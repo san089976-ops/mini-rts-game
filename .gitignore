@@ -30,3 +30,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# local agent/IDE
+.claude/settings.local.json
+flightgame/src/_write_test.txt
+
