@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from pathlib import Path; import re; p=Path\\(r'D:\\\\ZHUO MIAN\\\\game\\\\logic-gate-game.html'\\); s=p.read_text\\(encoding='utf-8'\\); js=re.search\\(r'<script>\\(.*\\)</script>',s,re.S\\).group\\(1\\); Path\\(r'D:\\\\ZHUO MIAN\\\\game\\\\.__syntax_check.js'\\).write_text\\(js,encoding='utf-8'\\)\")",
+      "Bash(node --check \"D:/ZHUO MIAN/game/.__syntax_check.js\")",
+      "Bash(python -c \"from pathlib import Path; import re; s=Path\\(r'D:\\\\ZHUO MIAN\\\\game\\\\logic-gate-game.html'\\).read_text\\(encoding='utf-8'\\); js=re.search\\(r'<script>\\(.*\\)</script>',s,re.S\\).group\\(1\\); js=js[:js.index\\('assertData\\(\\);'\\)+len\\('assertData\\(\\);'\\)]; Path\\(r'D:\\\\ZHUO MIAN\\\\game\\\\.__data_check.js'\\).write_text\\(js,encoding='utf-8'\\)\")",
+      "Bash(node \"D:/ZHUO MIAN/game/.__data_check.js\")",
+      "Bash(python -)",
+      "Bash(node -)",
+      "Bash(npm --version)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(npm ls *)",
+      "Bash(npm run *)",
+      "Bash(python -c 'import subprocess *)",
+      "Bash(ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build:logicgategame)",
+      "Bash(powershell.exe -NoProfile -Command '$files = @\\(\"D:\\\\ZHUO MIAN\\\\electron-workspace\\\\logicgategame\\\\dist\\\\win-unpacked\\\\6767.exe\", \"D:\\\\ZHUO MIAN\\\\electron-workspace\\\\logicgategame\\\\dist\\\\6767-Portable-1.0.0-x64.exe\"\\); foreach \\($path in $files\\) { $item = Get-Item -LiteralPath $path; [PSCustomObject]@{ File=$item.Name; Bytes=$item.Length; FileDescription=$item.VersionInfo.FileDescription; ProductName=$item.VersionInfo.ProductName; LegalCopyright=$item.VersionInfo.LegalCopyright; FileVersion=$item.VersionInfo.FileVersion; ProductVersion=$item.VersionInfo.ProductVersion } | ConvertTo-Json -Compress }')",
+      "Bash(npx asar *)",
+      "Bash(\"D:/ZHUO MIAN/electron-workspace/logicgategame/dist/6767-Portable-1.0.0-x64.exe\")",
+      "Bash(powershell.exe -NoProfile -Command '$p = Get-Process | Where-Object { $_.ProcessName -like \"6767*\" }; $p | Select-Object ProcessName,Id,MainWindowTitle,Responding | ConvertTo-Json -Compress')"
+    ]
+  }
+}

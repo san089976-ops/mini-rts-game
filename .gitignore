@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+web/
+release/
+**/win-unpacked/
+*.exe
+*.nsis.7z
+*.blockmap
+
+# electron-builder
+electron-builder-debug.yml
+electron-builder-effective-config.yaml
+builder-debug.yml
+builder-effective-config.yaml
+
+# logs / temp
+*.log
+vite-err.txt
+vite-out.txt
+build-log.txt
+build-err.txt
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

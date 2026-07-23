@@ -1,0 +1,538 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>逻辑工坊 · 20关标准电路答案</title><style>
+:root{--ink:#20323a;--muted:#68777b;--paper:#f6f4ed;--panel:#fffdf7;--line:#d9ded7;--accent:#d36f42;--accent-soft:#f7e2d5;--code:#17383d;--shadow:0 16px 42px rgba(26,46,51,.08)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--paper);font-family:"Microsoft YaHei UI","Noto Sans CJK SC",sans-serif;line-height:1.65}body:before{content:"";display:block;height:7px;background:repeating-linear-gradient(90deg,var(--accent) 0 42px,#efbd72 42px 84px,#8aa6a1 84px 126px)}.shell{width:min(1240px,calc(100% - 40px));margin:0 auto}.hero{display:grid;grid-template-columns:1fr 310px;gap:40px;align-items:end;padding:58px 0 38px;border-bottom:1px solid var(--line)}.kicker{color:var(--accent);font:700 12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase}h1{margin:13px 0 8px;font-family:Georgia,"Noto Serif CJK SC",serif;font-size:clamp(34px,5vw,64px);line-height:1.05;letter-spacing:-.045em}.lede{max-width:650px;margin:0;color:var(--muted);font-size:16px}.meta{border-left:3px solid var(--accent);padding:12px 0 12px 18px;color:var(--muted);font-size:13px}.meta strong{display:block;color:var(--ink);font-size:24px;line-height:1.2}.layout{display:grid;grid-template-columns:245px minmax(0,1fr);gap:28px;align-items:start;padding:30px 0 70px}.sidebar{position:sticky;top:20px}.sidebar h2{margin:0 0 12px;font-size:13px;letter-spacing:.12em;color:var(--muted)}.search{width:100%;border:1px solid var(--line);background:var(--panel);padding:10px 12px;border-radius:8px;color:var(--ink);font:inherit;outline:none}.search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}.nav{display:grid;gap:3px;margin-top:14px;max-height:52vh;overflow:auto}.nav a{display:flex;gap:10px;align-items:baseline;padding:6px 8px;color:var(--muted);text-decoration:none;border-radius:6px;font-size:13px}.nav a:hover{color:var(--ink);background:var(--accent-soft)}.nav span{min-width:22px;color:var(--accent);font:700 11px ui-monospace,SFMono-Regular,Consolas,monospace}.actions{display:flex;gap:8px;margin-top:16px}button{border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);padding:8px 10px;cursor:pointer;font:12px inherit}button:hover{border-color:var(--accent);color:var(--accent)}.content{min-width:0}.intro{margin-bottom:18px;padding:20px 22px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}.intro pre{margin:0;white-space:pre-wrap;font:13px/1.7 ui-monospace,SFMono-Regular,Consolas,"Microsoft YaHei UI",monospace}.level{margin:12px 0;overflow:hidden;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 4px 18px rgba(26,46,51,.035);scroll-margin-top:18px}.level[open]{border-color:#c9d4cd}.level summary{display:flex;align-items:center;gap:13px;padding:16px 20px;cursor:pointer;list-style:none;font-weight:700}.level summary::-webkit-details-marker{display:none}.level summary:hover{background:#fbf8f0}.level-no{color:var(--accent);font:700 14px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.04em}.chevron{margin-left:auto;color:var(--muted);font-size:20px;transition:transform .2s}.level[open] .chevron{transform:rotate(180deg)}.level pre{overflow-x:auto;margin:0;padding:5px 20px 24px;color:var(--code);white-space:pre;font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,"Microsoft YaHei UI",monospace;tab-size:4}.footer{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.hidden{display:none}@media(max-width:800px){.shell{width:min(100% - 24px,680px)}.hero{display:block;padding:38px 0 26px}.meta{margin-top:24px}.layout{display:block;padding-top:20px}.sidebar{position:static;margin-bottom:22px}.nav{display:flex;max-height:none;overflow-x:auto;padding-bottom:5px}.nav a{flex:0 0 auto;border:1px solid var(--line);background:var(--panel)}.actions{margin-bottom:5px}.level pre{font-size:12px}}@media print{body{background:white}body:before,.sidebar,.footer{display:none}.shell{width:100%}.hero{padding:12px 0 18px}.layout{display:block;padding:18px 0}.intro,.level{box-shadow:none;break-inside:avoid}.level{border-color:#bbb}.level:not([open])>*{display:block}.level summary{padding:10px 12px}.level pre{padding:0 12px 14px;font-size:9px;line-height:1.35}}
+</style></head><body><header class="shell hero"><div><div class="kicker">LOGIC WORKSHOP / FIELD MANUAL</div><h1>20 关标准电路答案</h1><p class="lede">把输入条件变成可验证的控制信号。先看公式，再按等宽图搭建线路；需要时展开对应关卡。</p></div><div class="meta"><strong>01—20</strong>按当前游戏 target() 公式整理<br>ASCII 电路图 · 可打印 · 可折叠</div></header><main class="shell layout"><aside class="sidebar"><h2>关卡目录</h2><input class="search" id="search" type="search" placeholder="搜索关卡或关键词" aria-label="搜索关卡或关键词"><nav class="nav"><a href="#level-1"><span>01</span>门铃</a>
+<a href="#level-2"><span>02</span>冰箱警示</a>
+<a href="#level-3"><span>03</span>双手冲压</a>
+<a href="#level-4"><span>04</span>仓库照明</a>
+<a href="#level-5"><span>05</span>温室通风</a>
+<a href="#level-6"><span>06</span>停车场入口</a>
+<a href="#level-7"><span>07</span>火灾报警</a>
+<a href="#level-8"><span>08</span>双控楼梯灯（本关不用 XOR 门）</a>
+<a href="#level-9"><span>09</span>汽车安全启动</a>
+<a href="#level-10"><span>10</span>药品冷藏柜</a>
+<a href="#level-11"><span>11</span>化工厂压力表决</a>
+<a href="#level-12"><span>12</span>智能会议室</a>
+<a href="#level-13"><span>13</span>传送带安全</a>
+<a href="#level-14"><span>14</span>智能灌溉</a>
+<a href="#level-15"><span>15</span>数据中心温控</a>
+<a href="#level-16"><span>16</span>电梯调度安全</a>
+<a href="#level-17"><span>17</span>核磁安全门</a>
+<a href="#level-18"><span>18</span>机场行李分拣</a>
+<a href="#level-19"><span>19</span>航天器对接</a>
+<a href="#level-20"><span>20</span>全楼宇自动化总控</a></nav><div class="actions"><button id="open-all">全部展开</button><button id="close-all">全部收起</button></div></aside><section class="content"><div class="intro"><pre>逻辑工坊 · 20 关标准电路答案
+============================================================
+适用游戏主文件：6767.html
+依据：当前程序内 LEVELS 的 target() 目标函数。
+
+图例
+----
+[输入] / [输出]    游戏画布上的输入或输出端口
+(¬)                非门 NOT
+(∧)                与门 AND（两个输入）
+(∨)                或门 OR（两个输入）
+(⊕)                异或门 XOR
+[A&gt;B]              数值大于比较器 GT
+[M]                复位优先存储器：S=置位，R=复位，Q=记忆输出
+[P5]               五路优先选择器：I1 优先级最高，依次到 I5
+ ───&gt;              接线方向
+ ┬                 一路信号分接到多处（可直接从同一输出端口拉多条线）
+
+说明
+----
+1. AND、OR 都是双输入门。出现三项及以上时，按图从左到右串联。
+2. 一个信号可以从同一输出端口分多条线，无需复制门。
+3. “中间信号”不是额外输出，只是给某个门的输出取的阅读名称。
+4. 存储器关卡必须把 S、R 接到 [M]；只把 fire / confirm / abort 直接接输出不会通过序列验证。
+5. 第 13、14、17 关按游戏实际公式作答，不按可能不同的情景文字扩展条件。
+
+============================================================</pre></div><details id="level-1" class="level" open><summary><span class="level-no">01</span><span>门铃</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：bell = button
+
+[门口按钮] ───────────────────────────────────────&gt; [门铃]
+
+无需添加任何门。
+
+============================================================</pre></details>
+<details id="level-2" class="level"><summary><span class="level-no">02</span><span>冰箱警示</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：alarm = NOT closed
+
+[门已关闭] ───&gt; (¬) ───────────────────────────────&gt; [提醒灯]
+
+============================================================</pre></details>
+<details id="level-3" class="level"><summary><span class="level-no">03</span><span>双手冲压</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：press = left AND right
+
+[左手按钮] ───┐
+              ├──&gt; (∧) ───────────────────────────&gt; [冲压机]
+[右手按钮] ───┘
+
+============================================================</pre></details>
+<details id="level-4" class="level"><summary><span class="level-no">04</span><span>仓库照明</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：light = door AND (NOT bright)
+
+[室外明亮] ───&gt; (¬) ───┐
+                        ├──&gt; (∧) ─────────────────&gt; [仓库灯]
+[仓门打开] ─────────────┘
+
+============================================================</pre></details>
+<details id="level-5" class="level"><summary><span class="level-no">05</span><span>温室通风</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：skylight = (hot OR humid) AND (NOT rain)
+
+[温度过高] ───┐
+              ├──&gt; (∨) ───┐
+[湿度过高] ───┘            │
+                            ├──&gt; (∧) ─────────────&gt; [天窗]
+[正在下雨] ───&gt; (¬) ───────┘
+
+============================================================</pre></details>
+<details id="level-6" class="level"><summary><span class="level-no">06</span><span>停车场入口</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：
+  gate = vehicle AND verified AND (NOT full)
+  sign = vehicle AND full
+
+[车位已满] ───&gt; (¬) ───┐
+                        ├──&gt; (∧) ───┐
+[检测到车辆] ───────────┘            ├──&gt; (∧) ───&gt; [入口栏杆]
+[身份验证] ──────────────────────────┘
+
+[检测到车辆] ───┐
+                ├──&gt; (∧) ─────────────────────────&gt; [满位牌]
+[车位已满] ─────┘
+
+============================================================</pre></details>
+<details id="level-7" class="level"><summary><span class="level-no">07</span><span>火灾报警</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：fire = smoke AND heat AND (NOT bypass)
+公式：
+  bell = fire OR manual
+  sprinkler = fire
+  notify = fire OR manual
+
+[检修模式] ───&gt; (¬) ───┐
+                        ├──&gt; (∧) ───┐
+[烟雾] ────────────────┘            ├──&gt; (∧) ───&gt; fire ──┬──&gt; [喷淋]
+[高温] ─────────────────────────────┘                    │
+                                                           ├──┐
+[手动报警] ────────────────────────────────────────────────┘  │
+                                                              (∨) ──&gt; [警铃]
+                                                               │
+                                                               └─&gt; (∨) ──&gt; [消防通知]
+
+注意：fire 与 manual 要各自接入两个 OR 门；喷淋只接 fire。
+
+============================================================</pre></details>
+<details id="level-8" class="level"><summary><span class="level-no">08</span><span>双控楼梯灯（本关不用 XOR 门）</span><span class="chevron">⌄</span></summary><pre>============================================================
+公式：light = (s1 AND NOT s2) OR (NOT s1 AND s2)
+
+[楼下开关] ──┬───────────────┐
+             │               ├──&gt; (∧) ───┐
+             │ [楼上开关]─&gt;(¬)┘            │
+             │                              ├──&gt; (∨) ─────&gt; [楼梯灯]
+             └──&gt; (¬) ───┐                 │
+[楼上开关] ───────────────┴──&gt; (∧) ────────┘
+
+可读作：两个开关不同为 1，相同为 0。
+
+============================================================</pre></details>
+<details id="level-9" class="level"><summary><span class="level-no">09</span><span>汽车安全启动</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  normal = seatbelt AND brake
+  qualify = normal OR service
+公式：
+  start = qualify AND (NOT fault)
+  warn_cond = brake AND (NOT service) AND (NOT normal)
+  warn_fault = fault
+
+[安全带] ───┐
+             ├──&gt; (∧) ───&gt; normal ───┐
+[刹车] ──────┘                        ├──&gt; (∨) ───&gt; qualify ──┐
+[维修模式] ───────────────────────────┘                         ├──&gt; (∧) ──&gt; [允许启动]
+[发动机故障] ───&gt; (¬) ─────────────────────────────────────────┘
+
+[维修模式] ───&gt; (¬) ───┐
+                        ├──&gt; (∧) ───┐
+[刹车] ─────────────────┘            ├──&gt; (∧) ───────────────&gt; [条件不足]
+[normal] ───&gt; (¬) ───────────────────┘
+
+[发动机故障] ─────────────────────────────────────────────────&gt; [故障提示]
+
+============================================================</pre></details>
+<details id="level-10" class="level"><summary><span class="level-no">10</span><span>药品冷藏柜</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  mismatch = a XOR b
+  auto_ok = NOT service
+  both_hot = a AND b
+公式：
+  cool = override OR (auto_ok AND both_hot)
+  alarm_sensor = auto_ok AND mismatch
+  alarm_door = auto_ok AND (NOT door)
+  check = mismatch OR (NOT door)
+
+[传感器 A] ───┐
+               ├──&gt; (⊕) ───&gt; mismatch ──┬──&gt; (∧) ──&gt; [传感器警报]
+[传感器 B] ───┘                          │
+                                          └──&gt; (∨) ──&gt; [人工检查]
+
+[维修模式] ───&gt; (¬) ───&gt; auto_ok ──┬──&gt; (∧) ──&gt; [传感器警报]
+                                    ├──&gt; (∧) ──&gt; [柜门警报]
+                                    └──&gt; (∧) ──┐
+
+[传感器 A] ───┐                           │
+               ├──&gt; (∧) ───&gt; both_hot ───┘
+[传感器 B] ───┘
+
+[auto_ok AND both_hot] ───┐
+                           ├──&gt; (∨) ───────────────────────────&gt; [压缩机]
+[紧急制冷] ────────────────┘
+
+[柜门关闭] ───&gt; (¬) ───┬──&gt; (∧，另一输入 auto_ok) ───────────&gt; [柜门警报]
+                       └──&gt; (∨，另一输入 mismatch) ───────────&gt; [人工检查]
+
+============================================================</pre></details>
+<details id="level-11" class="level"><summary><span class="level-no">11</span><span>化工厂压力表决</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  majority = (a AND b) OR (a AND c) OR (b AND c)
+  pressure = majority AND (NOT bypass)
+  all_ok = (NOT a) AND (NOT b) AND (NOT c)
+  all_bad = a AND b AND c
+  sensor_match = all_ok OR all_bad
+
+输出：
+  shutdown = manual OR pressure
+  valve = pressure AND valve_ok
+  cooling = pressure AND (NOT valve_ok) AND cooling_ok
+  sensor_err = NOT sensor_match
+  crit_err = pressure AND (NOT valve_ok) AND (NOT cooling_ok)
+
+A. 多数表决（3 个两两 AND，再串联 OR）：
+[a]─┐       [a]─┐       [b]─┐
+    ├&gt;(∧)=ab      ├&gt;(∧)=ac      ├&gt;(∧)=bc
+[b]─┘       [c]─┘       [c]─┘
+
+ab ───┐
+      ├──&gt; (∨) ───┐
+ac ───┘            ├──&gt; (∨) ───&gt; majority
+bc ────────────────┘
+
+[检修] ───&gt; (¬) ───┐
+                    ├──&gt; (∧) ───&gt; pressure ──┬──&gt; (∨，另一输入人工停机) ─&gt; [停机]
+[majority] ─────────┘                         ├──&gt; (∧，另一输入泄压阀可用) ─&gt; [泄压]
+                                                └──&gt; 后续冷却/严重故障分支
+
+B. 泄压阀不可用分支：
+[泄压阀可用] ───&gt; (¬) ───&gt; no_valve ──┬──&gt; (∧，pressure、冷却可用) ─&gt; [备用冷却]
+                                        └──&gt; (∧，pressure、冷却可用的 NOT) ─&gt; [严重故障]
+
+C. 传感器异常：
+all_ok = ¬a ∧ ¬b ∧ ¬c
+all_bad = a ∧ b ∧ c
+sensor_match = all_ok ∨ all_bad
+sensor_match ───&gt; (¬) ─────────────────────────────────────────&gt; [传感器异常]
+
+============================================================</pre></details>
+<details id="level-12" class="level"><summary><span class="level-no">12</span><span>智能会议室</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  valid = booked AND checkin
+  occupied_ok = occupied AND checkin
+  idle = booked AND (NOT occupied) AND (NOT checkin)
+公式：
+  unlock = admin OR valid OR occupied_ok
+  warning = idle
+  release = idle
+  report = occupied AND (NOT booked) AND checkin
+
+[已预订] ───┐
+             ├──&gt; (∧) ───&gt; valid ───┐
+[已签到] ───┘                         │
+                                      (∨) ───┐
+[检测有人] ───┐                         │     ├──&gt; (∨) ─────────&gt; [开锁]
+             ├──&gt; (∧) ───&gt; occupied_ok ┘     │
+[已签到] ───┘                                [管理员]
+
+[已预订] ───┐
+[检测有人]─&gt;(¬) ─┼──&gt; (∧) ───┐
+[已签到] ──&gt;(¬) ─┘            ├──&gt; (∧) ───&gt; idle ──┬──&gt; [即将释放]
+[已预订] ──────────────────────┘                     └──&gt; [自动释放]
+
+[已预订] ───&gt; (¬) ───┐
+                      ├──&gt; (∧) ───┐
+[检测有人] ───────────┘            ├──&gt; (∧) ────────────────&gt; [异常占用]
+[已签到] ──────────────────────────┘
+
+============================================================</pre></details>
+<details id="level-13" class="level"><summary><span class="level-no">13</span><span>传送带安全</span><span class="chevron">⌄</span></summary><pre>============================================================
+注意：reset 按钮不参与本关实际输出公式。
+中间信号：safe = guard AND beam AND estop
+公式：
+  motor = running AND safe AND (NOT maint)
+  brake = (NOT estop) OR maint
+  light = (NOT safe) OR maint
+  ready = (NOT running) AND safe AND (NOT maint)
+
+[护罩关闭] ───┐
+               ├──&gt; (∧) ───┐
+[光幕正常] ───┘            ├──&gt; (∧) ───&gt; safe
+[急停未按] ─────────────────┘
+
+[safe] ───┐
+[已启动]──┼──&gt; (∧) ───┐
+[维护钥匙]&gt;(¬) ────────┘──&gt; (∧) ─────────────────────────────&gt; [电机]
+
+[急停未按] ───&gt; (¬) ───┐
+                         ├──&gt; (∨) ───────────────────────────&gt; [制动器]
+[维护钥匙] ─────────────┘
+
+[safe] ───&gt; (¬) ───────┐
+                         ├──&gt; (∨) ───────────────────────────&gt; [警示灯]
+[维护钥匙] ─────────────┘
+
+[已启动] ───&gt; (¬) ───┐
+                      ├──&gt; (∧) ───┐
+[safe] ───────────────┘            ├──&gt; (∧) ────────────────&gt; [就绪]
+[维护钥匙] ───&gt; (¬) ───────────────┘
+
+============================================================</pre></details>
+<details id="level-14" class="level"><summary><span class="level-no">14</span><span>智能灌溉</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  need = dry OR scheduled OR manual
+  weather_bad = rain OR freeze
+  weather_ok = NOT weather_bad
+公式：
+  water = need AND weather_ok
+  skip = (dry OR scheduled) AND weather_bad AND (NOT manual)
+  done = (NOT need) AND weather_ok
+
+[土壤干燥] ───┐
+               ├──&gt; (∨) ───┐
+[计划到达] ───┘            ├──&gt; (∨) ───&gt; need ────────────────┐
+[手动灌溉] ─────────────────┘                                   ├──&gt; (∧) ─&gt; [灌溉]
+[下雨] ───────┐                                                (¬)│
+               ├──&gt; (∨) ───&gt; weather_bad ───&gt; (¬) ──────────────┘
+[冰点] ───────┘
+
+[土壤干燥] ───┐
+               ├──&gt; (∨) ───&gt; demand ───┐
+[计划到达] ───┘                         ├──&gt; (∧) ───┐
+[天气坏] ───────────────────────────────┘            ├──&gt; (∧) ─&gt; [天气跳过]
+[手动灌溉] ───&gt; (¬) ─────────────────────────────────┘
+
+[need] ───&gt; (¬) ───┐
+                    ├──&gt; (∧) ─────────────────────────────────&gt; [完成/无需]
+[weather_bad] ─&gt;(¬)┘
+
+============================================================</pre></details>
+<details id="level-15" class="level"><summary><span class="level-no">15</span><span>数据中心温控</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  too_hot = temperature &gt; limit
+  not_fire = NOT fire
+公式：
+  cool  = (too_hot OR manual) AND not_fire
+  boost = ((too_hot AND NOT ac_ok) OR manual) AND not_fire
+  alarm = too_hot
+  fault = NOT ac_ok
+  vent  = too_hot AND not_fire
+
+[当前温度] ───┐
+               ├──&gt; [A&gt;B] ───&gt; too_hot ──┬────────────────────&gt; [温度警报]
+[温度上限] ───┘                            ├──&gt; (∧，not_fire) ─&gt; [通风口]
+                                           └──&gt; (∨，强制制冷) ─┐
+[消防释放] ───&gt; (¬) ───&gt; not_fire ─────────────────────────────┼──&gt; (∧) ─&gt; [正常制冷]
+                                                                │
+[空调正常] ───&gt; (¬) ───┐                                      │
+                         ├──&gt; (∧，too_hot) ───┐                │
+[too_hot] ──────────────┘                     ├──&gt; (∨，强制制冷) ─&gt; (∧，not_fire) ─&gt; [增强制冷]
+[强制制冷] ────────────────────────────────────┘
+
+[空调正常] ───&gt; (¬) ───────────────────────────────────────────&gt; [空调故障]
+
+============================================================</pre></details>
+<details id="level-16" class="level"><summary><span class="level-no">16</span><span>电梯调度安全</span><span class="chevron">⌄</span></summary><pre>============================================================
+存储器：fire_memory
+[M] 的 S 接消防信号；R 接消防复位；Q 为 fire_memory。
+
+[消防信号] ───────────────────────────────&gt; [M:S]
+[消防复位] ───────────────────────────────&gt; [M:R]
+[M:Q] = fire_memory ──┬──&gt; (¬) ───┐
+                      │            ├──&gt; (∧) ───┐
+[运行请求] ───────────┘            │            ├──&gt; (∧) ───&gt; [允许运行]
+[门已关闭] ─────────────────────────┘            │
+[超载] ──────────────&gt; (¬) ──────────────────────┘
+
+[M:Q] ───┐
+          ├──&gt; (∧) ───────────────────────────────────────────&gt; [消防迫降]
+[门已关闭]┘
+
+[超载] ───────────────────────────────────────────────────────&gt; [开门]
+[超载] ───────────────────────────────────────────────────────&gt; [超载警报]
+
+============================================================</pre></details>
+<details id="level-17" class="level"><summary><span class="level-no">17</span><span>核磁安全门</span><span class="chevron">⌄</span></summary><pre>============================================================
+存储器：approved
+[M:S] 接安全确认；[M:R] 接重新检查；[M:Q] 为 approved。
+中间信号：blocked = scanning OR emergency
+
+[安全确认] ───────────────────────────────────────────────────&gt; [M:S]
+[重新检查] ───────────────────────────────────────────────────&gt; [M:R]
+
+[扫描中] ───┐
+             ├──&gt; (∨) ───&gt; blocked ──┬──&gt; (¬) ───┐
+[紧急停止] ──┘                        │            ├──&gt; (∧) ───&gt; [允许进入]
+[M:Q] ────────────────────────────────────────────┘
+
+[金属报警] ───┐
+               ├──&gt; (∨) ─────────────────────────────────────&gt; [门锁锁死]
+[blocked] ─────┘
+
+[金属报警] ───────────────────────────────────────────────────&gt; [金属警告]
+[起搏器] ─────────────────────────────────────────────────────&gt; [起搏器警告]
+[起搏器] ───┐
+             ├──&gt; (∨) ───────────────────────────────────────&gt; [阻止扫描]
+[紧急停止] ──┘
+
+============================================================</pre></details>
+<details id="level-18" class="level"><summary><span class="level-no">18</span><span>机场行李分拣</span><span class="chevron">⌄</span></summary><pre>============================================================
+可直接用普通门完成；P5 不是必须。公式：
+  paused = pause
+  reject = scanned AND heavy AND NOT pause
+  accept = ((scanned AND manual AND NOT heavy)
+          OR (scanned AND dest_ok AND NOT heavy AND NOT flag AND NOT manual)) AND NOT pause
+  inspect = scanned AND flag AND NOT heavy AND NOT manual AND NOT pause
+
+[系统暂停] ───────────────────────────────────────────────────&gt; [暂停灯]
+[系统暂停] ───&gt; (¬) ───&gt; run_ok（把 run_ok 分接到下列三个输出的最后一级 AND）
+
+退回：
+[已扫码] ───┐
+[超重] ─────┼──&gt; (∧) ───┐
+[run_ok] ───┘            ├──&gt; (∧) ───────────────────────────&gt; [退回]
+
+人工接受分支：
+[已扫码] ───┐
+[人工放行] ─┼──&gt; (∧) ───┐
+[超重] ──&gt;(¬)┘          ├──&gt; (∧) ───&gt; manual_accept
+
+普通接受分支：
+[已扫码] ───┐
+[目的地有效]┼──&gt; (∧) ───┐
+[超重] ──&gt;(¬)┘          ├──&gt; (∧) ───┐
+[安检标记]&gt;(¬)──────────┘            ├──&gt; (∧) ───&gt; normal_accept
+[人工放行]&gt;(¬)────────────────────────┘
+
+manual_accept ───┐
+                  ├──&gt; (∨) ───┐
+normal_accept ───┘            ├──&gt; (∧，run_ok) ───────────────&gt; [接受]
+
+复查：
+[已扫码] AND [安检标记] AND NOT[超重] AND NOT[人工放行] AND run_ok
+  └── 使用 4 个串联 AND 门 ─────────────────────────────────────&gt; [复查]
+
+============================================================</pre></details>
+<details id="level-19" class="level"><summary><span class="level-no">19</span><span>航天器对接</span><span class="chevron">⌄</span></summary><pre>============================================================
+存储器：abort_memory
+[M:S] 接中止按钮；[M:R] 接中止复位；[M:Q] 为 abort_memory。
+
+中间信号：
+  auto_ok = align AND speed AND comms AND station
+  pilot_ok = pilot AND speed AND comms
+  dock_pre = auto_ok OR pilot_ok
+  dock = dock_pre AND NOT abort_memory
+
+[M:Q] ───&gt; (¬) ───┐
+                    ├──&gt; (∧) ─────────────────────────────────&gt; [执行对接]
+[dock_pre] ────────┘
+
+[对准] AND [速度正常] AND [通信正常] AND [空间站就绪]
+  └── 3 个串联 AND ───&gt; auto_ok ───┐
+                                   ├──&gt; (∨) ───&gt; dock_pre
+[人工接管] AND [速度正常] AND [通信正常]
+  └── 2 个串联 AND ───&gt; pilot_ok ──┘
+
+[M:Q] ─────────────────────────────────────────────────────────&gt; [中止后退]
+[dock] ───&gt; (¬) ───┐
+[M:Q] ───&gt; (¬) ───┼──&gt; (∧) ───────────────────────────────────&gt; [保持位置]
+
+[M:Q] ────────────┐
+[通信正常] ──&gt;(¬) ─┼──&gt; (∧，空间站就绪) ───┐
+[空间站就绪] ──────┘                         ├──&gt; (∨) ─────────&gt; [紧急密封]
+                                              │
+[M:Q] ───────────────────────────────────────┘
+
+条件警告：
+not_align_or_speed = NOT align OR NOT speed
+warn = NOT pilot AND comms AND NOT abort_memory AND not_align_or_speed
+  └── 先对 align、speed、pilot、abort_memory 各加 NOT，
+      再用 OR 得 not_align_or_speed，最后串联 3 个 AND 到 [条件警告]。
+
+============================================================</pre></details>
+<details id="level-20" class="level"><summary><span class="level-no">20</span><span>全楼宇自动化总控</span><span class="chevron">⌄</span></summary><pre>============================================================
+中间信号：
+  evac_event = fire OR quake OR evac
+  dark = night OR outage
+  not_clear = NOT all_clear
+
+所有输出都要与 not_clear 相与（全部复位为 1 时全部输出必须为 0）。
+
+A. 公共中间线路
+[火灾] ───┐
+           ├──&gt; (∨) ───┐
+[地震] ───┘            ├──&gt; (∨) ───&gt; evac_event
+[人工疏散] ─────────────┘
+
+[夜间] ───┐
+           ├──&gt; (∨) ───&gt; dark
+[断电] ───┘
+
+[全部复位] ───&gt; (¬) ───&gt; not_clear
+
+B. 疏散警报、关闭暖通、逃生门解锁（三路相同）
+base_evac = evac_event AND NOT maint AND not_clear
+
+[维护] ───&gt; (¬) ───┐
+                    ├──&gt; (∧) ───┐
+[evac_event] ───────┘            ├──&gt; (∧，not_clear) ──&gt; base_evac
+[not_clear] ─────────────────────┘
+base_evac ──┬─────────────────────────────────────────────────&gt; [疏散警报]
+             ├─────────────────────────────────────────────────&gt; [关闭暖通]
+             └─────────────────────────────────────────────────&gt; [逃生门解锁]
+
+C. 应急照明
+lights_em = (dark OR evac_event OR breach) AND not_clear
+
+[dark] ───────┐
+[evac_event] ─┼──&gt; (∨) ───┐
+[入侵] ───────┘            ├──&gt; (∨) ───┐
+[not_clear] ────────────────────────────┼──&gt; (∧) ─────────────&gt; [应急照明]
+
+D. 正常照明
+lights_normal = occupy AND NOT dark AND NOT evac_event AND NOT breach AND not_clear
+
+[dark] ────────&gt; (¬) ───┐
+[evac_event] ──&gt; (¬) ───┼──&gt; 4 个串联 AND（再接楼内有人、not_clear）──&gt; [正常照明]
+[入侵] ────────&gt; (¬) ───┘
+[楼内有人] ─────────────────┘
+[not_clear] ────────────────┘
+
+E. 锁门、警笛
+base_breach = breach AND NOT maint AND not_clear
+[维护] ───&gt; (¬) ───┐
+                    ├──&gt; (∧) ───┐
+[入侵] ─────────────┘            ├──&gt; (∧，not_clear) ──&gt; base_breach
+base_breach ──┬────────────────────────────────────────────────&gt; [锁门]
+               └────────────────────────────────────────────────&gt; [警笛]
+
+F. 发电机
+[断电] ───┐
+[发电机就绪]┼──&gt; (∧) ───┐
+[not_clear]┘            ├──&gt; (∧) ─────────────────────────────&gt; [发电机]
+
+============================================================
+搭建检查清单
+============================================================
+[ ] 所有输出端口都已接线。
+[ ] 同一中间信号需要多处使用时，直接从该门输出端口分线。
+[ ] NOT 门接在正确的原始条件上，而不是错误地接在已经组合后的信号上。
+[ ] 第 16、17、19 关的 MEMORY：S 与 R 都已接上，且 Q 被用于后续逻辑。
+[ ] 第 15 关的比较器：当前温度接 A，温度上限接 B。
+[ ] 第 20 关的全部复位 NOT 输出 not_clear 已接入每个输出分支。
+
+完成后点击游戏中的“验证”。</pre></details><div class="footer">标准答案与游戏当前版本同步；修改游戏目标函数后，请重新生成本文档。</div></section></main><script>const levels=[...document.querySelectorAll('.level')],links=[...document.querySelectorAll('.nav a')];document.querySelector('#open-all').onclick=()=>levels.forEach(x=>x.open=true);document.querySelector('#close-all').onclick=()=>levels.forEach(x=>x.open=false);document.querySelector('#search').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();levels.forEach((x,i)=>{const ok=!q||(x.textContent+links[i].textContent).toLowerCase().includes(q);x.classList.toggle('hidden',!ok);links[i].classList.toggle('hidden',!ok)})});</script></body></html>
