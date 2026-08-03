@@ -58,9 +58,12 @@ const BASE_UNITS = {
   mcv:      { name:'基地车', hp:900, speed:45, range:0, damage:0, rof:0, cost:1800, r:14, build:14, armor:'titanium', proj:null, desc:'可移动的基地核心,在空地展开(快捷键 E)后变成新的建造厂' },
 };
 const UNIT_DEFS = BASE_UNITS; // 兼容引用
+const UNIT_DEF_CACHE = {};
 function getUnitDefs(faction){
+  if(UNIT_DEF_CACHE[faction]) return UNIT_DEF_CACHE[faction];
+  let defs;
   if(faction==='allies'){
-    return {
+    defs = {
       infantry:{ ...BASE_UNITS.infantry, name:'北约士兵', hp:230, damage:16, cost:225 },
       tank:    { ...BASE_UNITS.tank },
       harvester:{ ...BASE_UNITS.harvester },
@@ -68,15 +71,18 @@ function getUnitDefs(faction){
       abrams:  { name:'艾布拉姆斯坦克', hp:1200, speed:62, range:122, damage:130, rof:1.1, cost:1500, r:14, build:9, armor:'titanium', proj:'cannon', desc:'盟军重型主战坦克,装甲厚重火力凶猛,需升级战车工厂' },
       exo:     { name:'外骨骼大兵', hp:330, speed:74, range:118, damage:70, rof:1.5, cost:460, r:9, build:8, armor:'steel', proj:'cannon', desc:'盟军高科技单兵:外骨骼装甲手持炮管,射程火力逼近主战坦克,需升级兵营' },
     };
+  } else {
+    defs = {
+      infantry:{ ...BASE_UNITS.infantry },
+      tank:    { ...BASE_UNITS.tank, name:'犀牛坦克', hp:450, damage:45, cost:650, r:14 },
+      harvester:{ ...BASE_UNITS.harvester },
+      mcv:      { ...BASE_UNITS.mcv },
+      t90:     { name:'T90坦克', hp:900, speed:72, range:116, damage:80, rof:0.9, cost:1000, r:13, build:9, armor:'titanium', proj:'cannon', desc:'苏军主战坦克,机动灵活射速快,需升级战车工厂' },
+      magnet:  { name:'磁暴步兵', hp:250, speed:58, range:72, damage:110, rof:3, cost:400, r:9, build:7, armor:'steel', proj:'cannon', desc:'苏军高科技步兵:电磁手套释放闪电,对布甲伤害提升至150%,需升级兵营' },
+    };
   }
-  return {
-    infantry:{ ...BASE_UNITS.infantry },
-    tank:    { ...BASE_UNITS.tank, name:'犀牛坦克', hp:450, damage:45, cost:650, r:14 },
-    harvester:{ ...BASE_UNITS.harvester },
-    mcv:      { ...BASE_UNITS.mcv },
-    t90:     { name:'T90坦克', hp:900, speed:72, range:116, damage:80, rof:0.9, cost:1000, r:13, build:9, armor:'titanium', proj:'cannon', desc:'苏军主战坦克,机动灵活射速快,需升级战车工厂' },
-    magnet:  { name:'磁暴步兵', hp:250, speed:58, range:72, damage:110, rof:3, cost:400, r:9, build:7, armor:'steel', proj:'cannon', desc:'苏军高科技步兵:电磁手套释放闪电,对布甲伤害提升至150%,需升级兵营' },
-  };
+  UNIT_DEF_CACHE[faction] = defs;
+  return defs;
 }
 function unitFactionOf(team){ return teamFactions[team] || 'allies'; }
 function advancedInfantryType(team){ return unitFactionOf(team)==='allies' ? 'exo' : 'magnet'; }
