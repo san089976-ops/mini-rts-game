@@ -54,22 +54,25 @@ export class WeaponSystem {
   private threat: ThreatSystem | null = null;
   private lastLockBeep = 0;
   private wasFullyLocked = false;
+  private bombPreviewTimer = 0;
+  private leadAimTimer = 0;
 
   constructor(
     private scene: THREE.Scene,
     private targets: TargetSystem,
     private effects: Effects,
     private getHeight: (x: number, z: number) => number,
-    private audio: AudioSystem | null = null
+    private audio: AudioSystem | null = null,
+    private onBombExplode: ((impact: THREE.Vector3) => void) | null = null
   ) {}
 
   setThreatSystem(threat: ThreatSystem) {
     this.threat = threat;
   }
 
-  setupFromAircraft(aircraft: Aircraft) {
+  setupFromAircraft(aircraft: Aircraft, weapons?: WeaponSlotDef[]) {
     this.clearProjectiles();
-    this.slots = aircraft.def.weapons.map((def) => ({
+    this.slots = (weapons ?? aircraft.def.weapons).map((def) => ({
       def,
       ammo: def.maxAmmo,
       cooldown: 0
@@ -132,8 +135,16 @@ export class WeaponSystem {
 
     for (const k of input.slotKeys) this.selectSlot(k);
 
-    this.updateBombPreview(aircraft);
-    this.updateLeadAim(aircraft);
+    this.bombPreviewTimer -= dt;
+    if (this.bombPreviewTimer <= 0) {
+      this.updateBombPreview(aircraft);
+      this.bombPreviewTimer = 1 / 60;
+    }
+    this.leadAimTimer -= dt;
+    if (this.leadAimTimer <= 0) {
+      this.updateLeadAim(aircraft);
+      this.leadAimTimer = 1 / 60;
+    }
 
     if (this.active.def.kind === 'missile') {
       this.updateLock(dt, aircraft, this.active.def, now);
@@ -547,6 +558,9 @@ export class WeaponSystem {
           const splash = this.targets.querySplash(impact, p.splash, p.damage, now);
           result.score += splash.score;
           result.kills += splash.kills;
+          if (p.kind === 'bomb' || p.kind === 'smallBomb') {
+            this.onBombExplode?.(impact);
+          }
           if (splash.hitNames.length) {
             result.messages.push(`摧毁 ${splash.hitNames.join('、')}`);
           }

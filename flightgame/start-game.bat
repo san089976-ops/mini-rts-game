@@ -2,7 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo.
-echo  === SkyStrike Flight Game ===
+echo  === FCS Flight Game ===
 echo.
 where npm.cmd >nul 2>nul
 if errorlevel 1 (

@@ -37,7 +37,8 @@ export class Aircraft {
 
   resetToRunway() {
     const r = this.world.runway;
-    this.mesh.position.set(r.center.x, 2.2, r.center.z + r.length * 0.35);
+    const gy = this.world.getSurfaceHeight(r.center.x, r.center.z + r.length * 0.35);
+    this.mesh.position.set(r.center.x, gy + 2.2, r.center.z + r.length * 0.35);
     this.mesh.rotation.set(0, 0, 0); // nose toward -Z
     this.velocity.set(0, 0, 0);
     this.speed = 0;
@@ -90,7 +91,7 @@ export class Aircraft {
     this.pitchInput += dy * mouseSens;
 
     this.updateAxes();
-    const groundY = this.world.getHeight(this.position.x, this.position.z);
+    const groundY = this.world.getSurfaceHeight(this.position.x, this.position.z);
     const gearClearance = 2.1;
     const agl = this.position.y - groundY;
     this.onGround = agl <= gearClearance + 0.35 && this.velocity.y <= 4;
@@ -166,8 +167,12 @@ export class Aircraft {
     this.position.addScaledVector(this.velocity, dt);
 
     // ground collision
-    const gy = this.world.getHeight(this.position.x, this.position.z);
+    const gy = this.world.getSurfaceHeight(this.position.x, this.position.z);
     if (this.position.y < gy + gearClearance) {
+      if (this.world.isWater(this.position.x, this.position.z)) {
+        this.crash();
+        return;
+      }
       const impact = -this.velocity.y;
       const horiz = Math.hypot(this.velocity.x, this.velocity.z);
       this.position.y = gy + gearClearance;

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RESPAWN_STATIC_SEC, MAP_HALF, MOBILE_CAP } from '../aircraft/defs';
+import type { MapStyle } from '../world/maps';
+import type { World } from '../world/World';
 
 export type TargetKind =
   | 'camp'
@@ -11,7 +13,8 @@ export type TargetKind =
   | 'tank'
   | 'aaVehicle'
   | 'apc'
-  | 'aircraft';
+  | 'aircraft'
+  | 'warship';
 
 export interface TargetDef {
   kind: TargetKind;
@@ -44,6 +47,15 @@ export const TARGET_DEFS: Record<TargetKind, TargetDef> = {
     aerial: true,
     speed: 42,
     radius: 7
+  },
+  warship: {
+    kind: 'warship',
+    name: '敌方战舰',
+    hp: 720,
+    score: 500,
+    mobile: true,
+    speed: 12,
+    radius: 18
   }
 };
 
@@ -243,6 +255,19 @@ function buildTargetMesh(def: TargetDef) {
     const top = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.8, 3), mat(0x4a553c));
     top.position.set(0, 2.8, 0.5);
     g.add(body, top);
+  } else if (def.kind === 'warship') {
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(11, 4, 30), mat(0x4a5358));
+    hull.position.y = 2;
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(9, 1.2, 24), mat(0x5a6468));
+    deck.position.y = 4.4;
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 9), mat(0x6a7480));
+    bridge.position.set(0, 7, -4);
+    const turret = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.9, 2.4, 8), mat(0x5c6670));
+    turret.position.set(0, 6.4, 8);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 8, 6), mat(0x3d4448));
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 6.6, 12);
+    g.add(hull, deck, bridge, turret, barrel);
   } else {
     const body = new THREE.Mesh(new THREE.BoxGeometry(4, 2, 6), mat(0x666));
     body.position.y = 1;
@@ -258,12 +283,29 @@ export class TargetSystem {
   private airSpawnTimer = 0;
   private staticKinds: TargetKind[] = ['camp', 'bridge', 'facility', 'fortress'];
   private mobileKinds: TargetKind[] = ['infantry', 'lightVehicle', 'tank', 'aaVehicle', 'apc'];
+  private staticLayout: Record<MapStyle, Array<{ kind: TargetKind; count: number }>> = {
+    canyon: [
+      { kind: 'camp', count: 3 },
+      { kind: 'facility', count: 2 },
+      { kind: 'fortress', count: 2 }
+    ],
+    archipelago: [
+      { kind: 'camp', count: 2 },
+      { kind: 'facility', count: 2 },
+      { kind: 'fortress', count: 1 }
+    ],
+    riverplain: [
+      { kind: 'camp', count: 3 },
+      { kind: 'facility', count: 2 },
+      { kind: 'fortress', count: 2 }
+    ]
+  };
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
 
   constructor(
     private scene: THREE.Scene,
-    private getHeight: (x: number, z: number) => number,
+    private world: World,
     private mobileCap = MOBILE_CAP
   ) {
     this.seedStatic();
@@ -274,47 +316,72 @@ export class TargetSystem {
 
   /** First wave: random interior ground positions. Later respawns use map edges. */
   private seedInitialGroundMobiles() {
-    const limit = MAP_HALF - 140;
     for (let i = 0; i < this.mobileCap; i++) {
       const kind = this.pickMobileKind();
       const def = TARGET_DEFS[kind];
-      const x = (Math.random() - 0.5) * 2 * limit;
-      const z = (Math.random() - 0.5) * 2 * limit;
+      let x = 0;
+      let z = 0;
+      for (let tries = 0; tries < 40; tries++) {
+        const limit = MAP_HALF - 140;
+        x = (Math.random() - 0.5) * 2 * limit;
+        z = (Math.random() - 0.5) * 2 * limit;
+        if (this.world.isWater(x, z)) continue;
+        if (this.world.slope(x, z) > 0.45) continue;
+        break;
+      }
       const ang = Math.random() * Math.PI * 2;
       const speed = def.speed ?? 10;
-      const y = this.getHeight(x, z);
+      const y = this.world.getSurfaceHeight(x, z);
       const vel = new THREE.Vector3(Math.sin(ang) * speed, 0, Math.cos(ang) * speed);
       this.addTarget(kind, new THREE.Vector3(x, y, z), vel);
     }
   }
 
   private seedStatic() {
-    const spots: Array<{ kind: TargetKind; x: number; z: number }> = [
-      { kind: 'bridge', x: -120, z: -420 },
-      { kind: 'camp', x: 360, z: -280 },
-      { kind: 'camp', x: -480, z: 120 },
-      { kind: 'facility', x: 520, z: 360 },
-      { kind: 'facility', x: -620, z: -180 },
-      { kind: 'fortress', x: 180, z: 720 },
-      { kind: 'fortress', x: -760, z: 540 },
-      { kind: 'bridge', x: 640, z: -640 },
-      { kind: 'camp', x: -200, z: 880 },
-      { kind: 'facility', x: 900, z: -100 },
-      { kind: 'camp', x: 780, z: 520 },
-      { kind: 'bridge', x: -900, z: -320 },
-      { kind: 'facility', x: 120, z: -900 },
-      { kind: 'fortress', x: -340, z: 1100 },
-      { kind: 'camp', x: 1100, z: -480 }
-    ];
-    for (const s of spots) {
-      const y = this.getHeight(s.x, s.z);
-      this.addTarget(s.kind, new THREE.Vector3(s.x, y, s.z));
+    for (const b of this.world.bridges) {
+      this.addTarget('bridge', new THREE.Vector3(b.x, b.y, b.z), undefined, {
+        yaw: b.heading,
+        scaleX: Math.max(0.6, b.span / 48)
+      });
+    }
+    for (const item of this.staticLayout[this.world.style]) {
+      for (let n = 0; n < item.count; n++) this.placeRandomStatic(item.kind);
     }
   }
 
-  private addTarget(kind: TargetKind, pos: THREE.Vector3, velocity?: THREE.Vector3) {
+  private placeRandomStatic(kind: TargetKind) {
+    const limit = MAP_HALF - 520;
+    for (let tries = 0; tries < 90; tries++) {
+      const x = (Math.random() - 0.5) * 2 * limit;
+      const z = (Math.random() - 0.5) * 2 * limit;
+      if (this.world.isWater(x, z)) continue;
+      if (this.world.slope(x, z) > 0.3) continue;
+      if (Math.hypot(x - this.world.runway.center.x, z - this.world.runway.center.z) < 430) continue;
+      let close = false;
+      for (const t of this.targets) {
+        if (t.def.mobile) continue;
+        if (Math.hypot(t.position.x - x, t.position.z - z) < 340) {
+          close = true;
+          break;
+        }
+      }
+      if (close) continue;
+      const y = this.world.getSurfaceHeight(x, z);
+      this.addTarget(kind, new THREE.Vector3(x, y, z));
+      return;
+    }
+  }
+
+  private addTarget(
+    kind: TargetKind,
+    pos: THREE.Vector3,
+    velocity?: THREE.Vector3,
+    opts?: { yaw?: number; scaleX?: number }
+  ) {
     const def = TARGET_DEFS[kind];
     const t = new Target(def, pos, this.nextId++);
+    if (opts?.yaw !== undefined) t.mesh.rotation.y = opts.yaw;
+    if (opts?.scaleX !== undefined) t.mesh.scale.x = opts.scaleX;
     if (velocity) t.velocity.copy(velocity);
     if (velocity && velocity.lengthSq() > 0.01) {
       t.mesh.lookAt(pos.clone().add(velocity));
@@ -335,7 +402,7 @@ export class TargetSystem {
     for (const t of this.targets) {
       if (!t.def.mobile && !t.alive && t.respawnAt > 0 && now >= t.respawnAt) {
         t.revive();
-        const y = this.getHeight(t.home.x, t.home.z);
+        const y = this.world.getSurfaceHeight(t.home.x, t.home.z);
         t.position.y = y;
         t.home.y = y;
       }
@@ -345,9 +412,30 @@ export class TargetSystem {
       if (!t.alive || !t.def.mobile) continue;
       if (t.isAerial) {
         this.updateAerial(t, dt);
+      } else if (t.def.kind === 'warship') {
+        const nx = t.position.x + t.velocity.x * dt;
+        const nz = t.position.z + t.velocity.z * dt;
+        if (this.world.isWater(nx, nz)) {
+          t.position.x = nx;
+          t.position.z = nz;
+        } else {
+          t.velocity.multiplyScalar(-1);
+          t.baseHeading = Math.atan2(t.velocity.x, t.velocity.z);
+          t.mesh.rotation.y = t.baseHeading;
+        }
+        t.position.y = this.world.waterLevel + 2;
       } else {
-        t.position.addScaledVector(t.velocity, dt);
-        t.position.y = this.getHeight(t.position.x, t.position.z);
+        const nx = t.position.x + t.velocity.x * dt;
+        const nz = t.position.z + t.velocity.z * dt;
+        if (this.world.isWater(nx, nz)) {
+          t.velocity.multiplyScalar(-1);
+          t.baseHeading = Math.atan2(t.velocity.x, t.velocity.z);
+          t.mesh.rotation.y = t.baseHeading;
+        } else {
+          t.position.x = nx;
+          t.position.z = nz;
+        }
+        t.position.y = this.world.getSurfaceHeight(t.position.x, t.position.z);
       }
       if (Math.abs(t.position.x) > MAP_HALF + 40 || Math.abs(t.position.z) > MAP_HALF + 40) {
         t.alive = false;
@@ -364,7 +452,13 @@ export class TargetSystem {
     }
 
     this.spawnTimer -= dt;
-    const groundAlive = this.targets.filter((t) => t.def.mobile && t.alive && !t.isAerial).length;
+    let groundAlive = 0;
+    let airAlive = 0;
+    for (const t of this.targets) {
+      if (!t.alive) continue;
+      if (t.isAerial) airAlive++;
+      else if (t.def.mobile) groundAlive++;
+    }
     if (this.spawnTimer <= 0 && groundAlive < this.mobileCap) {
       this.spawnMobile();
       this.spawnTimer = 2.5 + Math.random() * 2.5;
@@ -372,7 +466,6 @@ export class TargetSystem {
 
     this.airSpawnTimer -= dt;
     const airCap = 4;
-    let airAlive = this.targets.filter((t) => t.isAerial && t.alive).length;
     // Keep air population topped up (spawn up to 2 per tick when due)
     if (this.airSpawnTimer <= 0 && airAlive < airCap) {
       let n = 0;
@@ -429,7 +522,7 @@ export class TargetSystem {
     const err = t.cruiseAlt - t.position.y;
     t.position.y += err * Math.min(1, 1.8 * dt);
 
-    const ground = this.getHeight(t.position.x, t.position.z);
+    const ground = this.world.getSurfaceHeight(t.position.x, t.position.z);
     if (t.position.y < ground + 35) {
       t.position.y = ground + 35;
       t.velocity.y = Math.max(0, t.velocity.y);
@@ -478,22 +571,32 @@ export class TargetSystem {
     // AA vehicles spawn at 1.5x weight vs each other ground mobile type
     const kind = this.pickMobileKind();
     const def = TARGET_DEFS[kind];
-    const edge = Math.floor(Math.random() * 4);
     const limit = MAP_HALF - 30;
     let x = 0;
     let z = 0;
-    if (edge === 0) {
-      x = -limit;
-      z = (Math.random() - 0.5) * limit * 2;
-    } else if (edge === 1) {
-      x = limit;
-      z = (Math.random() - 0.5) * limit * 2;
-    } else if (edge === 2) {
-      z = -limit;
-      x = (Math.random() - 0.5) * limit * 2;
-    } else {
-      z = limit;
-      x = (Math.random() - 0.5) * limit * 2;
+    let found = false;
+    for (let tries = 0; tries < 60 && !found; tries++) {
+      const edge = Math.floor(Math.random() * 4);
+      if (edge === 0) {
+        x = -limit;
+        z = (Math.random() - 0.5) * limit * 2;
+      } else if (edge === 1) {
+        x = limit;
+        z = (Math.random() - 0.5) * limit * 2;
+      } else if (edge === 2) {
+        z = -limit;
+        x = (Math.random() - 0.5) * limit * 2;
+      } else {
+        z = limit;
+        x = (Math.random() - 0.5) * limit * 2;
+      }
+      if (this.world.isWater(x, z)) continue;
+      if (this.world.slope(x, z) > 0.5) continue;
+      found = true;
+    }
+    if (!found) {
+      x = (Math.random() - 0.5) * MAP_HALF * 1.1;
+      z = (Math.random() - 0.5) * MAP_HALF * 1.1;
     }
     const tx = (Math.random() - 0.5) * limit * 1.2;
     const tz = (Math.random() - 0.5) * limit * 1.2;
@@ -502,8 +605,61 @@ export class TargetSystem {
       dir.set(-Math.sign(x) || 1, 0, (Math.random() - 0.5) * 0.6).normalize();
     }
     const speed = def.speed ?? 10;
-    const y = this.getHeight(x, z);
+    const y = this.world.getSurfaceHeight(x, z);
     this.addTarget(kind, new THREE.Vector3(x, y, z), dir.multiplyScalar(speed));
+  }
+
+  /** Escort missions: spawn hostile ground units near a convoy position. */
+  spawnEscortEnemies(center: THREE.Vector3, count = 2) {
+    for (let i = 0; i < count; i++) {
+      const kind = this.pickMobileKind();
+      const def = TARGET_DEFS[kind];
+      for (let tries = 0; tries < 20; tries++) {
+        const x = center.x + (Math.random() - 0.5) * 380;
+        const z = center.z + (Math.random() - 0.5) * 380;
+        if (Math.abs(x) > MAP_HALF - 60 || Math.abs(z) > MAP_HALF - 60) continue;
+        if (this.world.isWater(x, z)) continue;
+        const y = this.world.getSurfaceHeight(x, z);
+        const dir = new THREE.Vector3(center.x - x, 0, center.z - z).normalize();
+        this.addTarget(kind, new THREE.Vector3(x, y, z), dir.multiplyScalar(def.speed ?? 10));
+        break;
+      }
+    }
+  }
+
+  /** Naval missions: spawn enemy warships in open water near a center. */
+  spawnWarships(center: THREE.Vector3, count = 3) {
+    for (let i = 0; i < count; i++) {
+      for (let tries = 0; tries < 30; tries++) {
+        const x = center.x + (Math.random() - 0.5) * 700;
+        const z = center.z + (Math.random() - 0.5) * 700;
+        if (Math.abs(x) > MAP_HALF - 120 || Math.abs(z) > MAP_HALF - 120) continue;
+        if (!this.world.isWater(x, z)) continue;
+        const ang = Math.random() * Math.PI * 2;
+        const vel = new THREE.Vector3(Math.sin(ang) * 12, 0, Math.cos(ang) * 12);
+        this.addTarget('warship', new THREE.Vector3(x, this.world.waterLevel + 2, z), vel);
+        break;
+      }
+    }
+  }
+
+  /** Boss missions: spawn an armored ground group on land near a center. */
+  spawnBossArmor(center: THREE.Vector3, tanks = 5, aa = 2) {
+    const spawn = (kind: TargetKind) => {
+      const def = TARGET_DEFS[kind];
+      for (let tries = 0; tries < 30; tries++) {
+        const x = center.x + (Math.random() - 0.5) * 500;
+        const z = center.z + (Math.random() - 0.5) * 500;
+        if (Math.abs(x) > MAP_HALF - 80 || Math.abs(z) > MAP_HALF - 80) continue;
+        if (this.world.isWater(x, z) || this.world.slope(x, z) > 0.4) continue;
+        const ang = Math.random() * Math.PI * 2;
+        const vel = new THREE.Vector3(Math.sin(ang) * (def.speed ?? 8), 0, Math.cos(ang) * (def.speed ?? 8));
+        this.addTarget(kind, new THREE.Vector3(x, this.world.getSurfaceHeight(x, z), z), vel);
+        return;
+      }
+    };
+    for (let i = 0; i < tanks; i++) spawn('tank');
+    for (let i = 0; i < aa; i++) spawn('aaVehicle');
   }
 
   private seedInitialAircraft() {
@@ -523,7 +679,7 @@ export class TargetSystem {
     const limit = MAP_HALF - 280;
     const x = (Math.random() - 0.5) * 2 * limit;
     const z = (Math.random() - 0.5) * 2 * limit;
-    const ground = this.getHeight(x, z);
+    const ground = this.world.getSurfaceHeight(x, z);
     const y = Math.max(ground + 55, 95 + Math.random() * 90);
     const ang = Math.random() * Math.PI * 2;
     const speed = TARGET_DEFS.aircraft.speed ?? 42;
@@ -554,7 +710,7 @@ export class TargetSystem {
       z = limit;
       x = (Math.random() - 0.5) * limit * 1.4;
     }
-    const ground = this.getHeight(x, z);
+    const ground = this.world.getSurfaceHeight(x, z);
     const y = Math.max(ground + 55, 100 + Math.random() * 80);
     // always head roughly toward map center / interior
     const tx = (Math.random() - 0.5) * limit * 0.6;

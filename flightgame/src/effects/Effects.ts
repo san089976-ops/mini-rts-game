@@ -9,6 +9,7 @@ interface Burst {
 
 export class Effects {
   private bursts: Burst[] = [];
+  private flashes: Array<{ mesh: THREE.Mesh; life: number; maxLife: number }> = [];
   private trail: THREE.Points | null = null;
 
   constructor(private scene: THREE.Scene) {}
@@ -47,23 +48,23 @@ export class Effects {
     );
     flash.position.copy(pos);
     this.scene.add(flash);
-    const start = performance.now();
-    const tick = () => {
-      const t = (performance.now() - start) / 280;
-      if (t >= 1) {
-        this.scene.remove(flash);
-        flash.geometry.dispose();
-        (flash.material as THREE.Material).dispose();
-        return;
-      }
-      flash.scale.setScalar(1 + t * 2.2);
-      (flash.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - t);
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    this.flashes.push({ mesh: flash, life: 0.28, maxLife: 0.28 });
   }
 
   update(dt: number) {
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const f = this.flashes[i];
+      f.life -= dt;
+      const t = 1 - Math.max(0, f.life / f.maxLife);
+      f.mesh.scale.setScalar(1 + t * 2.2);
+      (f.mesh.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - t);
+      if (f.life <= 0) {
+        this.scene.remove(f.mesh);
+        f.mesh.geometry.dispose();
+        (f.mesh.material as THREE.Material).dispose();
+        this.flashes.splice(i, 1);
+      }
+    }
     for (let i = this.bursts.length - 1; i >= 0; i--) {
       const b = this.bursts[i];
       b.life -= dt;

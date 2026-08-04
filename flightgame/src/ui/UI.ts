@@ -1,15 +1,27 @@
 import type { AircraftId } from '../aircraft/defs';
 import { AIRCRAFT } from '../aircraft/defs';
+import { AIRCRAFT_LOADOUTS, defaultLoadoutId } from '../aircraft/loadouts';
+import { MAPS, type MapStyle } from '../world/maps';
+import type { CampaignMission } from '../missions/campaign';
 import type { AmmoState } from '../weapons/WeaponSystem';
 import { DevCheats, anyCheatActive } from '../debug/DevCheats';
 
-export type UiPhase = 'title' | 'playing' | 'paused' | 'results';
+export type UiPhase = 'title' | 'briefing' | 'playing' | 'paused' | 'results';
 
 export interface HudModel {
   score: number;
   combo: number;
   kills: number;
   aliveTime: number;
+  modeLabel: string;
+  mapLabel: string;
+  missionName: string | null;
+  objectives: Array<{ text: string; state: 'active' | 'done' | 'failed' }>;
+  convoyHp: number | null;
+  convoyMaxHp: number | null;
+  convoyUnits: Array<{ hp: number; maxHp: number; alive: boolean }>;
+  precisionHits: number | null;
+  precisionDrops: number | null;
   speed: number;
   altitude: number;
   throttle: number;
@@ -32,12 +44,17 @@ export class UI {
   private root: HTMLElement;
   private phase: UiPhase = 'title';
   private selected: AircraftId = 'attacker';
-  private onStart: ((id: AircraftId) => void) | null = null;
+  private selectedMap: MapStyle = 'canyon';
+  private mode: 'campaign' | 'endless' = 'campaign';
+  private selectedLoadout = 'attacker-std';
+  private onStart: ((id: AircraftId, map: MapStyle, mode: 'campaign' | 'endless') => void) | null = null;
+  private onLaunch: ((id: AircraftId, loadoutId: string) => void) | null = null;
   private onResume: (() => void) | null = null;
   private onExit: (() => void) | null = null;
   private onRestart: (() => void) | null = null;
 
   private titleEl: HTMLElement | null = null;
+  private briefingEl: HTMLElement | null = null;
   private hudEl: HTMLElement | null = null;
   private pauseEl: HTMLElement | null = null;
   private resultsEl: HTMLElement | null = null;
@@ -61,12 +78,14 @@ export class UI {
   }
 
   setHandlers(h: {
-    onStart: (id: AircraftId) => void;
+    onStart: (id: AircraftId, map: MapStyle, mode: 'campaign' | 'endless') => void;
+    onLaunch: (id: AircraftId, loadoutId: string) => void;
     onResume: () => void;
     onExit: () => void;
     onRestart: () => void;
   }) {
     this.onStart = h.onStart;
+    this.onLaunch = h.onLaunch;
     this.onResume = h.onResume;
     this.onExit = h.onExit;
     this.onRestart = h.onRestart;
@@ -80,6 +99,86 @@ export class UI {
     this.phase = 'title';
     this.clear();
     this.renderTitle();
+  }
+
+  showBriefing(mission: CampaignMission | null, index: number, total: number) {
+    this.phase = 'briefing';
+    this.clear();
+    this.briefingEl = document.createElement('div');
+    this.briefingEl.className = 'screen interactive';
+    if (!mission) {
+      this.briefingEl.innerHTML = `
+        <div class="panel">
+          <h1>战区完成</h1>
+          <p class="sub">当前地图的战役任务已全部完成。</p>
+          <div class="actions"><button class="btn primary" data-act="exit">返回标题</button></div>
+        </div>`;
+      this.root.appendChild(this.briefingEl);
+      this.briefingEl.querySelector('[data-act="exit"]')?.addEventListener('click', () => this.onExit?.());
+      return;
+    }
+    const mapName =
+      mission.map === 'canyon'
+        ? '峡谷山地'
+        : mission.map === 'archipelago'
+          ? '群岛海战'
+          : '河网平原';
+    this.briefingEl.innerHTML = `
+      <div class="panel brief-panel">
+        <div class="brief-head">
+          <h1>${mission.name}</h1>
+          <p class="sub">${mapName} · 战役任务 ${index}/${total}</p>
+        </div>
+        <div class="brief-mission"><b>任务目标</b>：${mission.brief}</div>
+        <div class="row" id="brief-craft"></div>
+        <div class="row" id="brief-loadout"></div>
+        <div class="actions">
+          <button class="btn primary" id="brief-start">进入任务</button>
+          <button class="btn" id="brief-back">返回标题</button>
+        </div>
+      </div>`;
+    this.root.appendChild(this.briefingEl);
+    this.renderBriefingCraftRow();
+    this.renderBriefingLoadoutRow();
+    this.briefingEl
+      .querySelector('#brief-start')
+      ?.addEventListener('click', () => this.onLaunch?.(this.selected, this.selectedLoadout));
+    this.briefingEl.querySelector('#brief-back')?.addEventListener('click', () => this.onExit?.());
+  }
+
+  private renderBriefingCraftRow() {
+    if (!this.briefingEl) return;
+    const row = this.briefingEl.querySelector('#brief-craft') as HTMLElement;
+    row.innerHTML = '';
+    (Object.keys(AIRCRAFT) as AircraftId[]).forEach((id) => {
+      const def = AIRCRAFT[id];
+      const card = document.createElement('div');
+      card.className = 'card' + (id === this.selected ? ' selected' : '');
+      card.innerHTML = `<h3>${def.name}</h3><p>${def.blurb}</p><div class="meta">极速 ${def.maxSpeed}</div>`;
+      card.addEventListener('click', () => {
+        this.selected = id;
+        this.selectedLoadout = defaultLoadoutId(id);
+        this.renderBriefingCraftRow();
+        this.renderBriefingLoadoutRow();
+      });
+      row.appendChild(card);
+    });
+  }
+
+  private renderBriefingLoadoutRow() {
+    if (!this.briefingEl) return;
+    const row = this.briefingEl.querySelector('#brief-loadout') as HTMLElement;
+    row.innerHTML = '';
+    AIRCRAFT_LOADOUTS[this.selected].forEach((l) => {
+      const card = document.createElement('div');
+      card.className = 'card' + (l.id === this.selectedLoadout ? ' selected' : '');
+      card.innerHTML = `<h3>${l.name}</h3><p>${l.blurb}</p><div class="meta">${l.weapons.map((w) => w.name).join(' / ')}</div>`;
+      card.addEventListener('click', () => {
+        this.selectedLoadout = l.id;
+        this.renderBriefingLoadoutRow();
+      });
+      row.appendChild(card);
+    });
   }
 
   showPlaying() {
@@ -99,7 +198,17 @@ export class UI {
     this.phase = 'playing';
   }
 
-  showResults(stats: { score: number; kills: number; aliveTime: number; reason: string }) {
+  showResults(stats: {
+    score: number;
+    kills: number;
+    aliveTime: number;
+    reason: string;
+    modeLabel: string;
+    mapLabel: string;
+    missionName: string | null;
+    rating: string | null;
+    campaign: boolean;
+  }) {
     this.phase = 'results';
     this.clear();
     this.resultsEl = document.createElement('div');
@@ -109,13 +218,15 @@ export class UI {
         <h1>任务结算</h1>
         <p class="sub">${stats.reason}</p>
         <div class="hud-box" style="margin-bottom:16px">
+          <div>模式：<b>${stats.modeLabel}</b> · 地图：<b>${stats.mapLabel}</b></div>
+          <div>任务：<b>${stats.missionName ?? '自由清剿'}</b>${stats.rating ? ` · 评级 <b>${stats.rating}</b>` : ''}</div>
           <div>得分：<b>${stats.score}</b></div>
           <div>击毁：<b>${stats.kills}</b></div>
           <div>存活：<b>${formatTime(stats.aliveTime)}</b></div>
         </div>
         <div class="actions">
-          <button class="btn primary" data-act="again">沿用机型再战</button>
-          <button class="btn" data-act="hangar">返回机库</button>
+          <button class="btn primary" data-act="again">${stats.campaign ? '进入作战室' : '沿用机型再战'}</button>
+          <button class="btn" data-act="hangar">${stats.campaign ? '返回标题' : '返回机库'}</button>
         </div>
       </div>`;
     this.root.appendChild(this.resultsEl);
@@ -125,8 +236,56 @@ export class UI {
 
   updateHud(model: HudModel, bombScreen: { x: number; y: number } | null, leadScreen: { x: number; y: number } | null) {
     if (!this.hudStats || !this.hudWeapons) return;
+    const missionEl = this.hudEl?.querySelector('#hud-mission') as HTMLElement | null;
+    if (missionEl) {
+      if (model.missionName) {
+        missionEl.style.display = 'block';
+        const objectives = model.objectives
+          .map((o) => {
+            const cls = o.state === 'done' ? 'ok' : o.state === 'failed' ? 'danger' : '';
+            const mark = o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : '○';
+            return `<div class="${cls}">${mark} ${o.text}</div>`;
+          })
+          .join('');
+        let extra = '';
+        if (model.precisionDrops !== null && model.precisionHits !== null) {
+          const pct = model.precisionDrops ? Math.round((model.precisionHits / model.precisionDrops) * 100) : 0;
+          extra = `<div>炸弹精度 <b>${model.precisionHits}/${model.precisionDrops} (${pct}%)</b></div>`;
+        }
+        missionEl.innerHTML = `<div class="mission-title">${model.missionName}</div>${objectives}${extra}`;
+      } else {
+        missionEl.style.display = 'none';
+      }
+    }
+    const convoyEl = this.hudEl?.querySelector('#convoy-hud') as HTMLElement | null;
+    if (convoyEl) {
+      if (model.convoyHp !== null && model.convoyMaxHp) {
+        convoyEl.classList.remove('hidden');
+        const pct = Math.round((model.convoyHp / model.convoyMaxHp) * 100);
+        const barColor = pct < 30 ? 'var(--danger)' : pct < 60 ? 'var(--warn)' : 'var(--ok)';
+        const units = model.convoyUnits
+          .map((u) => {
+            const up = u.alive ? Math.round((u.hp / u.maxHp) * 100) : 0;
+            const uc = u.alive
+              ? up < 30
+                ? 'var(--danger)'
+                : up < 60
+                  ? 'var(--warn)'
+                  : 'var(--ok)'
+              : 'var(--danger)';
+            return `<i class="unit-hp-item ${u.alive ? '' : 'dead'}"><b style="width:${up}%;background:${uc}"></b></i>`;
+          })
+          .join('');
+        convoyEl.innerHTML = `
+          <div class="convoy-title">车队血量 <b>${Math.round(model.convoyHp)}/${model.convoyMaxHp}</b></div>
+          <div class="hp-bar"><i style="width:${pct}%;background:${barColor}"></i></div>
+          <div class="unit-hp-row">${units}</div>`;
+      } else {
+        convoyEl.classList.add('hidden');
+      }
+    }
     this.hudStats.innerHTML = `
-      <div><b>${model.aircraftName}</b> · ${model.groundState}</div>
+      <div><b>${model.modeLabel}</b> · ${model.mapLabel} · <b>${model.aircraftName}</b> · ${model.groundState}</div>
       <div>得分 <b>${model.score}</b>　连击 <b>${model.combo}</b>　击毁 <b>${model.kills}</b></div>
       <div>存活 <b>${formatTime(model.aliveTime)}</b>　机体 <b class="${model.playerHp < 40 ? 'warn' : 'ok'}">${model.playerHp.toFixed(0)}/${model.playerMaxHp}</b></div>
       <div>速度 <b>${model.speed.toFixed(0)}</b>　高度 <b>${model.altitude.toFixed(0)}</b>　油门 <b>${(model.throttle * 100).toFixed(0)}%</b></div>
@@ -220,8 +379,13 @@ export class UI {
     this.titleEl.className = 'screen interactive';
     this.titleEl.innerHTML = `
       <div class="panel">
-        <h1>苍穹打击</h1>
-        <p class="sub">网页 3D 军事飞行模拟 · 单地图无尽清剿</p>
+        <h1>FCS</h1>
+        <p class="sub">网页 3D 军事飞行模拟 · 战役 / 无尽清剿</p>
+        <div class="seg" id="mode-row">
+          <button type="button" data-mode="campaign">战役</button>
+          <button type="button" data-mode="endless">无尽清剿</button>
+        </div>
+        <div class="row" id="map-row"></div>
         <div class="row" id="craft-row"></div>
         <div class="actions">
           <button class="btn primary" id="btn-start">进入跑道起飞</button>
@@ -246,6 +410,36 @@ export class UI {
     });
 
     this.root.appendChild(this.titleEl);
+
+    const modeRow = this.titleEl.querySelector('#mode-row') as HTMLElement;
+    modeRow.querySelectorAll('button').forEach((btn) => {
+      const m = btn.dataset.mode as 'campaign' | 'endless';
+      if (m === this.mode) btn.classList.add('selected');
+      btn.addEventListener('click', () => {
+        this.mode = m;
+        modeRow.querySelectorAll('button').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
+    });
+
+    const mapRow = this.titleEl.querySelector('#map-row') as HTMLElement;
+    (Object.keys(MAPS) as MapStyle[]).forEach((id) => {
+      const def = MAPS[id];
+      const card = document.createElement('div');
+      card.className = 'card' + (id === this.selectedMap ? ' selected' : '');
+      card.dataset.id = id;
+      card.innerHTML = `
+        <h3>${def.name}</h3>
+        <p>${def.blurb}</p>
+        <div class="meta">${def.mission}</div>`;
+      card.addEventListener('click', () => {
+        this.selectedMap = id;
+        mapRow.querySelectorAll('.card').forEach((c) => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+      mapRow.appendChild(card);
+    });
+
     const row = this.titleEl.querySelector('#craft-row') as HTMLElement;
     (Object.keys(AIRCRAFT) as AircraftId[]).forEach((id) => {
       const def = AIRCRAFT[id];
@@ -263,7 +457,9 @@ export class UI {
       });
       row.appendChild(card);
     });
-    this.titleEl.querySelector('#btn-start')?.addEventListener('click', () => this.onStart?.(this.selected));
+    this.titleEl
+      .querySelector('#btn-start')
+      ?.addEventListener('click', () => this.onStart?.(this.selected, this.selectedMap, this.mode));
     this.titleEl.querySelector('#btn-github')?.addEventListener('click', (e) => {
       e.preventDefault();
       const url = 'https://github.com/cptslow123';
@@ -280,6 +476,8 @@ export class UI {
         <div class="hud-box" id="hud-stats"></div>
         <div class="hud-box" id="hud-weapons"></div>
       </div>
+      <div class="hud-mission" id="hud-mission"></div>
+      <div class="convoy-hud hidden" id="convoy-hud"></div>
       <div class="crosshair"></div>
       <div class="lock-box" id="lock-box"></div>
       <div class="lock-box-label" id="lock-box-label">导弹锁定框</div>
@@ -291,6 +489,7 @@ export class UI {
       <div class="radar-wrap" id="radar-wrap">
         <canvas id="radar-canvas" width="220" height="220"></canvas>
         <div class="radar-label">雷达</div>
+        <div class="radar-legend" id="radar-legend"></div>
       </div>
       <div class="overlay-center hidden interactive" id="pause-overlay">
         <div class="panel" style="width:min(420px,92vw)">
@@ -314,6 +513,21 @@ export class UI {
     this.radarCanvas = this.hudEl.querySelector('#radar-canvas') as HTMLCanvasElement | null;
     this.radarCtx = this.radarCanvas?.getContext('2d') ?? null;
     this.radarSweep = 0;
+    const legend = this.hudEl.querySelector('#radar-legend') as HTMLElement | null;
+    if (legend) {
+      legend.innerHTML = [
+        ['mobile', '移动目标'],
+        ['aa', '防空车'],
+        ['fixed', '固定目标'],
+        ['aircraft', '敌机'],
+        ['missile', '导弹'],
+        ['convoy', '车队'],
+        ['destination', '终点'],
+        ['objective', '任务目标']
+      ]
+        .map(([k, label]) => `<i class="rl-${k}"></i>${label}`)
+        .join('');
+    }
     this.pauseEl = this.hudEl.querySelector('#pause-overlay');
     this.pauseEl?.querySelector('[data-act="resume"]')?.addEventListener('click', () => this.onResume?.());
     this.pauseEl?.querySelector('[data-act="exit"]')?.addEventListener('click', () => this.onExit?.());
@@ -326,6 +540,7 @@ export class UI {
   private clear() {
     this.root.innerHTML = '';
     this.titleEl = null;
+    this.briefingEl = null;
     this.hudEl = null;
     this.pauseEl = null;
     this.resultsEl = null;
@@ -393,7 +608,12 @@ export class UI {
   }
 
   updateRadar(
-    blips: Array<{ x: number; y: number; kind: 'mobile' | 'aa' | 'aircraft' | 'missile'; heading?: number }>,
+    blips: Array<{
+      x: number;
+      y: number;
+      kind: 'mobile' | 'aa' | 'fixed' | 'aircraft' | 'missile' | 'convoy' | 'destination' | 'objective';
+      heading?: number;
+    }>,
     dt: number
   ) {
     const canvas = this.radarCanvas;
@@ -466,8 +686,12 @@ export class UI {
     const colors: Record<string, string> = {
       mobile: 'rgba(255, 220, 60, 0.95)',
       aa: 'rgba(255, 235, 80, 1)',
+      fixed: 'rgba(150, 225, 255, 0.98)',
       aircraft: 'rgba(255, 150, 40, 0.98)',
-      missile: 'rgba(255, 60, 50, 1)'
+      missile: 'rgba(255, 60, 50, 1)',
+      convoy: 'rgba(90, 230, 120, 0.98)',
+      destination: 'rgba(120, 255, 170, 0.95)',
+      objective: 'rgba(255, 90, 220, 0.98)'
     };
     const flashOn = Math.sin(performance.now() * 0.014) > 0;
 
@@ -513,12 +737,53 @@ export class UI {
         ctx.lineWidth = 1.5;
         ctx.arc(sx, sy, 7, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (b.kind === 'convoy') {
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = colors.convoy;
+        ctx.fillRect(-5, -5, 10, 10);
+        ctx.strokeStyle = 'rgba(10, 20, 28, 0.65)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-5, -5, 10, 10);
+        ctx.restore();
+      } else if (b.kind === 'destination') {
+        ctx.beginPath();
+        ctx.fillStyle = colors.destination;
+        ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.strokeStyle = colors.destination;
+        ctx.lineWidth = 2;
+        ctx.arc(sx, sy, 8 + Math.sin(performance.now() * 0.006) * 2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (b.kind === 'objective') {
+        const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.25;
+        ctx.strokeStyle = colors.objective;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 6 * pulse, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx - 10 * pulse, sy);
+        ctx.lineTo(sx + 10 * pulse, sy);
+        ctx.moveTo(sx, sy - 10 * pulse);
+        ctx.lineTo(sx, sy + 10 * pulse);
+        ctx.stroke();
+      } else if (b.kind === 'fixed') {
+        ctx.fillStyle = col;
+        ctx.fillRect(sx - 4.5, sy - 4.5, 9, 9);
+        ctx.strokeStyle = 'rgba(10, 20, 28, 0.65)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx - 4.5, sy - 4.5, 9, 9);
       } else {
-        const size = b.kind === 'aircraft' ? 4.2 : 3.4;
         ctx.beginPath();
         ctx.fillStyle = col;
-        ctx.arc(sx, sy, size, 0, Math.PI * 2);
+        ctx.arc(sx, sy, b.kind === 'aircraft' ? 4.2 : 3.8, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = 'rgba(10, 20, 28, 0.65)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
     }
 

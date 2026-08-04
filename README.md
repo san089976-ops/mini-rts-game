@@ -1,4 +1,4 @@
-# A Rudimentary Flight Simulator · 苍穹打击 (SkyStrike)
+# FCS
 
 浏览器端 **3D 军事飞行射击** 小游戏（街机偏模拟）。用 Vite + TypeScript + Three.js 实现，可选 Electron 便携版 EXE。
 
@@ -91,7 +91,7 @@ npm run build:win
 产物（构建后保留）：
 
 ```text
-flightgame/release/SkyStrike-Portable-1.0.0-x64.exe
+flightgame/release/FCS-Portable-1.0.0-x64.exe
 ```
 
 说明：使用 monorepo 已有 Electron（`electronDist`），无需在 `flightgame` 内再装一份 Electron。  

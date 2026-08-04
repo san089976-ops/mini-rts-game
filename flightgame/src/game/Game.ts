@@ -1,8 +1,12 @@
 import * as THREE from 'three';
-import { AIRCRAFT, PLAYER_MAX_HP, type AircraftId } from '../aircraft/defs';
+import { AIRCRAFT, MAP_HALF, PLAYER_MAX_HP, type AircraftId } from '../aircraft/defs';
 import { Aircraft } from '../flight/Aircraft';
 import { Input } from '../input/Input';
 import { World } from '../world/World';
+import { MAPS, type MapStyle } from '../world/maps';
+import { CAMPAIGN, type CampaignMission } from '../missions/campaign';
+import { MissionSystem, type MissionResult } from '../missions/MissionSystem';
+import { AIRCRAFT_LOADOUTS, defaultLoadoutId } from '../aircraft/loadouts';
 import { TargetSystem } from '../targets/TargetSystem';
 import { WeaponSystem } from '../weapons/WeaponSystem';
 import { ThreatSystem } from '../threats/ThreatSystem';
@@ -11,16 +15,17 @@ import { UI } from '../ui/UI';
 import { AudioSystem } from '../audio/Audio';
 import { DevCheats } from '../debug/DevCheats';
 
-export type GamePhase = 'title' | 'playing' | 'paused' | 'results';
+export type GamePhase = 'title' | 'briefing' | 'playing' | 'paused' | 'results';
 
 export class Game {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(65, 1, 0.5, 8000);
+  private camera = new THREE.PerspectiveCamera(65, 1, 0.5, 12000);
   private clock = new THREE.Clock();
   private input: Input;
   private ui: UI;
   private world!: World;
+  private worldCache = new Map<MapStyle, World>();
   private effects!: Effects;
   private targets!: TargetSystem;
   private weapons!: WeaponSystem;
@@ -28,6 +33,12 @@ export class Game {
   private aircraft: Aircraft | null = null;
   private phase: GamePhase = 'title';
   private selected: AircraftId = 'attacker';
+  private selectedMap: MapStyle = 'canyon';
+  private mode: 'campaign' | 'endless' = 'campaign';
+  private campaignMissions: CampaignMission[] = [];
+  private campaignIndex = 0;
+  private selectedLoadout = 'attacker-std';
+  private lastMissionSuccess = false;
 
   private score = 0;
   private combo = 0;
@@ -45,11 +56,14 @@ export class Game {
   private escWas = false;
   private slotEdge = new Set<string>();
   private audio = new AudioSystem();
+  private boundaryWarnTimer = 0;
+  private mission: MissionSystem | null = null;
+  private uiRenderTimer = 0;
   private readonly baseFov = 65;
   private readonly zoomFov = 32;
   private fovCurrent = 65;
   private aaLockProgress = 0;
-  private readonly radarRange = 900;
+  private readonly radarRange = 1200;
   private missileScratch: THREE.Vector3[] = [];
   private missileRadarScratch: Array<{ position: THREE.Vector3; velocity: THREE.Vector3 }> = [];
   private radarTmp = new THREE.Vector3();
@@ -58,18 +72,33 @@ export class Game {
     private canvas: HTMLCanvasElement,
     uiRoot: HTMLElement
   ) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: false,
+      powerPreference: 'high-performance'
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.input = new Input(canvas);
     this.ui = new UI(uiRoot);
     this.ui.setHandlers({
-      onStart: (id) => this.startMission(id),
+      onStart: (id, map, mode) => {
+        if (mode === 'campaign') this.startCampaign(map);
+        else this.startMission(id, map, 'endless', defaultLoadoutId(id));
+      },
+      onLaunch: (id, loadoutId) => this.launchMission(id, loadoutId),
       onResume: () => this.resume(),
       onExit: () => this.toTitle(),
-      onRestart: () => this.startMission(this.selected)
+      onRestart: () => {
+        if (this.mode === 'campaign') {
+          if (this.lastMissionSuccess) this.nextMission();
+          else this.showBriefing();
+        } else {
+          this.startMission(this.selected, this.selectedMap, 'endless', this.selectedLoadout);
+        }
+      }
     });
 
     this.buildWorld();
@@ -80,23 +109,32 @@ export class Game {
     this.loop();
   }
 
-  private buildWorld() {
+  private buildWorld(style: MapStyle = this.selectedMap) {
     while (this.scene.children.length) this.scene.remove(this.scene.children[0]);
-    this.world = new World(this.scene);
+    this.mission = null;
+    const cached = this.worldCache.get(style);
+    if (cached) {
+      this.world = cached;
+      cached.attach(this.scene);
+    } else {
+      this.world = new World(this.scene, style);
+      this.worldCache.set(style, this.world);
+    }
     this.effects = new Effects(this.scene);
-    this.targets = new TargetSystem(this.scene, (x, z) => this.world.getHeight(x, z));
+    this.targets = new TargetSystem(this.scene, this.world);
     this.weapons = new WeaponSystem(
       this.scene,
       this.targets,
       this.effects,
-      (x, z) => this.world.getHeight(x, z),
-      this.audio
+      (x, z) => this.world.getSurfaceHeight(x, z),
+      this.audio,
+      (impact) => this.mission?.onBombExplode(impact)
     );
     this.threats = new ThreatSystem(
       this.scene,
       this.targets,
       this.effects,
-      (x, z) => this.world.getHeight(x, z),
+      (x, z) => this.world.getSurfaceHeight(x, z),
       this.audio
     );
     this.weapons.setThreatSystem(this.threats);
@@ -104,15 +142,87 @@ export class Game {
     this.camera.lookAt(0, 0, 0);
   }
 
-  private startMission(id: AircraftId) {
+  private startCampaign(map: MapStyle) {
+    this.selectedMap = map;
+    this.mode = 'campaign';
+    this.campaignMissions = CAMPAIGN[map];
+    this.campaignIndex = this.loadCampaignProgress(map);
+    this.showBriefing();
+  }
+
+  private launchMission(id: AircraftId, loadoutId: string) {
+    this.startMission(id, this.selectedMap, 'campaign', loadoutId);
+  }
+
+  private showBriefing() {
+    this.phase = 'briefing';
+    this.audio.stopEngine();
+    this.input.exitPointerLock();
+    if (this.aircraft) {
+      this.scene.remove(this.aircraft.mesh);
+      this.aircraft = null;
+    }
+    this.buildWorld(this.selectedMap);
+    const mission =
+      this.campaignIndex < this.campaignMissions.length
+        ? this.campaignMissions[this.campaignIndex]
+        : null;
+    this.ui.showBriefing(mission, this.campaignIndex + 1, this.campaignMissions.length);
+  }
+
+  private nextMission() {
+    this.campaignIndex = Math.min(this.campaignMissions.length, this.campaignIndex + 1);
+    this.saveCampaignProgress(this.selectedMap, this.campaignIndex);
+    this.showBriefing();
+  }
+
+  private loadCampaignProgress(map: MapStyle) {
+    try {
+      const raw = localStorage.getItem('fcs-campaign');
+      if (raw) {
+        const data = JSON.parse(raw) as Record<string, number>;
+        return Math.max(0, Math.min(CAMPAIGN[map].length, data[map] ?? 0));
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 0;
+  }
+
+  private saveCampaignProgress(map: MapStyle, index: number) {
+    try {
+      const raw = localStorage.getItem('fcs-campaign');
+      const data = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      data[map] = index;
+      localStorage.setItem('fcs-campaign', JSON.stringify(data));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private startMission(
+    id: AircraftId,
+    map: MapStyle = this.selectedMap,
+    mode: 'campaign' | 'endless' = this.mode,
+    loadoutId = defaultLoadoutId(id)
+  ) {
     this.selected = id;
+    this.selectedMap = map;
+    this.mode = mode;
+    this.selectedLoadout = loadoutId;
     if (this.aircraft) {
       this.scene.remove(this.aircraft.mesh);
     }
-    this.buildWorld();
+    this.buildWorld(map);
     this.aircraft = new Aircraft(AIRCRAFT[id], this.world);
     this.scene.add(this.aircraft.mesh);
-    this.weapons.setupFromAircraft(this.aircraft);
+    const loadout = AIRCRAFT_LOADOUTS[id].find((l) => l.id === loadoutId);
+    this.weapons.setupFromAircraft(this.aircraft, loadout?.weapons);
+    const def =
+      mode === 'campaign' && this.campaignIndex < this.campaignMissions.length
+        ? this.campaignMissions[this.campaignIndex]
+        : null;
+    this.mission = def ? new MissionSystem(this.scene, this.world, this.targets, def) : null;
 
     this.score = 0;
     this.combo = 0;
@@ -121,8 +231,10 @@ export class Game {
     this.aliveTime = 0;
     this.playerHp = PLAYER_MAX_HP;
     this.aaLockProgress = 0;
+    this.boundaryWarnTimer = 0;
     this.toast =
-      '鼠标已锁定：移动改变机头方向 · W 油门 · 空格投弹 · X 热诱弹 · 左键射击（非炸弹）';
+      (mode === 'campaign' ? this.mission?.name ?? MAPS[map].mission : '无尽清剿') +
+      ` · 鼠标已锁定：W 油门 · 空格投弹 · X 热诱弹`;
     this.toastTimer = 4.5;
     this.phase = 'playing';
     this.ui.showPlaying();
@@ -164,15 +276,21 @@ export class Game {
     this.ui.showTitle();
   }
 
-  private endMission(reason: string) {
+  private endMission(reason: string, missionResult?: MissionResult) {
     this.phase = 'results';
+    this.lastMissionSuccess = missionResult?.success ?? false;
     this.input.exitPointerLock();
     this.audio.stopEngine();
     this.ui.showResults({
       score: this.score,
       kills: this.kills,
       aliveTime: this.aliveTime,
-      reason
+      reason,
+      modeLabel: this.mode === 'campaign' ? '战役' : '无尽清剿',
+      mapLabel: MAPS[this.selectedMap].name,
+      missionName: missionResult?.missionName ?? null,
+      rating: missionResult?.rating ?? null,
+      campaign: this.mode === 'campaign'
     });
   }
 
@@ -182,8 +300,12 @@ export class Game {
     const dt = Math.min(0.05, this.clock.getDelta());
     const now = performance.now() / 1000;
 
-    if (this.phase === 'title' || this.phase === 'results') {
-      this.renderer.render(this.scene, this.camera);
+    if (this.phase === 'title' || this.phase === 'results' || this.phase === 'briefing') {
+      this.uiRenderTimer -= dt;
+      if (this.uiRenderTimer <= 0) {
+        this.renderer.render(this.scene, this.camera);
+        this.uiRenderTimer = 0.1;
+      }
       return;
     }
 
@@ -308,6 +430,25 @@ export class Game {
     this.effects.update(dt);
     this.syncCamera(dt);
 
+    if (this.mission) {
+      const missionResult = this.mission.update(dt, now, this.aircraft);
+      if (missionResult) {
+        this.mission = null;
+        this.endMission(missionResult.reason, missionResult);
+        return;
+      }
+    }
+
+    const bx = Math.max(Math.abs(this.aircraft.position.x), Math.abs(this.aircraft.position.z));
+    if (bx > MAP_HALF - 520) {
+      if (this.boundaryWarnTimer <= 0) {
+        this.toast = '即将离开作战区，请返航';
+        this.toastTimer = 2.5;
+        this.boundaryWarnTimer = 4;
+      }
+    }
+    if (this.boundaryWarnTimer > 0) this.boundaryWarnTimer -= dt;
+
     if (this.aircraft.crashed) {
       this.audio.playCrash();
       this.audio.stopEngine();
@@ -353,7 +494,7 @@ export class Game {
 
   private pushHud() {
     if (!this.aircraft) return;
-    const groundY = this.world.getHeight(this.aircraft.position.x, this.aircraft.position.z);
+    const groundY = this.world.getSurfaceHeight(this.aircraft.position.x, this.aircraft.position.z);
     const stateLabel =
       this.aircraft.groundState === 'runway'
         ? '跑道'
@@ -389,6 +530,15 @@ export class Game {
         combo: this.combo,
         kills: this.kills,
         aliveTime: this.aliveTime,
+        modeLabel: this.mode === 'campaign' ? '战役' : '无尽清剿',
+        mapLabel: MAPS[this.selectedMap].name,
+        missionName: this.mission?.name ?? null,
+        objectives: this.mission?.objectives ?? [],
+        convoyHp: this.mission?.convoyHp ?? null,
+        convoyMaxHp: this.mission?.convoyMaxHp ?? null,
+        convoyUnits: this.mission?.convoyUnitStates ?? [],
+        precisionHits: this.mission?.precisionHits ?? null,
+        precisionDrops: this.mission?.precisionDrops ?? null,
         speed: this.aircraft.speed,
         altitude: Math.max(0, this.aircraft.position.y - groundY),
         throttle: this.aircraft.throttle,
@@ -420,7 +570,20 @@ export class Game {
 
   private pushRadar(dt: number) {
     if (!this.aircraft) return;
-    const blips: Array<{ x: number; y: number; kind: 'mobile' | 'aa' | 'aircraft' | 'missile'; heading?: number }> = [];
+    const blips: Array<{
+      x: number;
+      y: number;
+      kind:
+        | 'mobile'
+        | 'aa'
+        | 'fixed'
+        | 'aircraft'
+        | 'missile'
+        | 'convoy'
+        | 'destination'
+        | 'objective';
+      heading?: number;
+    }> = [];
     const origin = this.aircraft.position;
     const range = this.radarRange;
 
@@ -453,15 +616,27 @@ export class Game {
     };
 
     for (const t of this.targets.targets) {
-      if (!t.alive || !t.def.mobile) continue;
+      if (!t.alive) continue;
       const loc = toLocal(t.position.x, t.position.z);
       if (Math.hypot(loc.x, loc.y) > 1.05) continue;
-      const kind = t.isAerial ? 'aircraft' : t.def.kind === 'aaVehicle' ? 'aa' : 'mobile';
+      const kind =
+        t.def.kind === 'aaVehicle'
+          ? 'aa'
+          : t.isAerial
+            ? 'aircraft'
+            : t.def.mobile
+              ? 'mobile'
+              : 'fixed';
       blips.push({
         x: loc.x,
         y: loc.y,
         kind
       });
+    }
+
+    for (const m of this.mission?.getRadarBlips() ?? []) {
+      const loc = toLocal(m.x, m.z);
+      blips.push({ x: loc.x, y: loc.y, kind: m.kind });
     }
 
     this.threats.getMissilesForRadar(this.missileRadarScratch);

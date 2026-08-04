@@ -209,7 +209,7 @@ export const AIRCRAFT: Record<AircraftId, AircraftDef> = {
   }
 };
 
-export const MAP_HALF = 2200;
+export const MAP_HALF = 3200;
 export const GRAVITY = 28;
 export const RESPAWN_STATIC_SEC = 60;
 export const MOBILE_CAP = 25;

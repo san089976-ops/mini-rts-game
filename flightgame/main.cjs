@@ -25,7 +25,7 @@ function createWindow() {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: "#061018",
-    title: "SkyStrike",
+    title: "FCS",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
