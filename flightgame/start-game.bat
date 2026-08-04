@@ -10,6 +10,15 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+if not exist node_modules (
+  echo [INFO] Installing dependencies...
+  call npm.cmd install
+  if errorlevel 1 (
+    echo [ERROR] npm install failed.
+    pause
+    exit /b 1
+  )
+)
 start "" cmd /c "timeout /t 2 /nobreak >nul & start http://127.0.0.1:5173/"
 call npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 pause
