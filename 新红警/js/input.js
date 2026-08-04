@@ -2,6 +2,7 @@
 /* ============ input.js: 输入处理 ============ */
 function setupInput(){
   mouse.edge={x:0,y:0};
+  mouse.mmDown=false;
   canvas.addEventListener('mousedown', e=>{
     if(e.button===0){
       // 出售模式:点击己方建筑出售
@@ -52,7 +53,7 @@ function setupInput(){
         if(mouse.dragging) boxSelect(mouse.downX, mouse.downY, e.clientX, e.clientY);
         else if(!placing) clickSelect(e.clientX, e.clientY);
       }
-      mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false;
+      mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false;
     }
   });
   window.addEventListener('keydown', e=>{
@@ -66,7 +67,7 @@ function setupInput(){
   }
   if(paused) return;   // 暂停时忽略其它快捷键
   if(e.code==='Space'){ e.preventDefault(); const b=buildings.find(x=>x.team===TEAM_A&&x.defName==='command'&&x.alive); if(b) centerOn(b.x,b.y); }
-  if(e.code==='Tab'){ selectAllCombat(); }
+  if(e.code==='Tab' && !e.ctrlKey && !e.altKey && !e.metaKey){ e.preventDefault(); selectAllCombat(); }
   // E:选中基地车则展开(否则落到下方建造快捷键=战车工厂)
   if(e.code==='KeyE'){
     const mcvSel=selected.find(u=>u.type==='mcv');
@@ -92,12 +93,17 @@ function setupInput(){
   window.addEventListener('keyup', e=>keys[e.code]=false);
   // 小地图点击
   mmCv.addEventListener('mousedown', e=>{
+    if(e.button!==0) return;
+    e.preventDefault();
+    mouse.mmDown=true;
     const r=mmRect || mmCv.getBoundingClientRect();
-    const rx=(e.clientX-r.left)/r.width, ry=(e.clientY-r.top)/r.height;
-    centerOn(rx*W, ry*H);
+    centerOn((e.clientX-r.left)/r.width*W, (e.clientY-r.top)/r.height*H);
   });
   mmCv.addEventListener('mousemove', e=>{
-    if(mouse.down){ const r=mmRect || mmCv.getBoundingClientRect(); centerOn((e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H); }
+    if(mouse.mmDown){
+      const r=mmRect || mmCv.getBoundingClientRect();
+      centerOn((e.clientX-r.left)/r.width*W, (e.clientY-r.top)/r.height*H);
+    }
   });
   // 出售按钮
   document.getElementById('sellBtn').addEventListener('click', ()=>setSelling(!selling));

@@ -2,6 +2,11 @@
 /* ============ game.js: 游戏流程与主循环 ============ */
 function setupGame(){
   units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; placing=null;
+  paused=false;
+  if(selling) setSelling(false);
+  keys={};
+  mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false;
+  document.getElementById('pauseOv').classList.remove('show');
   gameOver=null; overTimer=0; time=0;
   document.getElementById('overlay').classList.remove('show');
   // 同步队伍数组与资金
