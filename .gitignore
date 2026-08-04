@@ -10,28 +10,18 @@ release/
 *.nsis.7z
 *.blockmap
 
-# electron-builder
-electron-builder-debug.yml
-electron-builder-effective-config.yaml
-builder-debug.yml
-builder-effective-config.yaml
+# archives
+*.rar
+*.zip
+*.7z
 
 # logs / temp
 *.log
-vite-err.txt
-vite-out.txt
-build-log.txt
-build-err.txt
 npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE / editors
 .vscode/
 .idea/
 *.swp
-
-# local agent/IDE
-.claude/settings.local.json
-flightgame/src/_write_test.txt
-
