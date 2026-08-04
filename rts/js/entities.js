@@ -26,7 +26,6 @@ class Unit {
     // 速度与转向平滑:避免单位贴在一起时抖动/鬼畜
     this.vx = 0; this.vy = 0;              // 当前实际速度(像素/秒)
     this.wantVx = 0; this.wantVy = 0;      // 期望速度(来自寻路/追击)
-    this.sepVx = 0; this.sepVy = 0;        // 分离力(来自同伴防挤压)
     // 反应装甲(T90):护盾 + 一次免死
     this.shield = 0; this.survivedOnce = false;
     if(type==='t90' && hasResearch(team,'reactiveArmor')) this.shield = REACTIVE_SHIELD;

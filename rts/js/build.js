@@ -99,10 +99,45 @@ function placeBuilding(team, defName, tx, ty){
   markBlocked(b, true);
   return b;
 }
+// 找单位附近最近的可通行格(避开刚占下的建筑格,并让同一批被移出的单位分到不同格)
+function nearestOpenCellFor(u, cx, cy, used){
+  const cxc=Math.floor(cx/TILE), cyc=Math.floor(cy/TILE);
+  for(let r=1;r<=16;r++){
+    for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
+      const nx=cxc+dx, ny=cyc+dy;
+      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H) continue;
+      const k=nx*MAP_W+ny;
+      if(used && used.has(k)) continue;
+      if(unitPassable(u,nx,ny)){
+        if(used) used.add(k);
+        return { x:nx*TILE+TILE/2, y:ny*TILE+TILE/2 };
+      }
+    }
+  }
+  return null;
+}
+// 建筑占下格子时,把原本站在格子内的单位强制移到最近开放空格,避免卡死在建筑里
+function ejectUnitsFromBuilding(b){
+  if(!units) return;
+  const used=new Set();
+  for(const u of units){
+    if(u.hp<=0) continue;
+    const tx=Math.floor(u.x/TILE), ty=Math.floor(u.y/TILE);
+    if(tx<b.tx || tx>=b.tx+b.w || ty<b.ty || ty>=b.ty+b.h) continue;
+    const p=nearestOpenCellFor(u, u.x, u.y, used);
+    if(p){
+      u.x=p.x; u.y=p.y;
+      u.path=null; u.pathIdx=0; u.repathT=0.2;
+      u.vx=0; u.vy=0;
+    }
+  }
+}
 function markBlocked(b, on){
   for(let x=b.tx;x<b.tx+b.w;x++) for(let y=b.ty;y<b.ty+b.h;y++){
     if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H){ blocked[x][y] = on; structBlocked[x][y] = on; }
   }
+  if(on) ejectUnitsFromBuilding(b);
 }
 function canPlaceAt(tx,ty,def,team){
   if(tx<0||ty<0||tx+def.w>MAP_W||ty+def.h>MAP_H) return false;
