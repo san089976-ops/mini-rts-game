@@ -5,7 +5,7 @@ let canvas, ctx, mmCv, mmCtx;
 function viewW(){ return (canvas && canvas.clientWidth) || window.innerWidth; }
 function viewH(){ return (canvas && canvas.clientHeight) || (window.innerHeight||800)-150; }
 let cam = { x: 0, y: 0, maxX: W, maxY: H };
-let mouse = { x:0, y:0, wx:0, wy:0, down:false, downX:0, downY:0, dragging:false };
+let mouse = { x:0, y:0, wx:0, wy:0, down:false, downX:0, downY:0, dragging:false, middleDown:false, midStartX:0, midStartY:0, midCamX:0, midCamY:0 };
 let keys = {};
 let credits = [10000, 3500];
 let selected = [];          // 选中的单位
