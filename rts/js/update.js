@@ -26,7 +26,7 @@ function update(dt){
   // 资金/电力每帧轻量刷新;按钮面板每 0.3s 重建一次,避免每帧 DOM 重建
   updateStats();
   panelT-=dt; if(panelT<=0){ panelT=0.3; updatePanel(); }
-  // 每帧重建一次空间网格(单位移动前),供索敌/炮塔共享
+  // 每帧重建一次空间网格(单位移动前),供索敌/分离/炮塔共享
   buildGrid();
   // 每帧按队伍各算一次电力,避免 updateBuilding 里反复 O(建筑²)
   const teamPower={};
@@ -40,7 +40,11 @@ function update(dt){
   // 上船处理(等遍历结束再移除,避免改数组跳过元素)
   for(const u of units.slice()){ if(u._boarded) doBoard(u); }
   buildGrid();   // 上船会移除单位,重建空间网格避免下标错乱
+  // 局部防挤压:计算每个单位的分离速度(不直接改坐标,由 applyMovement 统一积分)
+  separateAll();
   for(const u of units){ applyMovement(u, dt); }
+  // 刚性碰撞:方框重叠的位置修正(把互相重叠的单位推开;移动单位优先挤开挡路空闲单位)
+  resolveRigid();
   // 建筑生产/建造/炮塔/维修
   for(const b of buildings){ updateBuilding(b, dt, teamPower); }
   // 弹体
@@ -321,8 +325,9 @@ function updateUnit(u, dt){
     }
   }
 }
-/* ============ 转向行为(Steering):积分 ============ */
+/* ============ 转向行为(Steering):分离 / 积分 ============ */
 const STEER_RATE = 8;        // 转向/加减速平滑系数(越大响应越快)
+const SEPARATE_STRENGTH = 300; // 分离力强度
 function seekVelocity(u, tx, ty){
   const dx=tx-u.x, dy=ty-u.y;
   const d=Math.hypot(dx,dy);
@@ -335,29 +340,105 @@ function finishMove(u){
   u.order={kind:'none'}; u.path=null;
   u.wantVx=0; u.wantVy=0; u.vx=0; u.vy=0;
 }
-// 本地 8px 脱困失败时,按当前指令目标重新寻路,避免单位卡在角落一直空转
-function repathForOrder(u){
-  let tx=null, ty=null;
-  if(u.order.kind==='move' && u.order.x!==undefined){ tx=u.order.x; ty=u.order.y; }
-  else if(u.order.kind==='attack' && u.target){ tx=u.target.x; ty=u.target.y; }
-  else if(u.order.kind==='load' && u.order.transport){ tx=u.order.transport.x; ty=u.order.transport.y; }
-  else if(u.order.kind==='mine' && u.oreTarget){ tx=u.oreTarget.x; ty=u.oreTarget.y; }
-  else if(u.order.kind==='return'){
-    const t=u.refinery || buildings.find(b=>b.team===u.team && b.defName==='command' && b.alive);
-    if(t){ const pt=dumpPort(t) || {x:t.x,y:t.y}; tx=pt.x; ty=pt.y; }
+function separateAll(){
+  // 局部防挤压(软):按碰撞方框的最小穿透轴推开非敌对单位,不直接改坐标
+  // 注意:把同伴当“软障碍”,绝不加入 A* 的静态 blocked,避免反复重寻导致抖动
+  for(let i=0;i<units.length;i++){
+    const u=units[i];
+    u.sepVx=0; u.sepVy=0;
+    const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 8);
+    for(let c=0;c<cand.length;c++){
+      const j=cand[c];
+      if(j===i) continue;
+      const v=units[j];
+      if(v.hp<=0 || isEnemy(u.team,v.team)) continue;   // 敌人在战斗中不做分离
+      const dx=u.x-v.x, dy=u.y-v.y;
+      const ox=(u.hw+v.hw)-Math.abs(dx);
+      const oy=(u.hh+v.hh)-Math.abs(dy);
+      if(ox<=0 || oy<=0) continue;
+      const over=Math.min(ox,oy)/Math.max(1, Math.min(u.hw+v.hw, u.hh+v.hh)); // 0(刚接触)~1(完全重叠)
+      const str=over*over*SEPARATE_STRENGTH;             // 二次衰减:越近推力越强
+      if(ox<oy) u.sepVx += (dx>=0?1:-1)*str;             // 沿最小穿透轴推开
+      else u.sepVy += (dy>=0?1:-1)*str;
+    }
   }
-  if(tx===null) return false;
-  const p=pathFor(u,u.x,u.y,tx,ty);
-  if(p){
-    u.path=p; u.pathIdx=0; u.repathT=0;
-    return true;
+}
+/* ============ 刚性碰撞(方框):重叠的位置修正 ============ */
+function boxOverlap(u,v){
+  return Math.abs(u.x-v.x) < u.hw+v.hw && Math.abs(u.y-v.y) < u.hh+v.hh;
+}
+function tryMoveTo(u, x, y){
+  return inBounds(x,y) && !uCellBlocked(u, Math.floor(x/TILE), Math.floor(y/TILE));
+}
+// 该位置是否与任何存活单位碰撞箱重叠(用于本地脱困找空位)
+function hasUnitOverlapAt(u, x, y){
+  const cand=gridCollect(x, y, Math.max(u.hw,u.hh)*2 + 12);
+  for(let c=0;c<cand.length;c++){
+    const v=units[cand[c]];
+    if(v===u || v.hp<=0) continue;
+    if(Math.abs(v.x-x) < u.hw+v.hw && Math.abs(v.y-y) < u.hh+v.hh) return true;
   }
   return false;
 }
+function resolveRigid(){
+  // 把重叠的方框沿最小穿透轴互相推开(位置修正,迭代至收敛,每轮重建网格保证正确性)
+  for(let iter=0;iter<6;iter++){
+    buildGrid();
+    let moved=false;
+    for(let i=0;i<units.length;i++){
+      const u=units[i];
+      if(u.hp<=0) continue;
+      const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 12);
+      for(let k=0;k<cand.length;k++){
+        const j=cand[k];
+        if(j<=i) continue;
+        const v=units[j];
+        if(v.hp<=0 || !boxOverlap(u,v)) continue;
+        const dx=v.x-u.x, dy=v.y-u.y;
+        const ox=(u.hw+v.hw)-Math.abs(dx);
+        const oy=(u.hh+v.hh)-Math.abs(dy);
+        let px=0, py=0;
+        if(ox<oy) px=(dx>=0?1:-1)*ox;
+        else py=(dy>=0?1:-1)*oy;
+        // 完全重合时给一点随机抖动,避免刚性死锁
+        if(px===0 && py===0){
+          const a=Math.random()*Math.PI*2;
+          px=Math.cos(a)*2; py=Math.sin(a)*2;
+        }
+        // 移动中的单位优先挤开挡路的空闲单位(空闲者多分担位移,让队列能穿行不卡死)
+        const uIdle=u.order.kind==='none', vIdle=v.order.kind==='none';
+        const wu = uIdle&&!vIdle ? 0.8 : (!uIdle&&vIdle ? 0.2 : 0.5);
+        const wv = 1-wu;
+        if(tryMoveTo(u, u.x-px*wu, u.y-py*wu)){ u.x-=px*wu; u.y-=py*wu; moved=true; }
+        if(tryMoveTo(v, v.x+px*wv, v.y+py*wv)){ v.x+=px*wv; v.y+=py*wv; moved=true; }
+      }
+    }
+    if(!moved) break;
+  }
+}
 function applyMovement(u, dt){
+  // 期望速度 = 寻路方向 + 分离力,再限制幅值不超过最大速度
+  // 关键:分离力主要作用于“前进方向垂直分量”(侧向让路),
+  // 前进方向分量只做有限减速——否则队列中前后车互相抵消会整群死锁
   const wx=u.wantVx, wy=u.wantVy;
   const wm=Math.hypot(wx,wy);
-  let vx=wx, vy=wy;
+  let vx, vy;
+  if(wm>1){
+    const ux=wx/wm, uy=wy/wm;
+    const px=-uy, py=ux;                      // 前进方向法向
+    const sPerp = u.sepVx*px + u.sepVy*py;    // 分离→侧向分量(完整生效)
+    const sPar  = u.sepVx*ux + u.sepVy*uy;    // 分离→前进分量(挡路时适度减速)
+    const parSlow = sPar<0 ? Math.max(-wm*0.45, sPar) : 0;   // 最多减速45%,绝不静止
+    vx = wx + px*sPerp + ux*parSlow;
+    vy = wy + py*sPerp + uy*parSlow;
+  } else {
+    // 无前进目标(已到位/待命):被挤压时轻微推开,让先到位的单位散开腾出空间
+    const s=Math.hypot(u.sepVx,u.sepVy);
+    if(s>SEPARATE_STRENGTH*0.2){
+      const k=Math.min(1, 60/s);      // 空闲单位被推幅度封顶 60px/s
+      vx=u.sepVx*k; vy=u.sepVy*k;
+    } else { vx=0; vy=0; }
+  }
   const sp = u.speedEff;
   let m=Math.hypot(vx,vy);
   if(m>sp){ vx=vx/m*sp; vy=vy/m*sp; }
@@ -368,8 +449,8 @@ function applyMovement(u, dt){
   m=Math.hypot(u.vx,u.vy);
   if(m>sp){ u.vx=u.vx/m*sp; u.vy=u.vy/m*sp; m=sp; }
   if(m>0 && m<0.5){ u.vx=0; u.vy=0; m=0; }   // 微速清零,避免停在目标点附近漂移
-  // 卡住检测 + 本地脱困:有移动意图但实际速度长期过低(被地形顶住)时,
-  // 尝试向 8 个方向小步移动找可通行位置(直接改位置)
+  // 卡住检测 + 本地脱困:有移动意图但实际速度长期过低(被同伴/地形顶住)时,
+  // 尝试向左右/后方小步移动找不重叠的空位(直接改位置),让大部队能绕行散开
   const wantSpeed=wm;
   if(wantSpeed>12 && m<wantSpeed*0.25){ u.stuckT=(u.stuckT||0)+dt; }
   else u.stuckT=0;
@@ -377,18 +458,18 @@ function applyMovement(u, dt){
     u.stuckT=0;
     const wm2=Math.max(1,wm);
     const fx=wx/wm2, fy=wy/wm2;
-    const dirs=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+    const dirs=[[-fy,fx],[fy,-fx],[-fx,-fy]];   // 左,右,后
     for(let di=0; di<dirs.length; di++){
       const nx=u.x+dirs[di][0]*8, ny=u.y+dirs[di][1]*8;
       if(!inBounds(nx,ny) || uCellBlocked(u,Math.floor(nx/TILE),Math.floor(ny/TILE))) continue;
-      u.x=nx; u.y=ny;
-      u.vx=dirs[di][0]*sp*0.5; u.vy=dirs[di][1]*sp*0.5;
-      break;
+      if(!hasUnitOverlapAt(u,nx,ny)){
+        u.x=nx; u.y=ny;
+        u.vx=dirs[di][0]*sp*0.5; u.vy=dirs[di][1]*sp*0.5;
+        break;
+      }
     }
-    // 无论 8px 是否成功,都基于新位置重算路径,避免旧路径再次把单位拉回角落
-    repathForOrder(u);
   }
-  // 积分 + 静态障碍碰撞(滑动)
+  // 积分 + 静态障碍碰撞(滑动):同伴不是静态障碍,只靠分离推开
   const nx=u.x+u.vx*dt, ny=u.y+u.vy*dt;
   const txn=Math.floor(nx/TILE), tyn=Math.floor(ny/TILE);
   if(!uCellBlocked(u,txn,tyn)){
