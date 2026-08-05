@@ -337,7 +337,7 @@ function updateUnit(u, dt){
     if(u.def.range>0){
       // 察觉附近有敌人 -> 主动迎战(感知半径略大于射程,空闲单位不再发愣/发呆)
       const en=findEnemyNear(u, u.def.range*1.5);
-      if(en && Math.random()<dt*1.5){ u.target=en; u.order={kind:'attack'}; }
+      if(en){ u.target=en; u.order={kind:'attack'}; }
     }
   }
 }

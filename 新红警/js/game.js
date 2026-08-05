@@ -6,7 +6,7 @@ function setupGame(){
   paused=false;
   if(selling) setSelling(false);
   keys={};
-  mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false;
+  mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false; mouse.middleDown=false;
   document.getElementById('pauseOv').classList.remove('show');
   gameOver=null; overTimer=0; time=0;
   document.getElementById('overlay').classList.remove('show');

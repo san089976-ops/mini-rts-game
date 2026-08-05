@@ -33,6 +33,11 @@ function setupInput(){
           textPopup(mw.x,mw.y,'资金不足', '#ff8080');
         }
       }
+    } else if(e.button===1){
+      e.preventDefault();
+      mouse.middleDown=true;
+      mouse.midStartX=e.clientX; mouse.midStartY=e.clientY;
+      mouse.midCamX=cam.x; mouse.midCamY=cam.y;
     } else if(e.button===2){
       if(selling){ setSelling(false); return; }
       giveOrder();
@@ -41,6 +46,10 @@ function setupInput(){
   canvas.addEventListener('contextmenu', e=>e.preventDefault());
   window.addEventListener('mousemove', e=>{
     mouse.x=e.clientX; mouse.y=e.clientY;
+    if(mouse.middleDown){
+      cam.x=clamp(mouse.midCamX - (e.clientX-mouse.midStartX), 0, W-viewW());
+      cam.y=clamp(mouse.midCamY - (e.clientY-mouse.midStartY), 0, H-viewH());
+    }
     if(mouse.down && !mouse.dragging && Math.hypot(e.clientX-mouse.downX,e.clientY-mouse.downY)>6) mouse.dragging=true;
     // 边缘滚动
     const m=28;
@@ -54,6 +63,8 @@ function setupInput(){
         else if(!placing) clickSelect(e.clientX, e.clientY);
       }
       mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false;
+    } else if(e.button===1){
+      mouse.middleDown=false;
     }
   });
   window.addEventListener('keydown', e=>{
