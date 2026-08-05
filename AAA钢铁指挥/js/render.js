@@ -605,7 +605,7 @@ function drawTrackMarks(){
     ctx.save();
     ctx.translate(m.x, m.y);
     ctx.rotate(m.a);
-    ctx.globalAlpha = 0.08 + 0.08*k;          // 很淡的深色土痕,越老越透明
+    ctx.globalAlpha = 0.14 + 0.32*k;   // 泥土灰压痕,随时间淡出
     ctx.fillStyle = '#2c3428';
     ctx.fillRect(-m.l/2, -m.w/2, m.l, m.w);
     ctx.restore();
@@ -668,35 +668,61 @@ function bakedShadow(img){
     return c;
   }catch(e){ _shadowCache[key] = null; return null; }
 }
-// 方向性剪影阴影 + 接地接触阴影(AO)。核心:接地阴影必须与"车体足迹"同尺寸、
-// 紧贴车身正下方,坦克才不会看起来悬浮在草地上。
+const _rectShadowCache = {};
+// 长方形阴影(预烘焙):车体足迹同尺寸的实心黑色矩形 + 高斯模糊,边缘柔和,
+// 一次性烘焙缓存,运行期零 filter 开销(与剪影阴影同思路)
+function bakedRectShadow(w, h, blurPx){
+  const key = Math.round(w)+'x'+Math.round(h)+'_'+blurPx;
+  if(_rectShadowCache[key]) return _rectShadowCache[key];
+  try{
+    const pad = Math.max(2, Math.ceil(blurPx*2));
+    const cw = Math.ceil(w + pad*2), ch = Math.ceil(h + pad*2);
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const g = c.getContext('2d');
+    g.filter = 'blur('+blurPx+'px)';
+    g.fillStyle = '#000';
+    g.fillRect(pad, pad, w, h);
+    g.filter = 'none';
+    _rectShadowCache[key] = c;
+    return c;
+  }catch(e){ _rectShadowCache[key] = null; return null; }
+}
+// 方向性矩形阴影 + 接地接触阴影(AO)。坦克/步兵战车等长条形车辆:
+// 阴影是"与车体足迹同尺寸的长方形"整体向右下偏移,边缘高斯模糊,
+// 形成长方体落到地面的方形投影;AO 负责贴地防悬浮。
 function drawShadowSprite(u, img){
   // ① 接地接触阴影(AO):与车体足迹(hw/hh)同尺寸的暗色椭圆,旋转随车头,紧贴车身正下方
   ctx.save();
   ctx.translate(2, 4);                       // 极小的下移,让阴影"贴地"
   ctx.rotate(u.facing);
   ctx.fillStyle = '#000';
-  ctx.globalAlpha = UNIT_SHADOW_AO;          // 内层:紧贴足迹
+  ctx.globalAlpha = UNIT_SHADOW_AO*0.7;      // 内层:紧贴足迹
   ctx.beginPath();
   ctx.ellipse(0, 0, u.hw*0.98, u.hh*1.06, 0, 0, Math.PI*2);
   ctx.fill();
-  ctx.globalAlpha = UNIT_SHADOW_AO*0.5;      // 外层:更大更淡的 AO 过渡,消除贴图硬边
+  ctx.globalAlpha = UNIT_SHADOW_AO*0.4;      // 外层:更大更淡的 AO 过渡,消除贴图硬边
   ctx.beginPath();
   ctx.ellipse(0, 0, u.hw*1.3, u.hh*1.38, 0, 0, Math.PI*2);
   ctx.fill();
   ctx.restore();
-  // ② 方向性剪影阴影:继承坦克纹理形状,整体偏移(光在左上方),旋转与车身同步
-  const sh = bakedShadow(img);
+  // ② 方向性长方形阴影:车体足迹(hw/hh)同尺寸的黑色矩形,整体向右下偏移(光在左上),
+  //    边缘高斯模糊(预烘焙),旋转随车头——呈现"长方体落地"的方形投影
+  const bw = Math.max(12, u.hw*2.1);
+  const bh = Math.max(12, u.hh*2.1);
+  const sh = bakedRectShadow(bw, bh, UNIT_SHADOW_RECT_BLUR);
   if(!sh) return;
-  const rot = SPRITE_ROT[u.type] || 0;
-  const sc  = SPRITE_SCALE[u.type] || 1;
-  const s   = (u.r*2.9*1.8*sc)/Math.max(img.width, img.height);
-  const dw  = img.width*s, dh = img.height*s;
   ctx.save();
   ctx.translate(UNIT_SHADOW_OFFSET.x, UNIT_SHADOW_OFFSET.y);
-  ctx.rotate(u.facing + rot);
+  ctx.rotate(u.facing);
+  // 外层:更大更淡的扩展影,加强模糊层级感
+  ctx.save();
+  ctx.scale(1.4, 1.4);
+  ctx.globalAlpha = UNIT_SHADOW_ALPHA*0.4;
+  ctx.drawImage(sh, -sh.width/2, -sh.height/2);
+  ctx.restore();
+  // 本体:清晰的模糊长方形
   ctx.globalAlpha = UNIT_SHADOW_ALPHA;
-  ctx.drawImage(sh, -dw/2, -dh/2, dw, dh);
+  ctx.drawImage(sh, -sh.width/2, -sh.height/2);
   ctx.restore();
 }
 // 水上单位(驱逐舰/运输艇):不做陆地阴影,只留一个很淡的椭圆投影,避免"黑影贴在水面上"
@@ -773,6 +799,8 @@ function drawUnit(u){
     ctx.fillStyle='rgba(80,180,255,.08)';
     ctx.beginPath(); ctx.arc(0,0,u.r+4,0,Math.PI*2); ctx.fill();
   }
+  // 车体渲染偏移(起步/刹车俯仰 + 开火后坐力):阴影/选中圈保持接地,车体位移
+  if(u.renderOx || u.renderOy) ctx.translate(u.renderOx, u.renderOy);
   if(u.type==='tank'||u.type==='abrams'||u.type==='t90'){
     const heavy = unitFactionOf(u.team)==='soviet';
     ctx.rotate(u.facing);
@@ -1594,6 +1622,26 @@ function drawSel(){
       ctx.setLineDash([]);
       drawMoveMarker(o.x, o.y);
     }
+  }
+  // 攻击指示红线(不依赖选中):本方刚下达攻击指令的单位显示到目标的红线,
+  // 由 _lineT 计时短暂显示后自动消失(不影响单位继续攻击)
+  for(const u of units){
+    if(u.team!==TEAM_A) continue;
+    if(!(u.order && u.order.kind==='attack')) continue;
+    if(!u.target || u.target.hp<=0) continue;
+    if(!(u._lineT>0)) continue;
+    const k = Math.min(1, u._lineT / (RED_LINE_TIME*0.6));   // 最后0.6秒淡出
+    const alpha = 0.25 + 0.7*k;
+    ctx.strokeStyle='rgba(255,60,60,'+alpha+')'; ctx.lineWidth=3; ctx.setLineDash([7,4]);
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(u.target.x,u.target.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle='rgba(255,200,120,'+(0.5*k)+')'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(u.target.x,u.target.y); ctx.stroke();
+    const tx=u.target.x, ty=u.target.y;
+    ctx.strokeStyle='rgba(255,60,60,'+alpha+')'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(tx,ty,6,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx-10,ty); ctx.lineTo(tx+10,ty); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx,ty-10); ctx.lineTo(tx,ty+10); ctx.stroke();
   }
   if(selBuilding && selBuilding.alive){
     const pul=0.5+0.5*Math.sin(time*6);

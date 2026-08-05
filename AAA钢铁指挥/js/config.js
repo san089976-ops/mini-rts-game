@@ -4,6 +4,8 @@ const TILE = 32;
 let MAP_W = 64, MAP_H = 48;
 let W = MAP_W * TILE, H = MAP_H * TILE;
 const TEAM_A = 0, TEAM_B = 1;
+// 攻击指示红线显示时长(秒):下达攻击指令后短暂显示,随后消失,不影响单位继续攻击
+const RED_LINE_TIME = 1.5;
 
 // 设置当前地图尺寸(海战图等可更大),所有 MAP_W/MAP_H/W/H 均为运行时读取
 function setMapSize(w, h){
@@ -80,6 +82,19 @@ const UNIT_BOX = {
 };
 // 战车转向角速度(弧度/秒):朝向用 lerpAngle 平滑插值,产生履带战车转向效果,而非瞬间硬转
 const TURN_RATE = 6;
+// 载具阻尼转向参数:匀速旋转 + 起步/换向角加速度 + 到位前减速(履带转向感)
+const TURN_MAX_SPEED = 2.6;    // 载具转向匀速(rad/s):缓慢的履带转向
+const TURN_ACCEL = 20;         // 转向角加速度(rad/s²):起步/换向平滑
+// 载具横移削减系数:履带车几乎不能横移,只能朝车头方向前进/倒退
+const VEHICLE_LATERAL = 0.18;
+// 载具转向对齐门(rad):期望方向与车头夹角超过此值时,先原地匀速转向、不做任何移动;
+// 对齐后才沿车头直线开过去(移动中几乎不转弯)
+const VEHICLE_ALIGN_GATE = 0.35;
+// 载具渲染偏移参数:起步/刹车俯仰 + 开火后坐力(只改渲染偏移,不动逻辑坐标)
+const FIRE_RECOIL = 8;        // 开火后坐力初始偏移(px)
+const RECOIL_DECAY = 14;      // 后坐力恢复速率(1/s,越大回弹越快,约0.1~0.2s恢复)
+// 有履带压痕的载具(除海军驱逐舰/登陆艇外的所有车辆)
+const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1 };
 const BASE_UNITS = {
   infantry: { name:'动员兵', hp:90, speed:74, range:72, damage:9, rof:0.9, cost:100, r:9,  build:4, armor:'cloth', proj:'bullet', desc:'低造价轻步兵,前期侦察与骚扰的主力' },
   tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:0.55, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
@@ -292,6 +307,8 @@ const UNIT_SHADOW_OFFSET = { x:5, y:8 };
 const UNIT_SHADOW_ALPHA = 0.45;
 // 阴影预烘焙高斯模糊半径(px):烘焙一次,运行期直接 drawImage,零每帧滤镜开销
 const UNIT_SHADOW_BLUR = 5;
+// 长方形阴影的模糊半径(px):比剪影略大,让"长方体落地"的方形投影边缘更柔和
+const UNIT_SHADOW_RECT_BLUR = 9;
 // 接地接触阴影(AO)不透明度:车身正下方与"车体足迹"同尺寸的暗色椭圆,
 // 这是让坦克"压在地面上、不悬浮"的关键——足迹多大,阴影就多大。
 const UNIT_SHADOW_AO = 0.36;
@@ -354,3 +371,14 @@ function preloadImages(){
     im.src='img/terrain/water_'+String(i).padStart(2,'0')+'.png';
   }
 }
+
+/* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
+const GAME_VERSION = 'v22';
+console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
+try{
+  const vb=document.createElement('div');
+  vb.id='verBadge';
+  vb.textContent='版本 '+GAME_VERSION+' (攻击修正)';
+  vb.style.cssText='position:fixed;right:10px;bottom:160px;z-index:9999;font:12px "Microsoft YaHei";color:#ffe27a;background:rgba(20,10,0,.8);padding:3px 10px;border-radius:5px;border:2px solid #ffe27a;pointer-events:none;';
+  document.body.appendChild(vb);
+}catch(e){}

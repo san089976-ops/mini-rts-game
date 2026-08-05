@@ -43,6 +43,12 @@ class Unit {
     this.upgradeLvl = 0; this.upgrading = false; this.upgradeProg = 0;
     // 上次收到玩家移动指令的时间:用于战斗脱离保护期(刚被拉动时不被拉回战斗)
     this._lastMoveCmd = -99;
+    // 载具物理感渲染状态(只影响绘制偏移,不改逻辑坐标)
+    this.angVel = 0;              // 当前角速度(rad/s),阻尼转向用
+    this.renderOx = 0; this.renderOy = 0;   // 渲染偏移(起步/刹车俯仰 + 开火后坐力)
+    this.fireRecoil = 0;          // 开火后坐力偏移量(px)
+    this.surge = 0;               // 起步/刹车俯仰偏移(px)
+    this._prevSp = 0;             // 上一帧速度,用于计算纵向加速度
   }
   // 该单位处在 (x,y) 且朝向为 facing 时,两个碰撞圆的中心与半径(胶囊近似)。
   // 圆形单位(colOff=0)只返回一个圆;长条单位返回车头(+facing)/车尾(-facing)两圆。
