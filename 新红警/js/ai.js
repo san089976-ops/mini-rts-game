@@ -13,12 +13,18 @@ function initAI(){
   aiState = {};
   for(let t=0;t<gameTeams.length;t++){
     if(gameTeams[t].ai){
+      const diff = gameTeams[t].diff || 'easy';   // easy简单 / medium中等 / brutal残酷
+      // 中等/残酷:建造计划中加入实验室,用于研发科技
+      const plan = ['power','power','barracks','factory','refinery'];
+      if(diff!=='easy') plan.push('lab');
+      plan.push('turret');
       aiState[t] = {
-        plan: ['power','power','barracks','factory','refinery','turret'],
+        diff: diff,
+        plan: plan,
         trainTargets: { infantry: 5, tank: 0, harvester: 2 },
         attackT: 45, idleB: 0,
         lastBaseX: 0, lastBaseY: 0,
-        queueDepth: 2,
+        queueDepth: diff==='brutal' ? 3 : 2,
         advTank: advancedTankType(t),
         advInf: advancedInfantryType(t),
         built: {},
@@ -115,14 +121,46 @@ function updateAI(dt, team){
   const adv = st.advTank;
   const aInf = st.advInf;
 
-  // 经济:基础收入 + 随时间增长 + 矿车收入
-  credits[team] += dt * (12 + Math.min(38, time*0.35));
+  // 经济:基础收入 + 随时间增长 + 矿车收入(按难度加成:中等1.6x / 残酷2.3x)
+  let inc = 12 + Math.min(38, time*0.35);
+  if(st.diff==='medium') inc *= 1.6;
+  else if(st.diff==='brutal') inc *= 2.3;
+  credits[team] += dt * inc;
 
-  // 生产目标随进度提升
+  // 生产目标随进度提升(残酷更强)
   const nFactory = aiCount(team,'factory');
   st.trainTargets.tank = nFactory>=2 ? 6 : (aiHas(team,'factory') ? 4 : 0);
   st.trainTargets.harvester = 2;
   st.trainTargets.infantry = time<50 ? 5 : 6;
+  if(st.diff==='brutal'){
+    st.trainTargets.tank = nFactory>=2 ? 9 : (aiHas(team,'factory') ? 5 : 0);
+    st.trainTargets.infantry = 8;
+  }
+
+  // === 海战图专属:建船坞出驱逐舰 ===
+  const isNaval = gameSetup && gameSetup.map && gameSetup.map.custom==='naval';
+  if(isNaval){
+    if(time>45 && !aiHas(team,'dock') && credits[team]>500) aiPlaceBuilding(team,'dock');
+    st.trainTargets.destroyer = aiHas(team,'dock') ? 3 : 0;
+  }
+
+  // === 中等/残酷:实验室科技研究(先经济后防御,再阵营专属) ===
+  if(st.diff!=='easy'){
+    // 实验室耗电 100,补一座发电厂保证电力
+    if(time>40 && aiCount(team,'power')<3 && credits[team]>150) aiPlaceBuilding(team,'power');
+    if(time>55 && !aiHas(team,'lab') && credits[team]>900) aiPlaceBuilding(team,'lab');
+    const lab = buildings.find(b=>b.team===team && b.defName==='lab' && b.alive && !b.constructing && !b.researching);
+    if(lab && credits[team]>=800){
+      const order = ['oreRefine','advTurret','depletedUranium','reactiveArmor'];
+      for(const id of order){
+        const rd = RESEARCH_DEFS[id];
+        if(!rd) continue;
+        if(rd.faction && rd.faction!==unitFactionOf(team)) continue;   // 阵营专属过滤
+        if(hasResearch(team,id)) continue;
+        if(credits[team] >= rd.cost){ startResearch(lab, id); break; }
+      }
+    }
+  }
 
   // === 发展路径:按计划建建筑 ===
   if(st.plan.length){
@@ -208,7 +246,8 @@ function updateAI(dt, team){
   // 敌方阵营的建造厂(优先玩家)
   const enemyBase = st.enemyBase;
   const attacked = time - st.lastAttackT < 8;
-  const wantAttack = enemyBase && combat.length>=3 && (st.attackT<=0 || attacked);
+  const minCombat = st.diff==='brutal' ? 2 : 3;   // 残酷兵力更少就开打
+  const wantAttack = enemyBase && combat.length>=minCombat && (st.attackT<=0 || attacked);
   if(wantAttack){
     const target = attacked ? {x:st.lastBaseX,y:st.lastBaseY} : {x:enemyBase.x,y:enemyBase.y};
     const orderU=[];
@@ -217,7 +256,7 @@ function updateAI(dt, team){
       orderMove(orderU, target.x, target.y);
       // x2=true 表示打完路上遭遇的敌人后继续赶往目标地点
       for(const u of orderU) u.order.x2 = true;
-      st.attackT = rnd(28,40);
+      st.attackT = st.diff==='brutal' ? rnd(18,26) : (st.diff==='medium' ? rnd(24,33) : rnd(28,40));
     }
   }
 }

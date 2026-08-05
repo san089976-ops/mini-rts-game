@@ -1,10 +1,13 @@
 "use strict";
 /* ============ orders.js: 指令与选择 ============ */
 // 批量移动阵型:以目标点为中心生成圆环阵,避免所有单位挤向同一个坐标
-function formationTargets(x, y, count){
+// 环间距按单位碰撞箱自适应(必须 >= 碰撞箱尺寸,否则刚性碰撞会互相顶住死锁)
+function formationTargets(x, y, list){
   const pts=[];
+  const count=list.length;
   if(count<=1){ pts.push({x,y}); return pts; }
-  const spacing=20;
+  let spacing=26;
+  for(const u of list){ if(u){ spacing=Math.max(spacing, (u.hw||10)+(u.hh||10)+4); } }
   let placed=0, ring=0;
   while(placed<count){
     if(ring===0){
@@ -24,15 +27,25 @@ function formationTargets(x, y, count){
   return pts;
 }
 function orderMove(list, x, y){
-  const targets = list.length>1 ? formationTargets(x,y,list.length) : null;
-  for(let i=0;i<list.length;i++){
-    const u=list[i];
+  // 目标是一艘(友方/同盟)运输艇:可装载的地面单位改为"登艇"指令
+  const tgt=entityAt(x,y);
+  const isLoadTarget = tgt && tgt instanceof Unit && tgt.type==='transport' && !isEnemy((list[0]||{team:tgt.team}).team, tgt.team);
+  const boarders = isLoadTarget ? list.filter(u=>u!==tgt && !u.naval && !u.amphib && transportCost(u)>0 && !isEnemy(u.team,tgt.team)) : [];
+  const movers = list.filter(u=>!boarders.includes(u));
+  for(const u of boarders){
+    u.target=null; u.order={kind:'load', transport:tgt}; u.path=null;
+  }
+  if(boarders.length) textPopup(tgt.x,tgt.y-18,'登艇 '+boarders.length+' 个单位','#8aff8a');
+  // 其余单位正常移动(运输艇/海军等),不递归避免死循环
+  const targets = movers.length>1 ? formationTargets(x,y,movers) : null;
+  for(let i=0;i<movers.length;i++){
+    const u=movers[i];
     const tx = targets ? targets[i].x : x;
     const ty = targets ? targets[i].y : y;
     u.target=null;
     if(u.type==='harvester'){ u.mode='mine'; u.oreTarget=null; }
     u.order={kind:'move', x:tx, y:ty};
-    const p=findPath(u.x,u.y,tx,ty);
+    const p=pathFor(u,u.x,u.y,tx,ty);
     u.path=p; u.pathIdx=0; u.repathT=1.0;
   }
 }
@@ -70,8 +83,8 @@ function oreAt(wx,wy){
 }
 
 function centerOn(x,y){
-  cam.x = clamp(x - canvas.clientWidth/2, 0, W-canvas.clientWidth);
-  cam.y = clamp(y - canvas.clientHeight/2, 0, H-canvas.clientHeight);
+  cam.x = clamp(x - viewW()/2, 0, W-viewW());
+  cam.y = clamp(y - viewH()/2, 0, H-viewH());
 }
 function giveOrder(){
   if(placing) return;
@@ -85,9 +98,34 @@ function giveOrder(){
   }
   if(!list.length && !selBuilding) return;
   const enemy = entityAt(mw.x, mw.y);
+  // 右键己方/同盟运输艇 -> 其它地面单位登艇
+  if(enemy && enemy instanceof Unit && enemy.type==='transport' && !isEnemy((list[0]||{team:enemy.team}).team, enemy.team)){
+    const boarders = list.filter(u=>u!==enemy && !u.naval && !u.amphib && transportCost(u)>0 && !isEnemy(u.team,enemy.team));
+    const rest = list.filter(u=>u!==enemy && !boarders.includes(u));
+    for(const u of boarders){ u.target=null; u.order={kind:'load', transport:enemy}; u.path=null; }
+    if(rest.length) orderMove(rest, mw.x, mw.y);
+    if(boarders.length) textPopup(enemy.x,enemy.y-18,'登艇 '+boarders.length+' 个单位','#8aff8a');
+    return;
+  }
+  // 运输艇:右键地面/目标 -> 移动 + 到达后卸载
+  const transports = list.filter(u=>u.type==='transport');
+  let remaining = list;
+  if(transports.length){
+    for(const t of transports){
+      t.target=null;
+      t.order={kind:'move', x:mw.x, y:mw.y};
+      t.path=pathFor(t,t.x,t.y,mw.x,mw.y);
+      t.unloadAt=null;   // 不自动卸载,玩家手动释放
+    }
+    remaining = list.filter(u=>u.type!=='transport');
+    if(!remaining.length){
+      textPopup(mw.x,mw.y-12,'移动','#8aff8a');
+      return;
+    }
+  }
   // 采矿车特殊指令:右键矿场=采指定矿;右键己方精炼厂/建造厂=倒矿
-  const harvesters = list.filter(u=>u.type==='harvester');
-  const others = list.filter(u=>u.type!=='harvester');
+  const harvesters = remaining.filter(u=>u.type==='harvester');
+  const others = remaining.filter(u=>u.type!=='harvester');
   if(harvesters.length){
     const ore = oreAt(mw.x, mw.y);
     if(ore){
@@ -107,12 +145,13 @@ function giveOrder(){
       return;
     }
   }
-  if(enemy && isEnemy(list[0]?list[0].team:selBuilding.team, enemy.team) && !(enemy instanceof Building && !enemy.alive)){
-    // 攻击(采矿车不攻击)
-    orderAttack(list, enemy);
-    if(list.length) textPopup(list[0].x,list[0].y-20,'攻击 '+(enemy.defName||enemy.def.name||enemy.type),'#ffb0b0');
-  } else if(list.length){
-    orderMove(list, mw.x, mw.y);
+  if(enemy && isEnemy(remaining[0]?remaining[0].team:selBuilding.team, enemy.team) && !(enemy instanceof Building && !enemy.alive)){
+    // 攻击(采矿车/运输艇不参与主动攻击)
+    const attackers = remaining.filter(u=>u.type!=='harvester' && u.type!=='transport');
+    orderAttack(attackers, enemy);
+    if(attackers.length) textPopup(attackers[0].x,attackers[0].y-20,'攻击 '+(enemy.defName||enemy.def.name||enemy.type),'#ffb0b0');
+  } else if(remaining.length){
+    orderMove(remaining, mw.x, mw.y);
   }
 }
 function selectAllCombat(){

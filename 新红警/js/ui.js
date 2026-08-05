@@ -23,7 +23,9 @@ function unitStatsHTML(u, multi){
   h+=statRow('造价', '$'+d.cost);
   h+=statRow('护甲', ARMOR_NAME[u.armor]||'—');
   if(u.shield>0) h+=statRow('护盾', Math.ceil(u.shield)+' (回'+REACTIVE_REGEN+'/秒)');
-  if(u.type==='harvester') h+=statRow('载量', d.capacity);
+  if(u.type==='harvester') h+=statRow('内含矿', Math.floor(u.cargo)+' / '+d.capacity);
+  if(u.type==='transport') h+=statRow('运载', usedCapacity(u)+' / '+d.capacity+' 点');
+  if(u.type!=='transport' && !u.naval && transportCost(u)>0) h+=statRow('占点', transportCost(u)+' 点');
   h+='<div class="udesc">'+(d.desc||UNIT_DESC[u.type]||'')+'</div>';
   return h;
 }
@@ -159,6 +161,7 @@ function updatePanel(){
     title.textContent = selected.length>1 ? (first.def.name+' 等 '+selected.length+' 个单位') : first.def.name;
     desc.innerHTML = unitStatsHTML(first, selected.length>1);
     if(first.type==='mcv') mkAction('展开基地车 (E)','deploy',true);
+    if(first.type==='transport' && first.cargoUnits && first.cargoUnits.length) mkAction('释放部队 ('+first.cargoUnits.length+')','unload',true);
     mkAction('全选作战单位','selectall',true);
     return;
   }

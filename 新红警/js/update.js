@@ -37,9 +37,16 @@ function update(dt){
   }
   // 采矿车自动找矿/倒矿 + 单位战斗(只更新逻辑/期望速度,不直接改坐标)
   for(const u of units){ updateUnit(u, dt); }
+  // 上船处理(等遍历结束再移除,避免改数组跳过元素)
+  for(const u of units.slice()){ if(u._boarded) doBoard(u); }
+  buildGrid();   // 上船会移除单位,重建空间网格避免下标错乱
   // 局部防挤压:计算每个单位的分离速度(不直接改坐标,由 applyMovement 统一积分)
   separateAll();
   for(const u of units){ applyMovement(u, dt); }
+  updateTrackMarks(dt);
+  for(const u of units) crushTreesUnder(u);   // 重型单位碾倒所经树木
+  resolveRigid();
+  for(const u of units) resolveStuckAfterRigid(u, dt);   // 单位互锁脱困(位移检测)
   // 建筑生产/建造/炮塔/维修
   for(const b of buildings){ updateBuilding(b, dt, teamPower); }
   // 弹体
@@ -58,10 +65,13 @@ function update(dt){
     }
   }
   effects=effects.filter(e=>e.life>0);
+  if(effects.length>350) effects.splice(0, effects.length-350);   // 防粒子/残影无限堆积
+  // 履带压痕:随时间淡出,并限制数量(丢弃最旧的)
+  for(const m of trackMarks) m.life-=dt;
+  if(trackMarks.length>600) trackMarks.splice(0, trackMarks.length-600);
+  trackMarks=trackMarks.filter(m=>m.life>0);
   for(const t of texts){ t.y-=22*dt; t.life-=dt; }
   texts=texts.filter(t=>t.life>0);
-  // 矿石恢复
-  for(const o of oreFields){ if(o.amount<o.max){ o.amount=Math.min(o.max, o.amount+dt*4); } }
   // 清理死亡单位
   units=units.filter(u=>u.hp>0);
   // 胜负判定(摧毁所有建筑获胜/战败;gameTeams 仅在开局后非空,避免主菜单误判)
@@ -108,13 +118,21 @@ function applyDamage(ent, dmg, attacker, proj){
   }
   textPopup(ent.x, ent.y-rnd(10,18), negated ? '反应装甲 免疫!' : '-'+final, negated ? '#8aff8a' : '#ffd0d0');
   if(ent instanceof Building){ ent.lastAttackT = time; }
-  // 反击:被攻击的作战单位第一时间锁定攻击者
+  // 受击反应(灵活、不牵制):空闲单位立刻锁定攻击者迎战;而已有
+  // 移动/撤退/采集等指令的单位不被强制拉入战斗——它会一边按原指令走,
+  // 一边对射程内的敌人顺路开火(见 updateUnit 的 move 分支移动射击),撤退时照样能走掉。
+  // 例外:AI 的"边走边打"(move+x2) 仍会被拉入战斗,保持电脑进攻强度。
   if(ent instanceof Unit && ent.def.range>0 && attacker && isEnemy(ent.team, attacker.team) && attacker.hp>0){
-    if(ent.order.kind!=='attack' || !ent.target){
-      ent.prevOrder = ent.order;
-      ent.order = {kind:'attack'};
-      ent.target = attacker;
-      ent.path = null;
+    const k = ent.order ? ent.order.kind : 'none';
+    const isAttackMove = k==='move' && ent.order.x2;
+    const commanded = (k==='move' && !isAttackMove) || k==='retreat' || k==='load' || k==='mine' || k==='return';
+    if(!commanded){
+      if(k!=='attack' || !ent.target){
+        ent.prevOrder = ent.order;
+        ent.order = {kind:'attack'};
+        ent.target = attacker;
+        ent.path = null;
+      }
     }
   }
   if(ent.hp<=0){
@@ -260,32 +278,50 @@ function updateBuilding(b, dt, teamPower){
 function updateUnit(u, dt){
   u.fireT-=dt;
   u.wantVx=0; u.wantVy=0;   // 每帧重置期望速度,由下方指令逻辑重新计算
-  // 反应装甲:T90 护盾每秒恢复
-  if(u.type==='t90' && u.shield>0 && u.shield<REACTIVE_SHIELD && hasResearch(u.team,'reactiveArmor')){
+  // 反应装甲:T90 护盾每秒恢复 15(被打破后也能从 0 重新生成)
+  if(u.type==='t90' && u.shield<REACTIVE_SHIELD && hasResearch(u.team,'reactiveArmor')){
     u.shield = Math.min(REACTIVE_SHIELD, u.shield + REACTIVE_REGEN*dt);
   }
   if(u.type==='harvester'){
     updateHarvester(u,dt);
+  } else if(u.order.kind==='load'){
+    // 登艇:走向运输艇,到达后等待上船
+    const t=u.order.transport;
+    if(!t || t.hp<=0 || !units.includes(t)){
+      u.order={kind:'none'};
+    } else {
+      const d=dist(u,t);
+      if(usedCapacity(t) >= t.capacity){
+        u.wantVx=0; u.wantVy=0;
+      } else if(d<=t.r+u.r+10){
+        u._boarded=true; u.boardTo=t;
+        u.order={kind:'none'}; u.path=null;
+      } else {
+        u.turnTarget=Math.atan2(t.y-u.y,t.x-u.x);
+        followPathTo(u,t.x,t.y,dt);
+      }
+    }
   } else if(u.order.kind==='move'){
     followPath(u,dt);
     // 移动射击:行进途中朝射程内敌人开火,不打断移动
     if(u.def.range>0){
       const en=findEnemyNear(u, u.def.range);
       if(en){
-        u.facing=Math.atan2(en.y-u.y,en.x-u.x);
+        u.turnTarget=Math.atan2(en.y-u.y,en.x-u.x);
         if(u.fireT<=0){ u.fireT=u.def.rof; fireAt(u,en); }
       }
     }
+    // 运输艇:不再自动卸载,由玩家手动释放(manualUnload 按钮)
   } else if(u.order.kind==='attack'){
     if(u.target && u.target.hp>0 && (dist(u,u.target) > u.def.range)){
       followPathToEntity(u, u.target, dt);
       if(Math.random()<dt*0.5){ // 偶尔重寻路
-        const p=findPath(u.x,u.y,u.target.x,u.target.y); if(p){ u.path=p; u.pathIdx=0; }
+        const p=pathFor(u,u.x,u.y,u.target.x,u.target.y); if(p){ u.path=p; u.pathIdx=0; }
       }
     }
     if(u.target && u.target.hp>0 && dist(u,u.target)<=u.def.range){
       u.path=null;
-      u.facing=Math.atan2(u.target.y-u.y,u.target.x-u.x);
+      u.turnTarget=Math.atan2(u.target.y-u.y,u.target.x-u.x);
       if(u.fireT<=0){
         u.fireT=u.def.rof;
         fireAt(u,u.target);
@@ -299,14 +335,60 @@ function updateUnit(u, dt){
     }
   } else if(u.order.kind==='none'){
     if(u.def.range>0){
-      const en=findEnemyNear(u, u.def.range*1.2);
-      if(en && Math.random()<dt*1.0){ u.target=en; u.order={kind:'attack'}; }
+      // 察觉附近有敌人 -> 主动迎战(感知半径略大于射程,空闲单位不再发愣/发呆)
+      const en=findEnemyNear(u, u.def.range*1.5);
+      if(en && Math.random()<dt*1.5){ u.target=en; u.order={kind:'attack'}; }
+    }
+  }
+}
+/* ============ 单位互锁脱困(位移检测) ============ */
+// 有移动意图但 0.4s 内实际位移极小——比如两辆坦克顶在一起,速度被分离/刚性修正
+// 抵消(velocity 很高但位置原地发抖),此时 velocity 检测的 stuckT 不会触发。
+// 做法:侧向/后方滑出找不重叠空位,绕开挡路同伴。不做旋转(非静态障碍卡死)。
+function resolveStuckAfterRigid(u, dt){
+  if(u.hp<=0) return;
+  const wantSpeed = Math.hypot(u.wantVx, u.wantVy);
+  const hasIntent = u.order && (u.order.kind==='move'||u.order.kind==='attack') && wantSpeed>12;
+  if(!hasIntent){ u._srT=0; u._srRef=null; return; }
+  if(!u._srRef){
+    const wp = (u.path && u.path[u.pathIdx]) || null;
+    u._srRef = {x:u.x, y:u.y, wpD: wp ? Math.hypot(wp.x-u.x, wp.y-u.y) : 1e9};
+  }
+  u._srT = (u._srT||0) + dt;
+  if(u._srT < 0.4) return;
+  const d = Math.hypot(u.x-u._srRef.x, u.y-u._srRef.y);
+  const ok = d >= wantSpeed*0.4*0.4;   // 0.4s 内位移 <40% 期望 → 卡死
+  // 环绕航点卡死:离当前航点很近但距离一直没缩小(两车争同一个中间航点,互相顶住绕圈)
+  const wp = (u.path && u.path[u.pathIdx]) || null;
+  let wpStuck = false;
+  if(wp && u._srRef.wpD < 110){
+    const dNow = Math.hypot(wp.x-u.x, wp.y-u.y);
+    if(dNow < 110 && dNow > u._srRef.wpD - 5) wpStuck = true;   // 0.4s 内没有在靠近航点
+  }
+  u._srT = 0; u._srRef = null;
+  if(wpStuck){
+    // 跳过当前被同伴占据的航点,向下一航点进发
+    u.pathIdx++;
+    if(u.path && u.pathIdx>=u.path.length){ finishMove(u); }
+    return;
+  }
+  if(ok) return;
+  // 卡死:沿垂直于前进方向(左右)或向后,逐档距离找不重叠空位
+  const fx = u.wantVx/wantSpeed, fy = u.wantVy/wantSpeed;
+  const dirs = [[-fy,fx],[fy,-fx],[-fx,-fy]];
+  for(const [dx,dy] of dirs){
+    for(const dist of [14, 26, 40]){
+      const nx = u.x + dx*dist, ny = u.y + dy*dist;
+      if(!inBounds(nx,ny) || uBodyBlocked(u,nx,ny)) continue;
+      if(hasUnitOverlapAt(u,nx,ny)) continue;
+      u.x = nx; u.y = ny;
+      return;
     }
   }
 }
 /* ============ 转向行为(Steering):分离 / 积分 ============ */
 const STEER_RATE = 8;        // 转向/加减速平滑系数(越大响应越快)
-const SEPARATE_STRENGTH = 240; // 分离力强度
+const SEPARATE_STRENGTH = 300; // 分离力强度
 function seekVelocity(u, tx, ty){
   const dx=tx-u.x, dy=ty-u.y;
   const d=Math.hypot(dx,dy);
@@ -320,58 +402,140 @@ function finishMove(u){
   u.wantVx=0; u.wantVy=0; u.vx=0; u.vy=0;
 }
 function separateAll(){
-  // 局部防挤压:对非敌对单位计算分离速度,不直接改坐标
-  // 注意:把同伴当“软障碍”,绝不加入 A* 的静态 blocked,避免反复重寻导致抖动
+  // 局部防挤压(软):按"双圆胶囊"碰撞圆两两距离检测计算排斥力,不直接改坐标
+  // 两辆坦克(或单位)靠近重叠时,按圆的重叠量产生平滑推力,互相推开:
+  // 海量坦克挤在一起时绝不穿模、不抖动、不卡墙。
   for(let i=0;i<units.length;i++){
     const u=units[i];
     u.sepVx=0; u.sepVy=0;
-    const cand=gridCollect(u.x, u.y, u.r*2+8);
+    const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 16);
+    const csU = u.circles();
     for(let c=0;c<cand.length;c++){
       const j=cand[c];
       if(j===i) continue;
       const v=units[j];
       if(v.hp<=0 || isEnemy(u.team,v.team)) continue;   // 敌人在战斗中不做分离
-      const dx=u.x-v.x, dy=u.y-v.y;
-      let d=Math.hypot(dx,dy);
-      const min=u.r+v.r;
-      if(d>=min) continue;
-      if(d<0.5){
-        const a=Math.random()*Math.PI*2;
-        u.sepVx+=Math.cos(a)*SEPARATE_STRENGTH;
-        u.sepVy+=Math.sin(a)*SEPARATE_STRENGTH;
-        continue;
+      const csV = v.circles();
+      // 双圆 × 双圆:车头/车尾圆之间两两做距离检测
+      for(let a=0;a<csU.length;a++) for(let b=0;b<csV.length;b++){
+        const A=csU[a], B=csV[b];
+        const dx=A.x-B.x, dy=A.y-B.y;
+        const d=Math.hypot(dx,dy)||0.0001;
+        const min=A.r+B.r;
+        if(d>=min) continue;
+        const over=(min-d)/min;             // 0(刚接触)~1(完全重叠)
+        const str=over*over*SEPARATE_STRENGTH;   // 二次衰减:越近推力越强
+        u.sepVx += (dx/d)*str;              // 沿两圆心连线把 u 推开
+        u.sepVy += (dy/d)*str;
       }
-      const overlap=1-d/min;                    // 0(刚接触)~1(完全重叠)
-      const str=overlap*overlap*SEPARATE_STRENGTH; // 二次衰减:越近推力越强,远处平滑
-      u.sepVx += dx/d*str;
-      u.sepVy += dy/d*str;
     }
+  }
+}
+/* ============ 刚性碰撞(双圆胶囊):重叠的位置修正 ============ */
+// 双圆胶囊 vs 双圆胶囊:两两(车头/车尾)圆检测,取穿透最深的圆对,沿其圆心连线推开
+function capsuleOverlap(u,v){
+  const csA=u.circles(), csB=v.circles();
+  let deepest=null, deepPen=0;
+  for(const A of csA) for(const B of csB){
+    const dx=B.x-A.x, dy=B.y-A.y;
+    const d=Math.hypot(dx,dy)||0.0001;
+    const min=A.r+B.r;
+    if(d<min){
+      const pen=min-d;
+      if(pen>deepPen){ deepPen=pen; deepest={x:dx/d, y:dy/d}; }
+    }
+  }
+  return deepest ? { axis:deepest, pen:deepPen } : null;
+}
+function tryMoveTo(u, x, y){
+  if(!inBounds(x,y)) return false;
+  // 胶囊两圆所在格都必须可通行(防车身斜插进障碍/水面)
+  const cs=u.circlesAt(x,y,u.facing);
+  for(const c of cs){
+    if(uCellBlocked(u, Math.floor(c.x/TILE), Math.floor(c.y/TILE))) return false;
+  }
+  return true;
+}
+// 该位置是否与任何存活单位碰撞圆重叠(用于本地脱困找空位)
+function hasUnitOverlapAt(u, x, y){
+  const cand=gridCollect(x, y, Math.max(u.hw,u.hh)*2 + 16);
+  const csA=u.circlesAt(x,y,u.facing);
+  for(let c=0;c<cand.length;c++){
+    const v=units[cand[c]];
+    if(v===u || v.hp<=0) continue;
+    const csB=v.circles();
+    for(const A of csA) for(const B of csB){
+      if(Math.hypot(A.x-B.x,A.y-B.y) < A.r+B.r) return true;
+    }
+  }
+  return false;
+}
+function resolveRigid(){
+  // 把重叠的胶囊沿最深穿透圆的圆心连线互相推开(位置修正,迭代至收敛,每轮重建网格)
+  for(let iter=0;iter<6;iter++){
+    buildGrid();
+    let moved=false;
+    for(let i=0;i<units.length;i++){
+      const u=units[i];
+      if(u.hp<=0) continue;
+      const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 16);
+      for(let k=0;k<cand.length;k++){
+        const j=cand[k];
+        if(j<=i) continue;
+        const v=units[j];
+        if(v.hp<=0) continue;
+        const ov=capsuleOverlap(u,v);
+        if(!ov) continue;
+        let px=ov.axis.x*ov.pen, py=ov.axis.y*ov.pen;
+        // 完全重合时给一点随机抖动,避免刚性死锁
+        if(px===0 && py===0){
+          const a=Math.random()*Math.PI*2;
+          px=Math.cos(a)*2; py=Math.sin(a)*2;
+        }
+        // 移动中的单位优先挤开挡路的空闲单位(空闲者多分担位移,让队列能穿行不卡死)
+        const uIdle=u.order.kind==='none', vIdle=v.order.kind==='none';
+        const wu = uIdle&&!vIdle ? 0.8 : (!uIdle&&vIdle ? 0.2 : 0.5);
+        const wv = 1-wu;
+        if(tryMoveTo(u, u.x-px*wu, u.y-py*wu)){ u.x-=px*wu; u.y-=py*wu; moved=true; }
+        if(tryMoveTo(v, v.x+px*wv, v.y+py*wv)){ v.x+=px*wv; v.y+=py*wv; moved=true; }
+      }
+    }
+    if(!moved) break;
   }
 }
 function applyMovement(u, dt){
   // 期望速度 = 寻路方向 + 分离力,再限制幅值不超过最大速度
   // 关键:分离力主要作用于“前进方向垂直分量”(侧向让路),
   // 前进方向分量只做有限减速——否则队列中前后车互相抵消会整群死锁
+  const sp = u.speedEff;
+  // 旋转脱困后的"短暂逃生":朝逃生方向直线滑出,不被寻路期望方向拉回卡死
+  if(u._escapeT>0){
+    u._escapeT -= dt;
+    u.wantVx = Math.cos(u._escapeAng)*sp;
+    u.wantVy = Math.sin(u._escapeAng)*sp;
+  }
   const wx=u.wantVx, wy=u.wantVy;
   const wm=Math.hypot(wx,wy);
   let vx, vy;
   if(wm>1){
     const ux=wx/wm, uy=wy/wm;
     const px=-uy, py=ux;                      // 前进方向法向
-    const sPerp = u.sepVx*px + u.sepVy*py;    // 分离→侧向分量(完整生效)
+    const sPerp = u.sepVx*px + u.sepVy*py;    // 分离→侧向分量
     const sPar  = u.sepVx*ux + u.sepVy*uy;    // 分离→前进分量(挡路时适度减速)
-    const parSlow = sPar<0 ? Math.max(-wm*0.45, sPar) : 0;   // 最多减速45%,绝不静止
-    vx = wx + px*sPerp + ux*parSlow;
-    vy = wy + py*sPerp + uy*parSlow;
+    // 侧向分量封顶:最多占速度的 55%,避免被同伴"推着绕圈"(两辆坦克顶在一起
+    // 原地转圈/垂直震荡的根因)。前进分量只做有限减速(最多45%),绝不静止。
+    const sPerpC = Math.max(-sp*0.55, Math.min(sp*0.55, sPerp));
+    const parSlow = sPar<0 ? Math.max(-wm*0.45, sPar) : 0;
+    vx = wx + px*sPerpC + ux*parSlow;
+    vy = wy + py*sPerpC + uy*parSlow;
   } else {
-    // 无前进目标(已到位/待命):只有严重重叠时才轻微推开,避免被过路单位吹远
+    // 无前进目标(已到位/待命):被挤压时轻微推开,让先到位的单位散开腾出空间
     const s=Math.hypot(u.sepVx,u.sepVy);
-    if(s>SEPARATE_STRENGTH*0.3){
-      const k=Math.min(1, 30/s);      // 空闲单位被推幅度封顶 30px/s
+    if(s>SEPARATE_STRENGTH*0.2){
+      const k=Math.min(1, 60/s);      // 空闲单位被推幅度封顶 60px/s
       vx=u.sepVx*k; vy=u.sepVy*k;
     } else { vx=0; vy=0; }
   }
-  const sp = u.speedEff;
   let m=Math.hypot(vx,vy);
   if(m>sp){ vx=vx/m*sp; vy=vy/m*sp; }
   // 速度平滑:向期望速度渐变(限制转向/加减速,消除单帧180°转向)
@@ -381,22 +545,158 @@ function applyMovement(u, dt){
   m=Math.hypot(u.vx,u.vy);
   if(m>sp){ u.vx=u.vx/m*sp; u.vy=u.vy/m*sp; m=sp; }
   if(m>0 && m<0.5){ u.vx=0; u.vy=0; m=0; }   // 微速清零,避免停在目标点附近漂移
-  // 积分 + 静态障碍碰撞(滑动):同伴不是静态障碍,只靠分离推开
+  // 卡住检测 + 本地脱困:有移动意图但实际速度长期过低(被同伴/地形顶住)时,
+  // 1) 先向左右/后方小步移动找不重叠的空位;2) 还不行就"旋转脱困"——
+  //    在期望朝向附近搜一个能让胶囊两圆都落在可通行格上的角度,转到该朝向滑出。
+  //    (解决长车身斜贴在水/陆边缘、建筑边缘、船坞边缘卡死的问题)
+  const wantSpeed=wm;
+  if(wantSpeed>12 && m<wantSpeed*0.25){ u.stuckT=(u.stuckT||0)+dt; }
+  else u.stuckT=0;
+  if(u.stuckT>0.5){
+    u.stuckT=0;
+    const wm2=Math.max(1,wm);
+    const fx=wx/wm2, fy=wy/wm2;
+    const dirs=[[-fy,fx],[fy,-fx],[-fx,-fy]];   // 左,右,后
+    let escaped=false;
+    for(let di=0; di<dirs.length; di++){
+      const nx=u.x+dirs[di][0]*8, ny=u.y+dirs[di][1]*8;
+      if(!inBounds(nx,ny) || uBodyBlocked(u,nx,ny)) continue;
+      if(!hasUnitOverlapAt(u,nx,ny)){
+        u.x=nx; u.y=ny;
+        u.vx=dirs[di][0]*sp*0.5; u.vy=dirs[di][1]*sp*0.5;
+        escaped=true;
+        break;
+      }
+    }
+    if(!escaped && uBodyBlocked(u, u.x, u.y)){
+      // 旋转脱困:仅当被地形/水域/建筑等"静态障碍"真正卡住时才触发
+      // (纯被同伴挤压交给分离系统,避免两辆坦克原地转圈)
+      const wantAng = Math.atan2(fy, fx);   // fx/fy = 归一化期望方向
+      const STEPS = [0, 1, -1, 2, -2, 3, -3, 6];   // ×30° 的偏移档
+      for(const s of STEPS){
+        const ang = wantAng + s*(Math.PI/6);
+        if(uBodyBlocked(u, u.x, u.y, ang)) continue;   // 该朝向下车身仍在障碍里
+        // 朝该朝向小幅滑出一段,确认能真正动起来
+        const cx = u.x + Math.cos(ang)*10, cy = u.y + Math.sin(ang)*10;
+        if(uBodyBlocked(u, cx, cy, ang)) continue;
+        if(hasUnitOverlapAt(u, cx, cy)) continue;
+        u.facing = ang;
+        u.vx = Math.cos(ang)*sp*0.5; u.vy = Math.sin(ang)*sp*0.5;
+        u.turnTarget = ang;
+        // 短暂逃生:约 0.6 秒内保持朝该方向直线滑出,清开障碍后再回归正常寻路
+        u._escapeT = 0.6; u._escapeAng = ang;
+        escaped = true;
+        break;
+      }
+    }
+  }
+  // 积分 + 静态障碍碰撞(滑动):检查胶囊两圆所在格,防止长车身斜插进障碍/水面
   const nx=u.x+u.vx*dt, ny=u.y+u.vy*dt;
-  const txn=Math.floor(nx/TILE), tyn=Math.floor(ny/TILE);
-  if(!cellBlocked(txn,tyn)){
+  if(!uBodyBlocked(u,nx,ny)){
     u.x=nx; u.y=ny;
   } else {
-    if(!cellBlocked(Math.floor(nx/TILE), Math.floor(u.y/TILE))){ u.x=nx; u.vx*=0.4; }
+    if(!uBodyBlocked(u,nx,u.y)){ u.x=nx; u.vx*=0.4; }
     else u.vx=0;
-    if(!cellBlocked(Math.floor(u.x/TILE), Math.floor(ny/TILE))){ u.y=ny; u.vy*=0.4; }
+    if(!uBodyBlocked(u,u.x,ny)){ u.y=ny; u.vy*=0.4; }
     else u.vy=0;
   }
-  u.x=clamp(u.x,u.r,W-u.r); u.y=clamp(u.y,u.r,H-u.r);
-  // 朝向:由实际速度决定(攻击瞄准时保持面朝目标)
-  const vm=Math.hypot(u.vx,u.vy);
+  u.x=clamp(u.x,u.hw,W-u.hw); u.y=clamp(u.y,u.hh,H-u.hh);
+  // 朝向:向目标方向角做 lerpAngle 平滑插值,产生真实的履带战车转向效果,而非瞬间硬转
   const aiming = u.order.kind==='attack' && u.target && u.target.hp>0 && dist(u,u.target)<=u.def.range;
-  if(!aiming && vm>2) u.facing=Math.atan2(u.vy,u.vx);
+  let tgt = u.facing;
+  if(aiming){
+    // 攻击瞄准:朝当前目标方向平滑转过去
+    tgt = (u.turnTarget !== undefined) ? u.turnTarget : Math.atan2(u.target.y-u.y, u.target.x-u.x);
+  } else {
+    const wm = Math.hypot(u.wantVx, u.wantVy);
+    if(wm > 2) tgt = Math.atan2(u.wantVy, u.wantVx);          // 有寻路意图:朝前进方向转
+    else if(u.turnTarget !== undefined) tgt = u.turnTarget;   // 无速度时回退到命令朝向
+  }
+  u.facing = lerpAngle(u.facing, tgt, TURN_RATE*dt);
+  // 归一化到 [-π,π],避免慢速连续转向时 facing 无限累积(渲染按 facing 旋转,累积=转圈圈)
+  if(u.facing > Math.PI || u.facing < -Math.PI){
+    u.facing = ((u.facing + Math.PI) % (Math.PI*2) + Math.PI*2) % (Math.PI*2) - Math.PI;
+  }
+}
+/* ============ 履带/轮子接地细节:压痕 + 扬尘 ============ */
+// 移动中的履带车辆按"走过的距离"生成压痕,并在较快时扬起尘土
+function updateTrackMarks(dt){
+  for(const u of units){
+    if(u.hp<=0) continue;
+    if(u.type!=='tank' && u.type!=='abrams' && u.type!=='t90' && u.type!=='harvester' && u.type!=='mcv') continue;
+    const sp=Math.hypot(u.vx,u.vy);
+    if(sp<18) continue;
+    u._trackD = (u._trackD||0) + sp*dt;
+    if(u._trackD > 42){ u._trackD = 0; spawnTrackMark(u); }
+    // 扬尘:速度较快时从车尾两侧喷出淡黄尘土
+    if(sp>40 && Math.random()<dt*3){
+      const fx=Math.cos(u.facing), fy=Math.sin(u.facing);
+      const nx=-fy, ny=fx;
+      const e=new Effect(u.x - fx*(u.hw||10)*0.7 + nx*rnd(-u.hh,u.hh),
+                         u.y - fy*(u.hw||10)*0.7 + ny*rnd(-u.hh,u.hh), 'dust', rnd(2.5,4.5));
+      e.life=0.6; e.maxLife=0.6; effects.push(e);
+    }
+  }
+}
+function spawnTrackMark(u){
+  const fx=Math.cos(u.facing), fy=Math.sin(u.facing);
+  const px=-fx, py=-fy;                 // 车尾方向
+  const nx=-fy, ny=fx;                  // 车体横向(右)
+  const halfW=(u.hh||8)*0.7;
+  const back=(u.hw||12)*0.55;
+  for(const s of [-1,1]){               // 左右两条履带各留一道压痕
+    trackMarks.push({
+      x: u.x + px*back + nx*halfW*s,
+      y: u.y + py*back + ny*halfW*s,
+      a: u.facing,
+      w: Math.max(3,(u.hh||8)*0.5),
+      l: 5,
+      life: 8, maxLife: 8,
+    });
+  }
+}
+/* ============ 树木可碾倒(坦克/两栖登陆艇) ============ */
+// 重型单位碾过树林:检查其碰撞圆所在格是否有站立的树,有则碾倒
+function crushTreesUnder(u){
+  if(!u || !u.crushTrees || u.hp<=0) return;
+  const cs = u.circles();
+  for(const c of cs){
+    const tx=Math.floor(c.x/TILE), ty=Math.floor(c.y/TILE);
+    if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H) continue;
+    if(terrain[tx][ty]!=='tree') continue;
+    crushTree(tx, ty, u);
+  }
+}
+// 碾倒一棵树:该格恢复草地(可通行),播放"倒下动画 + 尘土",并留一段断木残迹
+function crushTree(tx, ty, u){
+  terrain[tx][ty] = 'grass';
+  blocked[tx][ty] = false;
+  const cx = tx*TILE + TILE/2, cy = ty*TILE + TILE/2;
+  // 倒下动画:用整张树林贴图,从竖直缓缓倒向水平(0.5s)
+  const tile = imgs['tree'] || null;
+  const dir = u ? u.facing + rnd(-1.2, 1.2) : rnd(-Math.PI, Math.PI);
+  const e = new Effect(cx, cy, 'treefall', TILE/2);
+  e.img = tile; e.dir = dir; e.life = 0.5; e.maxLife = 0.5;
+  effects.push(e);
+  // 尘土:树根部扬起几团尘土
+  for(let i=0;i<6;i++){
+    const d = new Effect(cx + rnd(-9,9), cy + rnd(-2,6), 'dust', rnd(3,6.5));
+    d.life = 0.75; d.maxLife = 0.75; effects.push(d);
+  }
+  // 断木残迹:约 18 秒后淡出
+  const log = new Effect(cx, cy, 'treelog', TILE/2);
+  log.dir = dir; log.life = 18; log.maxLife = 18;
+  effects.push(log);
+}
+// 该位置是否撞到静态障碍/水域(胶囊两圆所在格任一被挡即算撞)。facing 可选:用于"旋转脱困"检查
+function uBodyBlocked(u, x, y, facing){
+  if(!inBounds(x,y)) return true;
+  const cs=u.circlesAt(x,y, facing!==undefined ? facing : u.facing);
+  for(const c of cs){
+    const tcx=Math.floor(c.x/TILE), tcy=Math.floor(c.y/TILE);
+    if(uCellBlocked(u,tcx,tcy)) return true;
+  }
+  return false;
 }
 function findEnemyNear(u, range){
   let best=null,bd=range;
@@ -413,7 +713,7 @@ function findEnemyNear(u, range){
 }
 function fireAt(u,target){
   const bolt = u.type==='magnet';
-  const speed = bolt ? 1400 : (u.type==='tank'?380: (u.type==='infantry'?430:420));
+  const speed = bolt ? 1400 : (u.type==='tank'||u.type==='destroyer'?400 : (u.type==='infantry'?430: (u.type==='transport'?520:420)));
   const px=u.x+Math.cos(u.facing)*(u.r+4), py=u.y+Math.sin(u.facing)*(u.r+4);
   projectiles.push(new Projectile(px,py,target.x,target.y,target,u.def.damage,u.team,speed,u,u.def.proj));
   if(bolt){
@@ -426,12 +726,12 @@ function fireAt(u,target){
 function followPathToEntity(u, target, dt){
   if(!u.path || u.pathIdx>=u.path.length){
     u.repathT-=dt;
-    if(u.repathT<=0 || !u.path){ u.repathT=0.7; const p=findPath(u.x,u.y,target.x,target.y); if(p){u.path=p;u.pathIdx=0;} }
+    if(u.repathT<=0 || !u.path){ u.repathT=0.7; const p=pathFor(u,u.x,u.y,target.x,target.y); if(p){u.path=p;u.pathIdx=0;} }
   }
   followPath(u,dt);
   // 路径走完但目标仍超射程 -> 立即重寻,避免停在半路干瞪眼
   if((!u.path || u.pathIdx>=u.path.length) && u.target && u.target.hp>0 && dist(u,u.target)>u.def.range){
-    const p=findPath(u.x,u.y,u.target.x,u.target.y); if(p){ u.path=p; u.pathIdx=0; }
+    const p=pathFor(u,u.x,u.y,u.target.x,u.target.y); if(p){ u.path=p; u.pathIdx=0; }
   }
 }
 function followPath(u,dt){
@@ -439,10 +739,10 @@ function followPath(u,dt){
     const wp=u.path[u.pathIdx];
     // 前方航点被静态障碍(如新建筑)堵住:移动指令重寻路,其余指令跳过该航点
     // 注意:同伴单位绝不进 blocked,不会被当作静态障碍,避免反复重寻抖动
-    if(cellBlocked(Math.floor(wp.x/TILE),Math.floor(wp.y/TILE))){
+    if(uCellBlocked(u,Math.floor(wp.x/TILE),Math.floor(wp.y/TILE))){
       if(u.order.kind==='move' && u.order.x!==undefined){
         u.repathT-=dt;
-        if(u.repathT<=0){ u.repathT=0.5; const p=findPath(u.x,u.y,u.order.x,u.order.y); if(p){u.path=p;u.pathIdx=0;} }
+        if(u.repathT<=0){ u.repathT=0.5; const p=pathFor(u,u.x,u.y,u.order.x,u.order.y); if(p){u.path=p;u.pathIdx=0;} }
       } else {
         u.pathIdx++;
       }
@@ -450,7 +750,9 @@ function followPath(u,dt){
       return;
     }
     const d=dist(u,wp);
-    if(d<=u.speedEff*dt){
+    // 到航点判定带容差(arriveDist):两辆车共用一个中间航点时不必精确踩到格中心,
+    // 到附近就切下一航点,避免在同一个点上互相顶住原地转圈
+    if(d<=Math.max(arriveDist(u), u.speedEff*dt)){
       u.pathIdx++;
       if(u.pathIdx>=u.path.length){
         if(u.order.kind==='move') finishMove(u);   // 到达(含最后一个可达航点)
@@ -494,9 +796,10 @@ function updateHarvester(u, dt){
       else {
         u.path=null;
         u.mineT-=dt;
-        if(u.mineT<=0){ u.mineT=0.35;
+        if(u.mineT<=0){ u.mineT=0.35/HARVEST_SPEED;   // 采矿速度倍率
           const take=Math.min(12, u.oreTarget.amount, u.def.capacity-u.cargo);
           u.oreTarget.amount-=take; u.cargo+=take;
+          if(u.oreTarget.amount<=0) depleteMine(u.oreTarget);
           if(u.cargo>=u.def.capacity || u.oreTarget.amount<=0){
             findRefinery(u); u.mode='return'; u.order={kind:'return'};
           }
@@ -509,14 +812,25 @@ function updateHarvester(u, dt){
     if(!u.refinery || !u.refinery.alive){ findRefinery(u); }
     const target = u.refinery || buildings.find(b=>b.team===u.team&&b.defName==='command'&&b.alive);
     if(target){
-      // 开到建筑旁的卸矿口(空地格子)再倒矿,不再试图进入建筑中心
-      const port = dumpPort(target);
-      if(port){
-        const d=dist(u,port);
-        if(d>u.r+14){ followPathTo(u,port.x,port.y,dt); }
+      // 倒矿:优先把车头贴到建筑"下方那条面",接触下方即可直接倒矿;
+      // 下方出口被堵时,退回任意可停靠的卸矿口(dumpPort)。
+      const faceY=(target.ty+target.h)*TILE;        // 建筑下方边线(像素)
+      const stopX=target.x, stopY=faceY+u.hh;       // 车头顶住下方面的停车位中心
+      const scx=Math.floor(stopX/TILE), scy=Math.floor(stopY/TILE);
+      const bottomFree = scx>=0&&scy>=0&&scx<MAP_W&&scy<MAP_H && !blocked[scx][scy] && !structBlocked[scx][scy];
+      if(bottomFree){
+        const d=Math.hypot(u.x-stopX, u.y-stopY);
+        if(d>u.r+6) followPathTo(u,stopX,stopY,dt);
         else dumpOre(u, target);
       } else {
-        dumpOre(u, target);
+        const port = dumpPort(target);
+        if(port){
+          const d=dist(u,port);
+          if(d>u.r+14){ followPathTo(u,port.x,port.y,dt); }
+          else dumpOre(u, target);
+        } else {
+          dumpOre(u, target);
+        }
       }
     }
   }
@@ -526,8 +840,7 @@ function updateHarvester(u, dt){
     if(u.cargo<=0 && Math.random()<dt*0.5) findOreTarget(u);
   }
 }
-function dumpPort(b){
-  // 卸矿口:取建筑旁的空地格子,南侧优先(正对精炼厂卸矿台/建造厂车库门)
+function dumpPort(b){  // 卸矿口:取建筑旁的空地格子,南侧优先(正对精炼厂卸矿台/建造厂车库门)
   const list=[];
   for(let dx=0;dx<b.w;dx++) list.push([b.tx+dx, b.ty+b.h]);  // 南
   for(let dx=0;dx<b.w;dx++) list.push([b.tx+dx, b.ty-1]);    // 北
@@ -542,11 +855,15 @@ function dumpPort(b){
 }
 function dumpOre(u, target){
   const gain=u.cargo; u.cargo=0;
-  // 矿石精炼科技:每车矿收益翻倍
+  // 矿石精炼科技:矿车箱子里的矿收入翻倍
   credits[u.team]+= gain * (hasResearch(u.team,'oreRefine')?2:1);
   textPopup(target.x,target.y-10,'+$'+gain*(hasResearch(u.team,'oreRefine')?2:1),'#ffe27a');
   effects.push(new Effect(u.x,u.y,'ring',16));
   findOreTarget(u); u.mode='mine'; u.order={kind:'mine'};
+}
+function depleteMine(o){
+  // 该格金矿采空:移除"禁建"标记,格子恢复为普通地面(单位本就能通行)
+  if(o && o.tx!==undefined && oreGrid && oreGrid[o.tx]) oreGrid[o.tx][o.ty]=false;
 }
 function findOreTarget(u){
   // 优先选未被其它矿车开采的矿脉,避免多辆矿车挤在一起堵路
@@ -571,7 +888,7 @@ function findRefinery(u){
 function followPathTo(u,tx,ty,dt){
   if(!u.path || u.pathIdx>=u.path.length){
     u.repathT-=dt;
-    if(u.repathT<=0 || !u.path){ u.repathT=0.6; const p=findPath(u.x,u.y,tx,ty); u.path=p; u.pathIdx=0; }
+    if(u.repathT<=0 || !u.path){ u.repathT=0.6; const p=pathFor(u,u.x,u.y,tx,ty); u.path=p; u.pathIdx=0; }
   }
   if(u.path && u.pathIdx<u.path.length){
     followPath(u,dt);
@@ -584,4 +901,62 @@ function followPathTo(u,tx,ty,dt){
       u.wantVx=w.x; u.wantVy=w.y;
     } else { u.wantVx=0; u.wantVy=0; }
   }
+}
+/* ============ 运输艇:上船 / 卸载 ============ */
+function doBoard(u){
+  const t=u.boardTo;
+  u._boarded=false; u.boardTo=null;
+  if(!t || t.hp<=0 || !units.includes(t)){ u.order={kind:'none'}; return; }
+  if(transportCost(u) > (t.capacity - usedCapacity(t))){ u.order={kind:'none'}; return; }  // 已满,停在原地
+  // 从场上移除,进入运输艇舱内(保留对象引用以便卸载时恢复属性)
+  t.cargoUnits.push(u);
+  units = units.filter(s=>s!==u);
+  if(selected.includes(u)) selected=selected.filter(s=>s!==u);
+  textPopup(t.x,t.y-18, u.def.name+' 已上船','#8aff8a');
+  updatePanel();
+}
+function nearestLand(x,y){
+  const cxc=Math.floor(x/TILE), cyc=Math.floor(y/TILE);
+  for(let r=0;r<10;r++){
+    for(let dx=-r;dx<=r;dx++) for(let dy=-r;dy<=r;dy++){
+      const nx=cxc+dx, ny=cyc+dy;
+      if(nx>=0&&ny>=0&&nx<MAP_W&&ny<MAP_H && !cellBlocked(nx,ny)){
+        return { x:nx*TILE+TILE/2, y:ny*TILE+TILE/2 };
+      }
+    }
+  }
+  return null;
+}
+function unloadTransport(t, at){
+  if(!t.cargoUnits || !t.cargoUnits.length) return 0;
+  const atPt = at || t.unloadAt || {x:t.x, y:t.y};
+  const pts=formationTargets(atPt.x, atPt.y, t.cargoUnits);
+  const out=[];
+  for(let i=0;i<t.cargoUnits.length;i++){
+    const c=t.cargoUnits[i];
+    const pt=(pts && pts[Math.min(i,pts.length-1)]) || {x:t.x,y:t.y};
+    const np=nearestLand(pt.x, pt.y);
+    if(np){
+      const u=new Unit(c.type, t.team, np.x, np.y);
+      u.hp=Math.min(u.maxHp, c.hp);
+      if(u.type==='harvester'){
+        u.cargo = c.cargo||0;
+        if(c.mode==='return' && c.refinery){ u.mode='return'; u.refinery=c.refinery; u.order={kind:'return'}; u.path=null; }
+        else { u.mode='mine'; u.oreTarget=c.oreTarget||null; u.order={kind:'mine'}; u.path=null; }
+      }
+      if(c.shield>0) u.shield=c.shield;
+      out.push(u);
+      effects.push(new Effect(u.x,u.y,'ring',18));
+    }
+  }
+  t.cargoUnits=[];
+  if(out.length) units.push(...out);
+  textPopup(t.x,t.y-18,'已卸载 '+out.length+' 个单位','#8aff8a');
+  updatePanel();
+  return out.length;
+}
+// 手动卸载:玩家点按钮,在运输艇当前位置释放部队
+function manualUnload(t){
+  if(!t || t.type!=='transport' || !t.cargoUnits || !t.cargoUnits.length) return;
+  unloadTransport(t, {x:t.x, y:t.y});
 }

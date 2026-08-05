@@ -1,13 +1,14 @@
 "use strict";
 /* ============ render.js: 渲染 ============ */
 function render(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.clearRect(0,0,viewW(),viewH());
   ctx.save();
   const shx=(Math.random()-0.5)*shake, shy=(Math.random()-0.5)*shake;
   ctx.translate(-cam.x+shx,-cam.y+shy);
   drawTerrain();
   drawCloudShadows();
   drawOre();
+  drawTrackMarks();
   for(const b of buildings) drawBuilding(b);
   for(const u of units) drawUnit(u);
   drawProjectiles();
@@ -22,52 +23,64 @@ function render(){
 }
 function tileVariation(x,y){ return ((x*374761393 + y*668265263) >>> 0) % 1000; }
 function drawTerrain(){
-  const x0=Math.max(0,Math.floor(cam.x/TILE)-1), x1=Math.min(MAP_W,Math.ceil((cam.x+canvas.width)/TILE)+1);
-  const y0=Math.max(0,Math.floor(cam.y/TILE)-1), y1=Math.min(MAP_H,Math.ceil((cam.y+canvas.height)/TILE)+1);
+  const x0=Math.max(0,Math.floor(cam.x/TILE)-1), x1=Math.min(MAP_W,Math.ceil((cam.x+viewW())/TILE)+1);
+  const y0=Math.max(0,Math.floor(cam.y/TILE)-1), y1=Math.min(MAP_H,Math.ceil((cam.y+viewH())/TILE)+1);
   for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++){
     const px=x*TILE, py=y*TILE;
     const v=tileVariation(x,y);
     const t=terrain[x][y];
     if(t==='water'){
-      ctx.fillStyle='#2a5a8a'; ctx.fillRect(px,py,TILE,TILE);
-      ctx.fillStyle='#2f6396'; ctx.fillRect(px,py,TILE,TILE*0.5);
-      const wv=Math.sin(time*1.8+x*0.7+y*0.5)*0.5+0.5;
-      ctx.fillStyle='rgba(180,220,255,'+(0.10+0.14*wv)+')';
-      ctx.fillRect(px+4, py+7, TILE-8, 2.5);
-      ctx.fillStyle='rgba(180,220,255,'+(0.05+0.10*wv)+')';
-      ctx.fillRect(px+6, py+19, TILE-12, 2);
-      ctx.fillStyle='rgba(255,255,255,.06)';
-      ctx.fillRect(px,py+26,TILE,3);
+      // 水域:照片水块随机平铺(每格固定一块);加载失败回退纯色水面
+      const wtile=waterTiles[(x*11+y*7+v)%WATER_TILE_COUNT];
+      if(wtile){
+        ctx.drawImage(wtile, px, py, TILE, TILE);
+      } else {
+        ctx.fillStyle='#2a5a8a'; ctx.fillRect(px,py,TILE,TILE);
+        ctx.fillStyle='#2f6396'; ctx.fillRect(px,py,TILE,TILE*0.5);
+      }
     } else if(t==='tree'){
-      ctx.fillStyle=((x+y)%2===0)?'#4a9a5a':'#3f8a4e'; ctx.fillRect(px,py,TILE,TILE);
-      const cx=px+16, cy=py+16;
-      ctx.fillStyle='#4a3018'; ctx.fillRect(cx-2,cy+2,5,9);
-      ctx.fillStyle='#2f7a3a'; ctx.beginPath(); ctx.arc(cx,cy-2,9,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#3f8f4e'; ctx.beginPath(); ctx.arc(cx-4,cy-6,6.5,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#347f42'; ctx.beginPath(); ctx.arc(cx+4,cy-5,6,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='rgba(255,255,255,.12)'; ctx.beginPath(); ctx.arc(cx-3,cy-8,3,0,Math.PI*2); ctx.fill();
+      // 树林:整张树林贴图(压缩后,未切块)按比例放进格子;加载失败回退程序化树木
+      const tile=imgs['tree'];
+      if(tile){
+        const s=Math.min(TILE/tile.width, TILE/tile.height);
+        const dw=tile.width*s, dh=tile.height*s;
+        ctx.drawImage(tile, px+(TILE-dw)/2, py+(TILE-dh)/2, dw, dh);
+      } else {
+        ctx.fillStyle=((x+y)%2===0)?'#4a9a5a':'#3f8a4e'; ctx.fillRect(px,py,TILE,TILE);
+        const cx=px+16, cy=py+16;
+        ctx.fillStyle='#4a3018'; ctx.fillRect(cx-2,cy+2,5,9);
+        ctx.fillStyle='#2f7a3a'; ctx.beginPath(); ctx.arc(cx,cy-2,9,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#3f8f4e'; ctx.beginPath(); ctx.arc(cx-4,cy-6,6.5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#347f42'; ctx.beginPath(); ctx.arc(cx+4,cy-5,6,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.12)'; ctx.beginPath(); ctx.arc(cx-3,cy-8,3,0,Math.PI*2); ctx.fill();
+      }
     } else {
-      // 草地
-      const base=(x+y)%2===0?'#4a9a5a':'#3f8a4e';
-      ctx.fillStyle=base; ctx.fillRect(px,py,TILE,TILE);
-      if(v%5===0){ ctx.fillStyle='rgba(0,0,0,.05)'; ctx.fillRect(px,py,TILE,TILE); }
-      else if(v%7===0){ ctx.fillStyle='rgba(255,255,255,.05)'; ctx.fillRect(px,py,TILE,TILE); }
-      // 装饰
-      const d=v%100;
-      if(d<14){ // 草丛
-        ctx.strokeStyle='#2f7a3a'; ctx.lineWidth=1.2;
-        const gx=px+(v%28)+3, gy=py+10+((v>>2)%14);
-        ctx.beginPath(); ctx.moveTo(gx,gy); ctx.lineTo(gx-3,gy-6);
-        ctx.moveTo(gx,gy); ctx.lineTo(gx+1,gy-7);
-        ctx.moveTo(gx,gy); ctx.lineTo(gx+4,gy-5);
-        ctx.stroke();
-      } else if(d<18){ // 小花
-        const fx=px+(v%28)+6, fy=py+14+((v>>3)%12);
-        ctx.fillStyle='#e8e8e8'; ctx.beginPath(); ctx.arc(fx,fy,1.8,0,Math.PI*2); ctx.fill();
-        ctx.fillStyle='#ffe27a'; ctx.beginPath(); ctx.arc(fx,fy,0.9,0,Math.PI*2); ctx.fill();
-      } else if(d>=97){ // 石头
-        ctx.fillStyle='#6a7468'; ctx.beginPath(); ctx.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); ctx.fill();
-        ctx.fillStyle='#7d8778'; ctx.beginPath(); ctx.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); ctx.fill();
+      // 草地:照片草块随机平铺(每格固定一块,不闪烁);加载失败回退程序化草地
+      const tile=terrainTiles[(x*7+y*13+v)%TERRAIN_TILE_COUNT];
+      if(tile){
+        ctx.drawImage(tile, px, py, TILE, TILE);
+      } else {
+        const base=(x+y)%2===0?'#4a9a5a':'#3f8a4e';
+        ctx.fillStyle=base; ctx.fillRect(px,py,TILE,TILE);
+        if(v%5===0){ ctx.fillStyle='rgba(0,0,0,.05)'; ctx.fillRect(px,py,TILE,TILE); }
+        else if(v%7===0){ ctx.fillStyle='rgba(255,255,255,.05)'; ctx.fillRect(px,py,TILE,TILE); }
+        // 装饰
+        const d=v%100;
+        if(d<14){ // 草丛
+          ctx.strokeStyle='#2f7a3a'; ctx.lineWidth=1.2;
+          const gx=px+(v%28)+3, gy=py+10+((v>>2)%14);
+          ctx.beginPath(); ctx.moveTo(gx,gy); ctx.lineTo(gx-3,gy-6);
+          ctx.moveTo(gx,gy); ctx.lineTo(gx+1,gy-7);
+          ctx.moveTo(gx,gy); ctx.lineTo(gx+4,gy-5);
+          ctx.stroke();
+        } else if(d<18){ // 小花
+          const fx=px+(v%28)+6, fy=py+14+((v>>3)%12);
+          ctx.fillStyle='#e8e8e8'; ctx.beginPath(); ctx.arc(fx,fy,1.8,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#ffe27a'; ctx.beginPath(); ctx.arc(fx,fy,0.9,0,Math.PI*2); ctx.fill();
+        } else if(d>=97){ // 石头
+          ctx.fillStyle='#6a7468'; ctx.beginPath(); ctx.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#7d8778'; ctx.beginPath(); ctx.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); ctx.fill();
+        }
       }
     }
   }
@@ -100,43 +113,146 @@ function drawCloudShadows(){
   ctx.restore();
 }
 function drawOre(){
+  const img = imgs['goldmine'];
   for(const o of oreFields){
-    if(o.amount<=0) continue;
-    const pct=o.amount/o.max;
-    const r=o.r*Math.max(0.45, pct);
-    const cx=o.x, cy=o.y;
-    // 柔光
-    const grd=ctx.createRadialGradient(cx,cy,2,cx,cy,r*1.7);
-    grd.addColorStop(0,'rgba(255,226,120,.32)');
-    grd.addColorStop(1,'rgba(255,226,120,0)');
-    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(cx,cy,r*1.7,0,Math.PI*2); ctx.fill();
-    // 金矿堆(小晶体)
-    for(let i=0;i<10;i++){
-      const a=i/10*Math.PI*2;
-      const dx=cx+Math.cos(a)*r*0.5, dy=cy+Math.sin(a)*r*0.5;
-      const s=r*0.17;
-      ctx.fillStyle=(i%2===0)?'#e8c84a':'#d3ad38';
-      ctx.beginPath(); ctx.moveTo(dx,dy-s); ctx.lineTo(dx+s*0.72,dy+s*0.6); ctx.lineTo(dx-s*0.72,dy+s*0.6); ctx.closePath(); ctx.fill();
+    if(o.amount<=0) continue;   // 采完即消失
+    const tx=o.tx, ty=o.ty, px=tx*TILE, py=ty*TILE;
+    if(img){
+      // 金矿照片贴图(已去白底)按比例放进单格,不拉伸
+      const s=Math.min(TILE/img.width, TILE/img.height);
+      const dw=img.width*s, dh=img.height*s;
+      ctx.drawImage(img, px+(TILE-dw)/2, py+(TILE-dh)/2, dw, dh);
+    } else {
+      // 回退:程序化金色晶体
+      const pct=o.amount/o.max;
+      const r=TILE*0.55*Math.max(0.45, pct);
+      const cx=o.x, cy=o.y;
+      const grd=ctx.createRadialGradient(cx,cy,2,cx,cy,r*1.7);
+      grd.addColorStop(0,'rgba(255,226,120,.32)');
+      grd.addColorStop(1,'rgba(255,226,120,0)');
+      ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(cx,cy,r*1.7,0,Math.PI*2); ctx.fill();
+      for(let i=0;i<10;i++){
+        const a=i/10*Math.PI*2;
+        const dx=cx+Math.cos(a)*r*0.5, dy=cy+Math.sin(a)*r*0.5;
+        const s2=r*0.17;
+        ctx.fillStyle=(i%2===0)?'#e8c84a':'#d3ad38';
+        ctx.beginPath(); ctx.moveTo(dx,dy-s2); ctx.lineTo(dx+s2*0.72,dy+s2*0.6); ctx.lineTo(dx-s2*0.72,dy+s2*0.6); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle='#f4e070';
+      ctx.beginPath(); ctx.moveTo(cx,cy-r*0.85); ctx.lineTo(cx+r*0.5,cy+1); ctx.lineTo(cx-r*0.5,cy+1); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.35)';
+      ctx.beginPath(); ctx.moveTo(cx,cy-r*0.85); ctx.lineTo(cx+r*0.15,cy-r*0.1); ctx.lineTo(cx-r*0.1,cy-r*0.2); ctx.closePath(); ctx.fill();
     }
-    // 中央大矿晶
-    ctx.fillStyle='#f4e070';
-    ctx.beginPath(); ctx.moveTo(cx,cy-r*0.85); ctx.lineTo(cx+r*0.5,cy+1); ctx.lineTo(cx-r*0.5,cy+1); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='rgba(255,255,255,.35)';
-    ctx.beginPath(); ctx.moveTo(cx,cy-r*0.85); ctx.lineTo(cx+r*0.15,cy-r*0.1); ctx.lineTo(cx-r*0.1,cy-r*0.2); ctx.closePath(); ctx.fill();
-    // 闪烁
-    const tw=(Math.sin(time*3+o.x*0.05+o.y*0.07)*0.5+0.5);
-    ctx.fillStyle='rgba(255,255,255,'+(0.22*tw+0.06)+')';
-    ctx.beginPath(); ctx.arc(cx+Math.sin(o.x+time)*r*0.3, cy+Math.cos(o.y+time)*r*0.3, 2+tw*2, 0, Math.PI*2); ctx.fill();
   }
+}
+function roundRectPath(x, y, w, h, r){
+  r = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+/* ============ 建筑四层渲染架构 ============ */
+// 层0:地基/水泥扩展层 —— 略大于建筑的暗色泥土/碎石底座,羽化边缘,破除"直接插在草地上"
+function drawBuildingPad(x, y, w, h, cx, cy, cAlpha){
+  const pad = BUILDING_PAD_EXTRA;
+  const px = x-pad, py = y-pad, pw = w+pad*2, ph = h+pad*2;
+  ctx.save();
+  ctx.globalAlpha = BUILDING_PAD_ALPHA * (cAlpha||1);
+  // 径向渐变:中心深、边缘全透明,形成羽化的泥土底座
+  const g = ctx.createRadialGradient(cx, cy, Math.min(w,h)*0.25, cx, cy, Math.max(pw,ph)*0.62);
+  g.addColorStop(0, 'rgba(64,52,34,0.9)');
+  g.addColorStop(0.55, 'rgba(64,52,34,0.55)');
+  g.addColorStop(1, 'rgba(64,52,34,0)');
+  ctx.fillStyle = g;
+  roundRectPath(px, py, pw, ph, 7);
+  ctx.fill();
+  ctx.restore();
+}
+// 层1:方向性建筑长阴影 —— 右下偏移的平行四边形,线性渐变软边,模拟日光立体长阴影
+function drawBuildingShadow(x, y, w, h, cAlpha){
+  const o = BUILDING_SHADOW_OFFSET, sc = BUILDING_SHADOW_SCALE;
+  const sx = o.x, sy = o.y;
+  const sw = w*sc.x, sh = h*sc.y;
+  ctx.save();
+  ctx.globalAlpha = BUILDING_SHADOW_ALPHA * (cAlpha||1);
+  const g = ctx.createLinearGradient(x, y, x+sx+sw, y+sy+sh);
+  g.addColorStop(0, 'rgba(15,20,15,0.85)');
+  g.addColorStop(0.6, 'rgba(15,20,15,0.35)');
+  g.addColorStop(1, 'rgba(15,20,15,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(x + sx*0.4, y + sy*0.4);
+  ctx.lineTo(x + sx + sw, y + sy*0.4);
+  ctx.lineTo(x + sx + sw, y + sy + sh);
+  ctx.lineTo(x + sx*0.4, y + sy + sh);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+// 层2:墙根接触阴影 AO —— 建筑底部一条极窄极暗的遮挡线,把建筑"压实"在地面
+function drawWallAO(x, y, w, h, cAlpha){
+  const ao = BUILDING_AO_HEIGHT;
+  ctx.save();
+  ctx.globalAlpha = cAlpha||1;
+  const g = ctx.createLinearGradient(0, y+h-ao, 0, y+h);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,'+BUILDING_AO_ALPHA+')');
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y+h-ao, w, ao);
+  ctx.restore();
+}
+// 水上建筑(船坞):不做泥土底座,只留淡的水面投影,避免"黑影+泥地"出现在水里
+function drawWaterBuildingBase(cx, cy, w, h){
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = '#0e1c2c';
+  ctx.beginPath(); ctx.ellipse(cx, cy+h*0.55, w*0.62, h*0.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 0.08;
+  ctx.beginPath(); ctx.ellipse(cx, cy+h*0.6, w*0.85, h*0.7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
 }
 function drawBuilding(b){
   if(!b.alive) return;
   const x=b.tx*TILE, y=b.ty*TILE, w=b.w*TILE, h=b.h*TILE;
   const tc=teamCol(b.team);
   const cx=b.x, cy=b.y;
-  // 阴影
-  ctx.fillStyle='rgba(0,0,0,.32)';
-  ctx.beginPath(); ctx.ellipse(cx+4, cy+h*0.5+5, w*0.55, h*0.55, 0, 0, Math.PI*2); ctx.fill();
+  // 建造厂/战车工厂:使用照片贴图(已去纯白背景),加载失败自动回退程序化绘制
+  // 发电站:按升级等级 powerLevel(0/1/2) 选对应贴图 power_0/1/2,不替换建造栏图标 power
+  // 兵营/精炼厂:用独立的战场贴图 barracks_field/refinery_field,不碰建造栏图标
+  let img;
+  if(b.defName==='power') img = imgs['power'+(b.powerLevel||0)] || imgs['power'];
+  else if(b.defName==='barracks') img = imgs['barracks_field'];
+  else if(b.defName==='refinery') img = imgs['refinery_field'];
+  else if(b.defName==='lab') img = imgs['lab_field'];
+  else if(b.defName==='turret') img = imgs['turret_field'];
+  else if(b.defName==='dock') img = imgs['dock_field'];
+  else img = imgs[b.defName];
+  const useImg = img && (b.defName==='command'||b.defName==='factory'||b.defName==='power'||b.defName==='barracks'||b.defName==='refinery'||b.defName==='lab'||b.defName==='turret'||b.defName==='dock');
+  // 建造中:地基/阴影按进度淡出(全息投影阶段不投浓影)
+  const cAlpha = b.constructing ? 0.35 : 1;
+  // ===== 层0:地基/水泥扩展层 =====
+  if(b.def.water) drawWaterBuildingBase(cx, cy, w, h);
+  else drawBuildingPad(x, y, w, h, cx, cy, cAlpha);
+  // ===== 层1:方向性建筑长阴影(建造中不投长影) =====
+  if(!b.constructing) drawBuildingShadow(x, y, w, h, cAlpha);
+  // ===== 层2:墙根接触阴影 AO =====
+  if(!b.constructing && !b.def.water) drawWallAO(x, y, w, h, cAlpha);
+  if(useImg){
+    // 层3:建筑主体贴图(按比例放进占地,不拉伸变形;建造中半透明显示)
+    const iw=img.width, ih=img.height;
+    const s=Math.min(w/iw, h/ih);
+    const dw=iw*s, dh=ih*s;
+    ctx.save();
+    if(b.constructing) ctx.globalAlpha=0.35;
+    ctx.drawImage(img, x+(w-dw)/2, y+(h-dh)/2, dw, dh);
+    ctx.restore();
+  } else if(b.defName==='dock'){
+    drawDockBody(b, x, y, w, h, cx, cy, tc);
+  } else {
   // 水泥基座
   ctx.fillStyle='#585d63'; ctx.fillRect(x-3,y-3,w+6,h+6);
   ctx.fillStyle='#4c5156'; ctx.fillRect(x-3,y-3,w+6,5);
@@ -149,8 +265,7 @@ function drawBuilding(b){
   ctx.strokeStyle='rgba(0,0,0,.15)'; ctx.lineWidth=1;
   const seg=Math.max(2,b.w*2);
   for(let i=1;i<seg;i++){ ctx.beginPath(); ctx.moveTo(x+i*w/seg,y+3); ctx.lineTo(x+i*w/seg,y+h-3); ctx.stroke(); }
-  // 屋顶边框 + 队色
-  ctx.strokeStyle=tc; ctx.lineWidth=2.5; ctx.strokeRect(x+1.5,y+1.5,w-3,h-3);
+  // 屋顶边框(去队色)
   ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1; ctx.strokeRect(x+9,y+9,w-18,h-18);
   ctx.fillStyle='rgba(0,0,0,.16)';
   ctx.fillRect(x+6,y+6,9,9); ctx.fillRect(x+w-15,y+6,9,9);
@@ -168,8 +283,9 @@ function drawBuilding(b){
     ctx.fillRect(wx, y+h*0.36, 4, 4);
     ctx.fillRect(wx, y+h*0.64, 4, 4);
   }
+  }
 
-  if(b.defName==='command'){
+  if(b.defName==='command' && !useImg){
     // 雷达三脚架
     ctx.strokeStyle='#5a6a5a'; ctx.lineWidth=2;
     ctx.beginPath();
@@ -194,7 +310,7 @@ function drawBuilding(b){
     ctx.fillStyle='#20242a'; ctx.fillRect(cx-16, y+h-16, 32, 12);
     ctx.strokeStyle='#3a4148'; ctx.strokeRect(cx-16, y+h-16, 32, 12);
     for(let i=0;i<3;i++){ ctx.fillStyle='#2a2f35'; ctx.fillRect(cx-16, y+h-14+i*4, 32, 2); }
-  } else if(b.defName==='power'){
+  } else if(b.defName==='power' && !useImg){
     // 供电时发光
     const p=powerOf(b.team);
     if(p.give>0 && p.give>=p.use){
@@ -224,7 +340,7 @@ function drawBuilding(b){
         else { ctx.fillStyle='rgba(255,226,122,.25)'; ctx.fillRect(cx-6+i*7, y+4, 5, 5); ctx.fillStyle='#ffe27a'; }
       }
     }
-  } else if(b.defName==='barracks'){
+  } else if(b.defName==='barracks' && !useImg){
     // 双开门
     ctx.fillStyle='#20242a'; ctx.fillRect(cx-8, y+h*0.34, 16, h*0.66-4);
     ctx.strokeStyle='#3a4148'; ctx.strokeRect(cx-8, y+h*0.34, 16, h*0.66-4);
@@ -239,7 +355,7 @@ function drawBuilding(b){
     ctx.beginPath(); ctx.moveTo(x+8, y+h-4); ctx.lineTo(x+8, y+4); ctx.stroke();
     ctx.fillStyle=tc;
     ctx.beginPath(); ctx.moveTo(x+8, y+4); ctx.lineTo(x+23, y+8); ctx.lineTo(x+8, y+13); ctx.closePath(); ctx.fill();
-  } else if(b.defName==='factory'){
+  } else if(b.defName==='factory' && !useImg){
     // 屋顶排气管
     ctx.fillStyle='#6a6f6a'; ctx.fillRect(cx-5, y+2, 10, 6);
     ctx.fillStyle='#4a4f4a'; ctx.fillRect(cx-5, y+2, 10, 2);
@@ -267,7 +383,7 @@ function drawBuilding(b){
       ctx.strokeStyle='rgba(120,80,0,.6)'; ctx.lineWidth=1; ctx.stroke();
       ctx.restore();
     }
-  } else if(b.defName==='refinery'){
+  } else if(b.defName==='refinery' && !useImg){
     // 卸矿台
     ctx.fillStyle='#20242a'; ctx.fillRect(cx-10, y+h-14, 20, 9);
     ctx.fillStyle='#2a2f35'; ctx.fillRect(cx-10, y+h-14, 20, 2);
@@ -286,20 +402,22 @@ function drawBuilding(b){
     ctx.fillStyle='#333'; ctx.fillRect(cx+17, cy-1, 6, 7);
     ctx.fillStyle='#222'; ctx.fillRect(cx+17, cy-1, 6, 2);
   } else if(b.defName==='turret'){
-    // 混凝土底座
-    ctx.fillStyle='#6a7070'; ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#4c5156'; ctx.lineWidth=2; ctx.stroke();
-    ctx.fillStyle='#555b5b'; ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI*2); ctx.fill();
-    // 沙袋
-    ctx.fillStyle='#9a8a5a';
-    ctx.beginPath(); ctx.arc(cx-13, cy-4, 2.6, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx+13, cy-4, 2.6, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx-11, cy+7, 2.6, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx+11, cy+7, 2.6, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.arc(cx-13, cy-4, 2.6, 0, Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx+13, cy-4, 2.6, 0, Math.PI*2); ctx.stroke();
-    // 旋转炮塔
+    if(!useImg){
+      // 混凝土底座
+      ctx.fillStyle='#6a7070'; ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#4c5156'; ctx.lineWidth=2; ctx.stroke();
+      ctx.fillStyle='#555b5b'; ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI*2); ctx.fill();
+      // 沙袋
+      ctx.fillStyle='#9a8a5a';
+      ctx.beginPath(); ctx.arc(cx-13, cy-4, 2.6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+13, cy-4, 2.6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx-11, cy+7, 2.6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+11, cy+7, 2.6, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.arc(cx-13, cy-4, 2.6, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx+13, cy-4, 2.6, 0, Math.PI*2); ctx.stroke();
+    }
+    // 旋转机枪(贴图中心/程序化底座上都画,朝目标转动,发射原有机炮)
     const a=b.turretTarget?Math.atan2(b.turretTarget.y-cy, b.turretTarget.x-cx):(Math.sin(time*1.5)*0.6);
     ctx.save(); ctx.translate(cx,cy); ctx.rotate(a);
     ctx.fillStyle='#1c2024'; ctx.fillRect(0,-5,13,10);
@@ -415,22 +533,219 @@ function drawBuilding(b){
   ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=1;
   ctx.strokeRect(x+w-11.5, y+7.5, 9, 9);
 }
-function drawHPBar(cx, y, w, pct, isConstruct){
-  if(pct>1)pct=1; if(pct<0)pct=0;
+function drawDockBody(b, x, y, w, h, cx, cy, tc){
+  // ===== 船坞:木质浮台 + 仓库 + 龙门吊 + 干船坞斜坡 =====
+  // 浮台
+  ctx.fillStyle='#4a5246'; ctx.fillRect(x-4,y-4,w+8,h+8);
+  ctx.fillStyle='#5a6450'; ctx.fillRect(x-2,y-2,w+4,h+4);
+  // 甲板木条纹
+  ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=1;
+  for(let i=1;i<4;i++){ ctx.beginPath(); ctx.moveTo(x-2,y+i*h/4); ctx.lineTo(x+w+2,y+i*h/4); ctx.stroke(); }
+  // 系船墩
+  ctx.fillStyle='#3a4248';
+  for(const px of [x+5, x+w-6]){ ctx.beginPath(); ctx.arc(px, y+h-7, 3, 0, Math.PI*2); ctx.fill(); }
+  // 仓库(左侧厂房)
+  ctx.fillStyle='#5b6b7a'; ctx.fillRect(x+4,y+4,w*0.5,h*0.56);
+  ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.strokeRect(x+4,y+4,w*0.5,h*0.56);
+  // 仓库人字屋顶
+  ctx.fillStyle='#8a4a3a';
+  ctx.beginPath(); ctx.moveTo(x+2,y+5); ctx.lineTo(x+3+w*0.25,y-5); ctx.lineTo(x+4+w*0.5,y+5); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.3)'; ctx.stroke();
+  // 仓库大门
+  ctx.fillStyle='#20242a'; ctx.fillRect(x+9,y+h*0.3,11,9);
+  ctx.strokeStyle='#3a4148'; ctx.strokeRect(x+9,y+h*0.3,11,9);
+  // 龙门吊(右侧,面向水面)
+  const gx0=x+w*0.62;
+  ctx.fillStyle='#4a5258'; ctx.fillRect(gx0-3, cy-h*0.42, 4, h*0.42);
+  ctx.fillStyle='#4a5258'; ctx.fillRect(gx0+14, cy-h*0.42, 4, h*0.42);
+  ctx.fillStyle='#3a4248'; ctx.fillRect(gx0-3, cy-h*0.46, 21, 4);
+  // 吊臂 + 吊钩(可上下微动)
+  const hook=Math.sin(time*2)*2;
+  ctx.strokeStyle='#6a7670'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(gx0+11, cy-h*0.42); ctx.lineTo(gx0+11, cy-h*0.12+hook); ctx.stroke();
+  ctx.fillStyle='#8a4a3a'; ctx.beginPath(); ctx.arc(gx0+11, cy-h*0.08+hook, 2.6, 0, Math.PI*2); ctx.fill();
+  // 滑道/干船坞(朝水延伸)
+  ctx.fillStyle='#3a4238'; ctx.fillRect(x+w-18, y+h-11, 18, 7);
+  ctx.fillStyle='#2f3730'; ctx.fillRect(x+w-18, y+h-11, 18, 3);
+  // 停泊的舰艇剪影(水中)
+  ctx.fillStyle='#5a6268';
+  ctx.beginPath(); ctx.ellipse(cx+w*0.2, cy+h*0.62, 15, 4.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#4c545a';
+  ctx.beginPath(); ctx.ellipse(cx+w*0.24, cy+h*0.6, 9, 3.2, 0, 0, Math.PI*2); ctx.fill();
+  // 水波拍岸
+  const wa=(Math.sin(time*2.4+x*0.1)*0.5+0.5);
+  ctx.fillStyle='rgba(180,220,255,'+(0.10+0.12*wa)+')';
+  ctx.fillRect(x-4, y+h+3, w+8, 2.5);
+}
+function drawHPBar(cx, y, w, pct, isConstruct){  if(pct>1)pct=1; if(pct<0)pct=0;
   ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillRect(cx-1,y-1,w+2,7);
   ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(cx,y,w,5);
   const col=isConstruct?'#ffe27a':(pct>0.5?'#4fdc7a':(pct>0.25?'#ffcf3a':'#ff5555'));
   ctx.fillStyle=col; ctx.fillRect(cx,y,w*pct,5);
   ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(cx,y,w*pct,1.5);
 }
+/* ============ 履带/轮子压痕(接地细节) ============ */
+// 坦克/车辆移动时在身后生成的低透明度地面残影,随时间淡出,增强"与地面的互动感"
+function drawTrackMarks(){
+  for(const m of trackMarks){
+    const k=m.life/m.maxLife;
+    ctx.save();
+    ctx.translate(m.x, m.y);
+    ctx.rotate(m.a);
+    ctx.globalAlpha = 0.08 + 0.08*k;          // 很淡的深色土痕,越老越透明
+    ctx.fillStyle = '#2c3428';
+    ctx.fillRect(-m.l/2, -m.w/2, m.l, m.w);
+    ctx.restore();
+  }
+}
+// 照片单位的战场贴图:坦克/艾布拉姆/T90 用本体图,其余用 *_field
+function unitPhotoImg(u){
+  const t=u.type;
+  if(t==='tank') return (unitFactionOf(u.team)==='soviet') ? imgs['tank_soviet_field'] : imgs['tank_allies_field'];
+  if(t==='abrams' || t==='t90') return imgs[t];
+  if(t==='harvester' || t==='destroyer' || t==='transport') return imgs[t+'_field'];
+  return null;
+}
+/* ---- 预烘焙缓存:滤镜 / 阴影都在第一次用到时烘焙到离屏 Canvas,运行期零 filter 开销 ---- */
+const BAKE_MAX = 384;                 // 烘焙最大边长(屏幕上的坦克才 ~68px,足够清晰还省显存)
+const _toneCache = {};                // img.src -> 色调对齐版
+const _shadowCache = {};              // img.src -> 模糊黑色剪影
+function bakeSize(w,h){ const k=Math.min(1, BAKE_MAX/Math.max(w,h)); return [Math.max(1,Math.round(w*k)), Math.max(1,Math.round(h*k))]; }
+// 等价 PixiJS ColorMatrixFilter:按 UNIT_TONE_FILTER(饱和度/对比度/亮度/色相)烘焙一次
+function bakedTone(img){
+  if(!UNIT_TONE_FILTER) return img;
+  const key = img.src || (img.width+'x'+img.height);
+  if(_toneCache[key]) return _toneCache[key];
+  try{
+    const [tw,th]=bakeSize(img.width,img.height);
+    const c=document.createElement('canvas'); c.width=tw; c.height=th;
+    const g=c.getContext('2d');
+    g.filter = UNIT_TONE_FILTER;
+    g.drawImage(img, 0, 0, tw, th);
+    g.filter = 'none';
+    _toneCache[key] = c;
+    return c;
+  }catch(e){ _toneCache[key] = img; return img; }
+}
+// 等价 PixiJS DropShadow/BlurFilter:黑色剪影(source-in) + 高斯模糊,烘焙一次
+function bakedShadow(img){
+  const key = img.src || (img.width+'x'+img.height);
+  if(_shadowCache[key]) return _shadowCache[key];
+  try{
+    const [tw,th]=bakeSize(img.width,img.height);
+    // 1) 黑色剪影(保留贴图 alpha,颜色压黑)
+    const sil=document.createElement('canvas'); sil.width=tw; sil.height=th;
+    const g1=sil.getContext('2d');
+    g1.drawImage(img, 0, 0, tw, th);
+    g1.globalCompositeOperation='source-in';
+    g1.fillStyle='#000';
+    g1.fillRect(0, 0, tw, th);
+    g1.globalCompositeOperation='source-over';
+    // 2) 对剪影做一次高斯模糊
+    const c=document.createElement('canvas'); c.width=tw; c.height=th;
+    const g2=c.getContext('2d');
+    g2.filter = 'blur('+UNIT_SHADOW_BLUR+'px)';
+    g2.drawImage(sil, 0, 0);
+    g2.filter = 'none';
+    _shadowCache[key] = c;
+    return c;
+  }catch(e){ _shadowCache[key] = null; return null; }
+}
+// 方向性剪影阴影 + 接地接触阴影(AO)。核心:接地阴影必须与"车体足迹"同尺寸、
+// 紧贴车身正下方,坦克才不会看起来悬浮在草地上。
+function drawShadowSprite(u, img){
+  // ① 接地接触阴影(AO):与车体足迹(hw/hh)同尺寸的暗色椭圆,旋转随车头,紧贴车身正下方
+  ctx.save();
+  ctx.translate(2, 4);                       // 极小的下移,让阴影"贴地"
+  ctx.rotate(u.facing);
+  ctx.fillStyle = '#000';
+  ctx.globalAlpha = UNIT_SHADOW_AO;          // 内层:紧贴足迹
+  ctx.beginPath();
+  ctx.ellipse(0, 0, u.hw*0.98, u.hh*1.06, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = UNIT_SHADOW_AO*0.5;      // 外层:更大更淡的 AO 过渡,消除贴图硬边
+  ctx.beginPath();
+  ctx.ellipse(0, 0, u.hw*1.3, u.hh*1.38, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+  // ② 方向性剪影阴影:继承坦克纹理形状,整体偏移(光在左上方),旋转与车身同步
+  const sh = bakedShadow(img);
+  if(!sh) return;
+  const rot = SPRITE_ROT[u.type] || 0;
+  const sc  = SPRITE_SCALE[u.type] || 1;
+  const s   = (u.r*2.9*1.8*sc)/Math.max(img.width, img.height);
+  const dw  = img.width*s, dh = img.height*s;
+  ctx.save();
+  ctx.translate(UNIT_SHADOW_OFFSET.x, UNIT_SHADOW_OFFSET.y);
+  ctx.rotate(u.facing + rot);
+  ctx.globalAlpha = UNIT_SHADOW_ALPHA;
+  ctx.drawImage(sh, -dw/2, -dh/2, dw, dh);
+  ctx.restore();
+}
+// 水上单位(驱逐舰/运输艇):不做陆地阴影,只留一个很淡的椭圆投影,避免"黑影贴在水面上"
+function drawNavalShadow(u){
+  ctx.save();
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = '#0e1c2c';
+  ctx.beginPath(); ctx.ellipse(0, 4, u.r*1.25, u.r*0.55, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 0.08;
+  ctx.beginPath(); ctx.ellipse(0, 4, u.r*1.6, u.r*0.75, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+// 坦克照片贴图(已预处理:背景透明 + 内容居中),直接在战场绘制为单位的本体
+function drawUnitImg(u, img){
+  const rot=SPRITE_ROT[u.type] || 0;
+  ctx.rotate(rot);
+  const sc=SPRITE_SCALE[u.type] || 1;   // 每类照片的额外缩放(采矿车 0.7)
+  const s=(u.r*2.9*1.8*sc)/Math.max(img.width, img.height);
+  const dw=img.width*s, dh=img.height*s;
+  // 色调对齐:使用预烘焙的"颜色滤镜版"绘制(饱和度/对比度/亮度微调),无缝融入草地
+  ctx.drawImage(bakedTone(img), -dw/2, -dh/2, dw, dh);
+  // 开火炮口闪光:画在贴图"炮口/车头"那一侧(按 SPRITE_FRONT 方向)
+  if(u.fireT>u.def.rof-0.1 && u.target){
+    const f=SPRITE_FRONT[u.type] || [-1,0];
+    const fx=f[0]*(dw/2+3), fy=f[1]*(dh/2+3);
+    ctx.fillStyle='rgba(255,220,120,.9)'; ctx.beginPath(); ctx.arc(fx,fy,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(fx,fy,2,0,Math.PI*2); ctx.fill();
+  }
+  return { dw, dh };
+}
+// 采矿车照片四角(默认是轮子):画旋转辐条的俯视轮子,做出"轮子滚动"感
+function drawHarvesterWheels(u, img){
+  const sc=SPRITE_SCALE[u.type] || 1;
+  const s=(u.r*2.9*1.8*sc)/Math.max(img.width, img.height);
+  const dw=img.width*s, dh=img.height*s;
+  const wa=time*3;
+  const r=Math.max(2.5, Math.min(dw,dh)*0.13);
+  const cx=[-dw/2+dw*0.14, dw/2-dw*0.14];
+  const cy=[-dh/2+dh*0.14, dh/2-dh*0.14];
+  for(const wx of cx) for(const wy of cy){
+    ctx.fillStyle='#14161a'; ctx.beginPath(); ctx.arc(wx,wy,r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#3a3f45'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(wx,wy,r,0,Math.PI*2); ctx.stroke();
+    ctx.strokeStyle='#555'; ctx.lineWidth=1;
+    for(let k=0;k<4;k++){
+      const a=wa+k*Math.PI/2;
+      ctx.beginPath(); ctx.moveTo(wx-Math.cos(a)*(r-1),wy-Math.sin(a)*(r-1)); ctx.lineTo(wx+Math.cos(a)*(r-1),wy+Math.sin(a)*(r-1)); ctx.stroke();
+    }
+    ctx.fillStyle='#6a7076'; ctx.beginPath(); ctx.arc(wx,wy,1.2,0,Math.PI*2); ctx.fill();
+  }
+}
 function drawUnit(u){
   const d=u.def;
   const tc=teamCol(u.team);
   ctx.save();
   ctx.translate(u.x,u.y);
-  // 阴影
-  ctx.fillStyle='rgba(0,0,0,.3)';
-  ctx.beginPath(); ctx.ellipse(2,3,u.r+2,u.r+1,0,0,Math.PI*2); ctx.fill();
+  // 接地阴影:照片单位用"形状继承的方向性剪影阴影 + AO";其余(步兵/基地车)用椭圆接地阴影
+  const pImg = unitPhotoImg(u);
+  if(pImg && pImg.width){
+    if(u.naval) drawNavalShadow(u);          // 水上:只留淡投影
+    else drawShadowSprite(u, pImg);          // 陆地:接触阴影 + 方向性剪影
+  }
+  else {
+    ctx.fillStyle='rgba(0,0,0,.3)';
+    ctx.beginPath(); ctx.ellipse(2,3,u.r+2,u.r+1,0,0,Math.PI*2); ctx.fill();
+  }
   // 队色底圈
   ctx.strokeStyle='rgba('+(teamGroup(u.team)===0?'120,255,160':'255,140,120')+',.35)'; ctx.lineWidth=1.5;
   ctx.beginPath(); ctx.arc(0,0,u.r+2,0,Math.PI*2); ctx.stroke();
@@ -444,7 +759,11 @@ function drawUnit(u){
   if(u.type==='tank'||u.type==='abrams'||u.type==='t90'){
     const heavy = unitFactionOf(u.team)==='soviet';
     ctx.rotate(u.facing);
-    if(u.type==='abrams'){
+    // 灰熊(盟军)/犀牛(苏军)照片贴图按阵营选,照片车头朝上(SPRITE_ROT 对齐)
+    const tImg = u.type==='tank' ? (heavy?imgs['tank_soviet_field']:imgs['tank_allies_field']) : imgs[u.type];
+    if(tImg){
+      drawUnitImg(u, tImg);
+    } else if(u.type==='abrams'){
       // ===== M1A2 艾布拉姆斯(正俯视,车头朝 +X · 沙漠黄) =====
       const R=u.r*1.25;   // 体型放大
       const Hw=0.70*R;      // 履带外缘半宽
@@ -764,8 +1083,15 @@ function drawUnit(u){
       }
     }
   } else if(u.type==='harvester'){
-    const wheelA = time*3;
-    ctx.rotate(u.facing);
+    if(imgs['harvester_field']){
+      // 采矿车照片本体贴图(已旋转使车头朝上,SPRITE_ROT 对齐到朝向前方)
+      ctx.rotate(u.facing);
+      drawUnitImg(u, imgs['harvester_field']);
+      // 四角轮子:叠加旋转辐条的俯视轮子动画(照片四角默认是轮子)
+      drawHarvesterWheels(u, imgs['harvester_field']);
+    } else {
+      const wheelA = time*3;
+      ctx.rotate(u.facing);
     // 车斗
     ctx.fillStyle='#9a8a2a'; ctx.fillRect(-u.r+1,-u.r+2,u.r*2-2,u.r*2-4);
     ctx.strokeStyle='#4a401a'; ctx.lineWidth=1.5; ctx.strokeRect(-u.r+1,-u.r+2,u.r*2-2,u.r*2-4);
@@ -789,6 +1115,7 @@ function drawUnit(u){
       ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(wx,wy,3,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle='#555'; ctx.lineWidth=1;
       ctx.beginPath(); ctx.moveTo(wx-Math.cos(wheelA)*2.5,wy-Math.sin(wheelA)*2.5); ctx.lineTo(wx+Math.cos(wheelA)*2.5,wy+Math.sin(wheelA)*2.5); ctx.stroke();
+    }
     }
   } else if(u.type==='mcv'){
     // ===== 基地车(MCV):可展开的移动基地核心 =====
@@ -825,6 +1152,88 @@ function drawUnit(u){
     ctx.strokeStyle='#9a9a8a'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(-5, -u.r*0.2); ctx.lineTo(-8, -u.r*0.7); ctx.stroke();
     ctx.fillStyle='#ff5555'; ctx.beginPath(); ctx.arc(-8, -u.r*0.75, 1.6, 0, Math.PI*2); ctx.fill();
+  } else if(u.type==='destroyer'){
+    if(imgs['destroyer_field']){
+      // 驱逐舰照片本体贴图(照片车头朝上,SPRITE_ROT 对齐朝向前方;放大)
+      ctx.rotate(u.facing);
+      drawUnitImg(u, imgs['destroyer_field']);
+    } else {
+    // ===== 驱逐舰(海军主力,灰色舰体 + 前主炮 + 舰桥雷达) =====
+    const R=u.r*1.35;
+    ctx.rotate(u.facing);
+    // 舰体
+    ctx.fillStyle='#5a6268';
+    ctx.beginPath();
+    ctx.moveTo(R*1.0,0); ctx.lineTo(R*0.3,-R*0.42); ctx.lineTo(-R,-R*0.34); ctx.lineTo(-R*0.9,R*0.3); ctx.lineTo(R*0.3,R*0.42);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#2c3238'; ctx.lineWidth=1.2; ctx.stroke();
+    // 水线
+    ctx.fillStyle='#3a4146'; ctx.fillRect(-R, R*0.18, R*2, R*0.22);
+    // 甲板
+    ctx.fillStyle='#4c545a'; ctx.fillRect(-R*0.8, -R*0.16, R*1.55, R*0.32);
+    // 前主炮塔(舰艏方向)
+    ctx.fillStyle='#3a4146'; ctx.fillRect(R*0.4, -R*0.2, R*0.24, R*0.4);
+    ctx.fillStyle='#2c3238'; ctx.fillRect(R*0.62, -R*0.07, R*0.52, R*0.14);
+    // 舰桥
+    ctx.fillStyle='#3f464c'; ctx.fillRect(-R*0.6, -R*0.3, R*0.36, R*0.3);
+    ctx.fillStyle='rgba(170,210,230,.5)'; ctx.fillRect(-R*0.54, -R*0.26, R*0.24, R*0.08);
+    // 雷达桅杆
+    ctx.strokeStyle='#2c3238'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(-R*0.42, -R*0.3); ctx.lineTo(-R*0.42, -R*0.72); ctx.stroke();
+    // 旋转雷达
+    const ra=time*1.2;
+    ctx.save(); ctx.translate(-R*0.42, -R*0.72);
+    ctx.fillStyle='#1c2024'; ctx.beginPath(); ctx.arc(0,0,3.4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='rgba(140,255,180,.9)'; ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,3.4,ra,ra+1.4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // 队标
+    ctx.fillStyle=tc; ctx.beginPath(); ctx.arc(-R*0.12, 0, 2.4, 0, Math.PI*2); ctx.fill();
+    // 开火闪光
+    if(u.fireT>u.def.rof-0.12 && u.target){
+      ctx.fillStyle='rgba(255,220,120,.9)'; ctx.beginPath(); ctx.arc(R*1.18,0,4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(R*1.18,0,2,0,Math.PI*2); ctx.fill();
+    }
+    }
+  } else if(u.type==='transport'){
+    if(imgs['transport_field']){
+      // 登陆艇照片本体贴图(照片车头朝上,SPRITE_ROT 对齐朝向前方)
+      ctx.rotate(u.facing);
+      drawUnitImg(u, imgs['transport_field']);
+    } else {
+    // ===== 运输艇(两栖登陆艇,前开舱门) =====
+    const R=u.r*1.3;
+    ctx.rotate(u.facing);
+    // 船体
+    ctx.fillStyle='#6a5a44';
+    ctx.beginPath();
+    ctx.moveTo(R*1.05,-R*0.38); ctx.lineTo(-R,-R*0.42); ctx.lineTo(-R,R*0.42); ctx.lineTo(R*1.05,R*0.38);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#2a2418'; ctx.lineWidth=1.2; ctx.stroke();
+    // 水线
+    ctx.fillStyle='#4a3f30'; ctx.fillRect(-R, R*0.2, R*2.1, R*0.2);
+    // 中央货舱
+    ctx.fillStyle='#7a6a4e'; ctx.fillRect(-R*0.72, -R*0.26, R*1.35, R*0.52);
+    ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.strokeRect(-R*0.72, -R*0.26, R*1.35, R*0.52);
+    // 舱内装货示意
+    if(u.cargoUnits && u.cargoUnits.length){
+      ctx.fillStyle='rgba(0,0,0,.28)'; ctx.fillRect(-R*0.66, -R*0.2, R*1.23, R*0.4);
+      ctx.fillStyle='#c0c8c0';
+      const n=Math.min(3,u.cargoUnits.length);
+      for(let i=0;i<n;i++){ ctx.fillRect(-R*0.6+i*R*0.45, -R*0.14, R*0.28, R*0.24); }
+    }
+    // 前部跳板舱口(舰艏)
+    ctx.fillStyle='#3a3228'; ctx.fillRect(R*0.25, -R*0.16, R*0.42, R*0.32);
+    // 舰桥
+    ctx.fillStyle='#5a4e3a'; ctx.fillRect(-R*0.62, -R*0.3, R*0.34, R*0.22);
+    ctx.fillStyle='rgba(170,210,230,.5)'; ctx.fillRect(-R*0.56, -R*0.26, R*0.22, R*0.07);
+    // 小机枪(舰艏)
+    ctx.fillStyle='#2c3238'; ctx.fillRect(R*0.5, -R*0.09, R*0.45, R*0.18);
+    // 队标
+    ctx.fillStyle=tc; ctx.beginPath(); ctx.arc(-R*0.2, 0, 2.3, 0, Math.PI*2); ctx.fill();
+    if(u.fireT>u.def.rof-0.12 && u.target){
+      ctx.fillStyle='rgba(255,220,120,.9)'; ctx.beginPath(); ctx.arc(R*1.0,0,2.5,0,Math.PI*2); ctx.fill();
+    }
+    }
   } else {
     // 步兵(面向行进/射击方向,分阵营建模)
     const fac = unitFactionOf(u.team);
@@ -973,6 +1382,16 @@ function drawUnit(u){
   ctx.fillRect(u.x+u.r*0.6, u.y+u.r+1, 7, 7);
   ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=1;
   ctx.strokeRect(u.x+u.r*0.6-0.5, u.y+u.r+0.5, 8, 8);
+  // 运输艇:下方显示装载量(如 10/12)
+  if(u.type==='transport'){
+    const used=usedCapacity(u);
+    const full=used>=u.capacity;
+    const txt=used+'/'+u.capacity;
+    ctx.font='bold 10px "Microsoft YaHei"'; ctx.textAlign='center';
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,.7)'; ctx.strokeText(txt, u.x, u.y+u.r+15);
+    ctx.fillStyle=full?'#ffb0b0':'#8aff8a';
+    ctx.fillText(txt, u.x, u.y+u.r+15);
+  }
 }
 function drawProjectiles(){
   for(const p of projectiles){
@@ -1018,6 +1437,39 @@ function drawEffects(){
       ctx.strokeStyle='rgba(140,255,180,'+k+')';
       ctx.lineWidth=2;
       ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(1-k),0,Math.PI*2); ctx.stroke();
+    } else if(e.type==='dust'){
+      // 履带扬尘:淡黄色尘土颗粒,随生命周期缩小淡出
+      ctx.fillStyle='rgba(214,206,184,'+(0.30*k)+')';
+      ctx.beginPath(); ctx.arc(e.x,e.y,e.r*k,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,'+(0.12*k)+')';
+      ctx.beginPath(); ctx.arc(e.x-1,e.y-1,e.r*0.6*k,0,Math.PI*2); ctx.fill();
+    } else if(e.type==='treefall'){
+      // 树木倒下:该格的树林贴图从竖直缓缓倒向水平(以树底部为轴),同时淡出
+      const img=e.img;
+      if(img){
+        const p = 1 - clamp(e.life/e.maxLife,0,1);     // 0(站立)→1(倒下)
+        const s = Math.min(TILE/img.width, TILE/img.height);
+        const dw=img.width*s, dh=img.height*s;
+        ctx.save();
+        ctx.translate(e.x, e.y + TILE/2);              // 树底部为旋转轴
+        ctx.rotate((e.dir||0) * p);
+        ctx.globalAlpha = 1 - p*0.55;
+        ctx.drawImage(img, -dw/2, -dh, dw, dh);
+        ctx.restore();
+      }
+    } else if(e.type==='treelog'){
+      // 断木残迹:树被碾倒后留在原地的深色木段,随时间淡出
+      const lk = clamp(e.life/e.maxLife,0,1);
+      ctx.save();
+      ctx.translate(e.x, e.y+4);
+      ctx.rotate(e.dir||0);
+      ctx.globalAlpha = 0.20*lk;
+      ctx.fillStyle='#3a3f2e';
+      ctx.beginPath(); ctx.ellipse(0,0,11,4,0,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 0.16*lk;
+      ctx.fillStyle='#20241a';
+      ctx.beginPath(); ctx.ellipse(1,1,10,3.5,0,0,Math.PI*2); ctx.fill();
+      ctx.restore();
     } else if(e.type==='bolt'){
       // 磁暴步兵闪电:起点->终点曲折电链
       const seg=7;
@@ -1059,20 +1511,37 @@ function drawTexts(){
   }
 }
 function drawSel(){
+  // 选中单位的移动点 + 从单位到目标点的连线(陆/海单位都显示;不再画选中圆圈)
   for(const u of selected){
-    ctx.strokeStyle='#8aff8a'; ctx.lineWidth=2;
-    ctx.setLineDash([6,5]); ctx.lineDashOffset=-time*22;
-    ctx.beginPath(); ctx.arc(u.x,u.y,u.r+4,0,Math.PI*2); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle='rgba(140,255,170,.35)';
-    ctx.beginPath(); ctx.arc(u.x,u.y,u.r+4,0,Math.PI*2); ctx.fill();
+    const o=u.order;
+    if(o && o.kind==='move' && o.x!==undefined){
+      ctx.strokeStyle='rgba(140,255,180,.45)'; ctx.lineWidth=1.5; ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(o.x,o.y); ctx.stroke();
+      ctx.setLineDash([]);
+      drawMoveMarker(o.x, o.y);
+    }
   }
   if(selBuilding && selBuilding.alive){
     const pul=0.5+0.5*Math.sin(time*6);
+    const bx=selBuilding.tx*TILE-3, by=selBuilding.ty*TILE-3;
+    const bw=selBuilding.w*TILE+6, bh=selBuilding.h*TILE+6;
+    // 选中框:圆角贴地轮廓(代替生硬正方形),底部压一条接地亮线
     ctx.strokeStyle='rgba(140,255,170,'+(0.55+0.45*pul)+')'; ctx.lineWidth=2;
-    ctx.strokeRect(selBuilding.tx*TILE-3, selBuilding.ty*TILE-3, selBuilding.w*TILE+6, selBuilding.h*TILE+6);
-    ctx.fillStyle='rgba(140,255,170,'+(0.08+0.06*pul)+')';
-    ctx.fillRect(selBuilding.tx*TILE-3, selBuilding.ty*TILE-3, selBuilding.w*TILE+6, selBuilding.h*TILE+6);
+    roundRectPath(bx, by, bw, bh, 5); ctx.stroke();
+    ctx.fillStyle='rgba(140,255,170,'+(0.06+0.05*pul)+')';
+    roundRectPath(bx, by, bw, bh, 5); ctx.fill();
+    // 墙根接地亮线(贴合层2 AO,强调"立在地面上")
+    ctx.fillStyle='rgba(140,255,170,'+(0.5+0.4*pul)+')';
+    ctx.fillRect(bx+2, by+bh-2.5, bw-4, 2);
+  }
+  // 移动目标点标记(小旗/准星)
+  function drawMoveMarker(x,y){
+    ctx.strokeStyle='#8aff8a'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x,y-7); ctx.lineTo(x,y+7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x-7,y); ctx.lineTo(x+7,y); ctx.stroke();
+    ctx.fillStyle='rgba(140,255,180,.5)';
+    ctx.beginPath(); ctx.arc(x,y,1.5,0,Math.PI*2); ctx.fill();
   }
   // 框选
   if(mouse.dragging){
@@ -1142,5 +1611,5 @@ function drawMinimap(){
   // 视野框
   mmCtx.strokeStyle='#ffffff';
   mmCtx.lineWidth=1.5;
-  mmCtx.strokeRect(cam.x*s, cam.y*s, canvas.width*s, canvas.height*s);
+  mmCtx.strokeRect(cam.x*s, cam.y*s, viewW()*s, viewH()*s);
 }

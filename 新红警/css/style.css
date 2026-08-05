@@ -154,6 +154,46 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
   box-shadow:0 2px 8px rgba(0,0,0,.5);
 }
 #helpBtn:hover { border-color:#7ac88a; color:#fff; box-shadow:0 0 14px rgba(120,200,140,.45); }
+/* ===== 主菜单左上角设置按钮(在帮助右侧) ===== */
+#settingsBtn {
+  position:fixed; top:16px; left:110px; z-index:65;
+  padding:8px 24px; font-size:15px; letter-spacing:4px;
+  background:linear-gradient(#3a5a4a,#22372a); color:#d8f0e0;
+  border:2px solid #5a8a6a; border-radius:8px; cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,.5);
+}
+#settingsBtn:hover { border-color:#7ac88a; color:#fff; box-shadow:0 0 14px rgba(120,200,140,.45); }
+/* ===== 设置弹层 ===== */
+#settingsOv {
+  position:absolute; inset:0; background:rgba(0,0,0,.62); z-index:85;
+  display:none; align-items:center; justify-content:center;
+}
+#settingsOv.show { display:flex; }
+.setBox {
+  width:360px; max-width:92%;
+  background:linear-gradient(#22303a,#141b20);
+  border:2px solid #4a6a5a; border-radius:12px;
+  padding:24px 28px; color:#cfe8d8;
+  display:flex; flex-direction:column; gap:16px;
+  box-shadow:0 10px 34px rgba(0,0,0,.65);
+}
+.setBox h2 { text-align:center; color:#ffe27a; letter-spacing:6px; font-size:22px; }
+.setBox .setLabel { text-align:center; color:#9fd0b0; font-size:13px; letter-spacing:3px; margin-top:-4px; }
+.setBox .trackRow { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.setBox .setRow {
+  padding:12px 16px; font-size:15px; letter-spacing:2px;
+  background:linear-gradient(#2c3c32,#1a241e); color:#d8f0e0;
+  border:1px solid #4a6a5a; border-radius:8px; cursor:pointer; text-align:center;
+}
+.setBox .trackRow .setRow { padding:10px 0; font-size:13px; letter-spacing:2px; }
+.setBox .setRow:hover { border-color:#7ac88a; color:#fff; }
+.setBox .setRow.sel { background:linear-gradient(#3a7a4a,#2a5a3a); border-color:#7ac88a; color:#fff; box-shadow:0 0 10px rgba(120,220,140,.4); }
+.setBox .setClose {
+  padding:10px 0; font-size:16px; letter-spacing:4px;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a;
+  color:#fff; border-radius:10px; cursor:pointer;
+}
+.setBox .setClose:hover { background:linear-gradient(#5ab06a,#3a7a4a); }
 /* ===== 帮助弹层 ===== */
 #helpOv {
   position:absolute; inset:0; background:rgba(0,0,0,.62); z-index:80;
@@ -179,3 +219,46 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
   color:#fff; border-radius:10px; cursor:pointer;
 }
 .helpBox #helpBackBtn:hover { background:linear-gradient(#5ab06a,#3a7a4a); box-shadow:0 0 14px rgba(120,220,140,.5); }
+/* ===== 模式选择页(遭遇战 / 任务模式 / 挑战模式) ===== */
+#landing {
+  position:absolute; inset:0; z-index:68;
+  display:flex; align-items:center; justify-content:center; flex-direction:column;
+  background:radial-gradient(circle at 50% 30%, #274a35 0%, #14241a 60%, #0a120c 100%);
+  color:#cfe8d8; overflow-y:auto; padding:20px;
+}
+#landing.hidden { display:none; }
+.landBox { display:flex; flex-direction:column; align-items:center; gap:20px; }
+#landing h1 { font-size:58px; color:#ffe27a; text-shadow:0 0 24px rgba(255,226,122,.4), 0 4px 8px #000; letter-spacing:6px; }
+#landing .msub { color:#9fc0ac; font-size:14px; letter-spacing:2px; }
+.modeBtn {
+  width:320px; padding:16px 0; font-size:20px; letter-spacing:4px;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a; color:#fff;
+  border-radius:12px; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.5);
+}
+.modeBtn:hover { background:linear-gradient(#5ab06a,#3a7a4a); box-shadow:0 0 18px rgba(120,220,140,.5); }
+.landBtns { display:flex; gap:16px; margin-top:6px; }
+#landing #helpBtn, #landing #settingsBtn {
+  position:static; padding:9px 38px; font-size:15px; letter-spacing:4px;
+  background:linear-gradient(#3a5a4a,#22372a); color:#d8f0e0;
+  border:2px solid #5a8a6a; border-radius:8px; cursor:pointer;
+}
+#landing #helpBtn:hover, #landing #settingsBtn:hover { border-color:#7ac88a; color:#fff; box-shadow:0 0 14px rgba(120,200,140,.45); }
+#landing .mfoot { color:#6f8f7f; font-size:12px; letter-spacing:1px; margin-top:4px; }
+/* ===== 敬请期待弹层 ===== */
+#soonOv {
+  position:absolute; inset:0; background:rgba(0,0,0,.62); z-index:90;
+  display:none; align-items:center; justify-content:center;
+}
+#soonOv.show { display:flex; }
+.soonBox {
+  width:340px; max-width:92%; padding:28px 30px; text-align:center;
+  background:linear-gradient(#22303a,#141b20); border:2px solid #4a6a5a; border-radius:12px;
+  color:#cfe8d8; box-shadow:0 10px 34px rgba(0,0,0,.65);
+}
+.soonBox h2 { color:#ffe27a; letter-spacing:6px; font-size:22px; margin-bottom:10px; }
+.soonBox p { color:#9fc0ac; font-size:13px; margin-bottom:20px; }
+.soonBox button {
+  padding:10px 44px; font-size:16px; letter-spacing:4px;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a; color:#fff; border-radius:10px; cursor:pointer;
+}
+.soonBox button:hover { background:linear-gradient(#5ab06a,#3a7a4a); }

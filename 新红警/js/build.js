@@ -101,12 +101,23 @@ function placeBuilding(team, defName, tx, ty){
 }
 function markBlocked(b, on){
   for(let x=b.tx;x<b.tx+b.w;x++) for(let y=b.ty;y<b.ty+b.h;y++){
-    if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H) blocked[x][y] = on;
+    if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H){ blocked[x][y] = on; structBlocked[x][y] = on; }
   }
 }
 function canPlaceAt(tx,ty,def,team){
   if(tx<0||ty<0||tx+def.w>MAP_W||ty+def.h>MAP_H) return false;
-  for(let x=tx;x<tx+def.w;x++) for(let y=ty;y<ty+def.h;y++) if(blocked[x][y]) return false;
+  for(let x=tx;x<tx+def.w;x++) for(let y=ty;y<ty+def.h;y++){
+    // 金矿格不能建建筑(单位仍可通行)
+    if(oreGrid[x] && oreGrid[x][y]) return false;
+    if(def.water){
+      // 船坞:整块必须落在水上,且未被建筑占用
+      if(terrain[x][y]!=='water' || structBlocked[x][y]) return false;
+    } else {
+      if(blocked[x][y]) return false;
+    }
+  }
+  // 船坞:整块落水 + 距离最近己方建筑 ≤ DOCK_BUILD_RANGE 格(贴近基地下海,不能随便乱修)
+  if(def.water) return nearestOwnTileDist(tx,ty,def,team) <= DOCK_BUILD_RANGE;
   // 必须贴近己方已有建筑
   for(const b of buildings){
     if(b.team!==team||!b.alive) continue;
@@ -114,10 +125,26 @@ function canPlaceAt(tx,ty,def,team){
   }
   return false;
 }
+// 两个矩形(格坐标)之间的切比雪夫距离:0=相交/相邻边重合
+function rectTileDist(x0,y0,x1,y1, a0,b0,a1,b1){
+  const dx=(x1<a0)?(a0-x1):(a1<x0?(x0-a1):0);
+  const dy=(y1<b0)?(b0-y1):(b1<y0?(y0-b1):0);
+  return Math.max(dx,dy);
+}
+// 某建筑占地矩形与"最近己方建筑"的格子距离(用于船坞贴基地建造判定)
+function nearestOwnTileDist(tx,ty,def,team){
+  let best=1e9;
+  for(const b of buildings){
+    if(b.team!==team||!b.alive) continue;
+    const d=rectTileDist(tx,ty,tx+def.w,ty+def.h, b.tx,b.ty,b.tx+b.w,b.ty+b.h);
+    if(d<best) best=d;
+  }
+  return best;
+}
 function canDeployAt(tx, ty){
   const d=BLD_DEFS['command'];
   if(tx<0||ty<0||tx+d.w>MAP_W||ty+d.h>MAP_H) return false;
-  for(let x=tx;x<tx+d.w;x++) for(let y=ty;y<ty+d.h;y++) if(blocked[x][y]) return false;
+  for(let x=tx;x<tx+d.w;x++) for(let y=ty;y<ty+d.h;y++) if(blocked[x][y] || (oreGrid[x]&&oreGrid[x][y])) return false;
   return true;
 }
 function deployMCV(u){
@@ -136,16 +163,39 @@ function deployMCV(u){
   updatePanel();
 }
 function spawnUnitNear(type, team, b){
-  const d=UNIT_DEFS[type];
-  const cells=[];
-  for(let dx=-1;dx<=b.w;dx++) for(let dy=-1;dy<=b.h;dy++){
-    const tx=b.tx+dx, ty=b.ty+dy;
-    if(tx>=0&&ty>=0&&tx<MAP_W&&ty<MAP_H && !blocked[tx][ty] && tx>=b.tx-1 && tx<b.tx+b.w+1 && ty>=b.ty-1 && ty<b.ty+b.h+1){
-      cells.push([tx,ty]);
+  const d=getUnitDefs(unitFactionOf(team))[type];
+  // 从建筑"下方那面"出:先取正下方一行,不足再向下/左右/上方回退
+  const order=[];
+  for(let dx=0;dx<b.w;dx++) order.push([b.tx+dx, b.ty+b.h]);          // 底部(正下方)
+  for(let dx=0;dx<b.w;dx++) order.push([b.tx+dx, b.ty+b.h+1]);        // 再下一行
+  for(let dy=0;dy<b.h;dy++){ order.push([b.tx+b.w, b.ty+dy]); order.push([b.tx-1, b.ty+dy]); }  // 左右
+  for(let dx=0;dx<b.w;dx++) order.push([b.tx+dx, b.ty-1]);            // 上方
+  let pick=null;
+  if(d.naval){
+    // 驱逐舰:在候选中挑"周围水面最开阔"的格(出生在船坞/岛屿旁的开阔水面,
+    // 避免挤进窄缝导致刚造出来就卡在船坞边缘)
+    let bestScore=-1;
+    for(const [tx,ty] of order){
+      if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H) continue;
+      if(structBlocked[tx][ty] || terrain[tx][ty]!=='water') continue;
+      let score=0;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nx=tx+dx, ny=ty+dy;
+        if(nx>=0&&ny>=0&&nx<MAP_W&&ny<MAP_H && terrain[nx][ny]==='water' && !structBlocked[nx][ny]) score++;
+      }
+      if(score>bestScore){ bestScore=score; pick=[tx,ty]; }
+    }
+  } else {
+    for(const [tx,ty] of order){
+      if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H) continue;
+      if(structBlocked[tx][ty]) continue;
+      if(d.amphib){
+        if(terrain[tx][ty]==='water'||terrain[tx][ty]==='grass'){ pick=[tx,ty]; break; }  // 运输艇可上岸
+      } else if(!blocked[tx][ty]){ pick=[tx,ty]; break; }
     }
   }
-  if(cells.length){
-    const [tx,ty]=cells[Math.floor(Math.random()*cells.length)];
+  if(pick){
+    const [tx,ty]=pick;
     const u=new Unit(type,team,tx*TILE+TILE/2,ty*TILE+TILE/2);
     u.order={kind:'none'};
     units.push(u);
@@ -237,7 +287,7 @@ function prodBuildingFor(team, defName){
 }
 function moveToRally(u, rally){
   u.order={kind:'move', x:rally.x, y:rally.y};
-  u.path=findPath(u.x,u.y,rally.x,rally.y); u.pathIdx=0; u.repathT=1.0;
+  u.path=pathFor(u,u.x,u.y,rally.x,rally.y); u.pathIdx=0; u.repathT=1.0;
 }
 // 取消制造:只取消队列末尾的一个单位并 100% 返还现金
 function cancelProduction(b){

@@ -2,6 +2,7 @@
 /* ============ game.js: 游戏流程与主循环 ============ */
 function setupGame(){
   units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; placing=null;
+  trackMarks=[];
   paused=false;
   if(selling) setSelling(false);
   keys={};
@@ -45,13 +46,18 @@ function startGame(){
 }
 function showMenu(){
   document.getElementById('overlay').classList.remove('show');
-  document.getElementById('menu').classList.remove('hidden');
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('landing').classList.remove('hidden');
 }
 
 /* ================= 主循环 ================= */
 function resize(){
-  canvas.width=window.innerWidth; canvas.height=window.innerHeight-150;
-  cam.x=clamp(cam.x,0,W-canvas.width); cam.y=clamp(cam.y,0,H-canvas.height);
+  const rs = Math.max(window.devicePixelRatio || 1, RENDER_SCALE);
+  const cw = window.innerWidth, ch = window.innerHeight - 150;
+  canvas.width = cw * rs; canvas.height = ch * rs;
+  canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+  ctx.setTransform(rs, 0, 0, rs, 0, 0);
+  cam.x=clamp(cam.x,0,W-cw); cam.y=clamp(cam.y,0,H-ch);
   if(mmCv) mmRect=mmCv.getBoundingClientRect();
 }
 function frame(ts){
@@ -69,8 +75,8 @@ function frame(ts){
   if(keys['KeyS']||keys['ArrowDown']) my=1;
   if(mx===0 && mouse.edge) mx=mouse.edge.x;
   if(my===0 && mouse.edge) my=mouse.edge.y;
-  cam.x=clamp(cam.x+mx*pan*dt,0,W-canvas.width);
-  cam.y=clamp(cam.y+my*pan*dt,0,H-canvas.height);
+  cam.x=clamp(cam.x+mx*pan*dt,0,W-viewW());
+  cam.y=clamp(cam.y+my*pan*dt,0,H-viewH());
   if(aiState && !gameOver){
     for(let t=1;t<gameTeams.length;t++){
       if(gameTeams[t].ai) updateAI(dt, t);
@@ -107,6 +113,7 @@ window.addEventListener('load',()=>{
   mmCtx=mmCv.getContext('2d');
   fpsEl=document.getElementById('fps');
   preloadImages();
+  initMusic();               // 背景音乐(4 首循环,可在设置里关)
   resize();
   window.addEventListener('resize',resize);
   setupInput();

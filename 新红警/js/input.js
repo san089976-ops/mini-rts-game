@@ -28,7 +28,7 @@ function setupInput(){
             placing=null; updatePanel();
           }
         } else if(!canPlaceAt(tx,ty,d,placing.team)){
-          textPopup(mw.x,mw.y,'无法在此建造(需贴近己方建筑)', '#ff8080');
+          textPopup(mw.x,mw.y, d.water ? '船坞需建在距己方建筑8格内的水面' : '无法在此建造(需贴近己方建筑)', '#ff8080');
         } else {
           textPopup(mw.x,mw.y,'资金不足', '#ff8080');
         }
@@ -73,8 +73,8 @@ function setupInput(){
     const mcvSel=selected.find(u=>u.type==='mcv');
     if(mcvSel){ deployMCV(mcvSel); return; }
   }
-  // QWERTYUI:直接建造建筑(当前7种,I预留第8种)
-  const BUILD_KEYS={ KeyQ:'power', KeyW:'barracks', KeyE:'factory', KeyR:'refinery', KeyT:'turret', KeyY:'repair', KeyU:'lab', KeyI:null };
+  // QWERTYUI:直接建造建筑(发电厂/兵营/战车工厂/精炼厂/碉堡/维修厂/实验室/船坞)
+  const BUILD_KEYS={ KeyQ:'power', KeyW:'barracks', KeyE:'factory', KeyR:'refinery', KeyT:'turret', KeyY:'repair', KeyU:'lab', KeyI:'dock' };
   if(BUILD_KEYS[e.code]){
     e.preventDefault();
     const dn=BUILD_KEYS[e.code];
@@ -124,6 +124,7 @@ function setupInput(){
     else if(act==='research'){ if(selBuilding) startResearch(selBuilding, btn.dataset.def); }
     else if(act==='cancelprod'){ if(selBuilding) cancelProduction(selBuilding); }
     else if(act==='deploy'){ if(selected[0]) deployMCV(selected[0]); }
+    else if(act==='unload'){ const t=selected.find(u=>u.type==='transport'); if(t) manualUnload(t); }
     else if(act==='selectall') selectAllCombat();
   });
 }

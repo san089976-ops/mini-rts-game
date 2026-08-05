@@ -10,13 +10,30 @@ let menuState = {
   playerFaction: 'allies',
   compFactions: ['soviet','soviet','soviet'],
   groups: [1,1,1],               // 电脑所在组 0=A(与玩家同盟,蓝)/1=B/2=C/3=D(敌对,红)
+  compDiffs: ['easy','easy','easy'],  // 电脑难度: easy简单 / medium中等 / brutal残酷(会研发实验室科技)
   colors: [6,3,2,8],             // 每队所选颜色下标(黄黑青红深红绿蓝天蓝紫)
   compCount: 1,
 };
 
+/* ============ 模式选择页(登陆页) ============ */
+function enterSkirmish(){
+  document.getElementById('landing').classList.add('hidden');
+  document.getElementById('menu').classList.remove('hidden');
+  buildMenu(true);
+}
+function comingSoon(){
+  document.getElementById('soonOv').classList.add('show');
+}
+function closeSoon(){
+  document.getElementById('soonOv').classList.remove('show');
+}
+
 /* ============ 帮助弹层 ============ */
 function openHelp(){ document.getElementById('helpOv').classList.add('show'); }
 function closeHelp(){ document.getElementById('helpOv').classList.remove('show'); }
+/* ============ 设置弹层(主菜单左上角/暂停页) ============ */
+function openSettings(){ document.getElementById('settingsOv').classList.add('show'); updateMusicUI(); }
+function closeSettings(){ document.getElementById('settingsOv').classList.remove('show'); }
 
 /* ============ 出生点分配辅助 ============ */
 function normalizeSpawns(){
@@ -39,10 +56,10 @@ function normalizeSpawns(){
 function buildGameSetup(){
   const teams=[{name:'玩家', faction:menuState.playerFaction, group:0, ai:false, color:menuState.colors[0], startMoney:menuState.startMoney}];
   for(let i=0;i<menuState.compCount;i++){
-    teams.push({name:'电脑'+(i+1), faction:menuState.compFactions[i], group:menuState.groups[i], ai:true, color:menuState.colors[i+1]});
+    teams.push({name:'电脑'+(i+1), faction:menuState.compFactions[i], group:menuState.groups[i], ai:true, color:menuState.colors[i+1], diff:menuState.compDiffs[i]});
   }
   const n=teams.length;
-  const spawns=SPAWN_POINTS[n];
+  const spawns=getSpawns(n);
   // 出生点:优先用已选点,重复/未选自动补剩余点
   const used=new Set();
   const assign=teams.map((t,i)=>{
@@ -121,6 +138,8 @@ function teamRowHTML(name, fac, teamIdx, compIdx){
   if(compIdx!==null){
     // 分组 A/B/C/D 下拉(与玩家同组=同盟,其余=敌对)
     h+='<span class="tname">分组</span>'+groupDropHTML(compIdx);
+    // 电脑难度下拉(简单/中等/残酷,中等与残酷会研发实验室科技)
+    h+='<span class="tname">难度</span>'+diffDropHTML(compIdx);
   } else {
     h+='<span class="tname" style="color:#9fd0b0">组 A(蓝)</span>';
   }
@@ -139,6 +158,7 @@ function selectDrop(key, val){
   if(key==='money') menuState.startMoney=val;
   else if(key.indexOf('group-')===0) menuState.groups[parseInt(key.slice(6),10)]=val;
   else if(key.indexOf('color-')===0) menuState.colors[parseInt(key.slice(6),10)]=val;
+  else if(key.indexOf('diff-')===0) menuState.compDiffs[parseInt(key.slice(5),10)]=val;
   menuState.openDrop=null;
   buildMenu(false);
 }
@@ -176,6 +196,22 @@ function groupDropHTML(compIdx){
   }
   return '<div class="dd">'
     +'<button class="ddTrig" onclick="toggleDrop(\''+key+'\')">组 '+('ABCD'[g])+' <span class="ddCaret">'+(open?'▲':'▼')+'</span></button>'
+    +(open?'<div class="ddList">'+list+'</div>':'')
+    +'</div>';
+}
+const DIFF_LABEL = { easy:'简单', medium:'中等', brutal:'残酷' };
+function diffDropHTML(compIdx){
+  const key='diff-'+compIdx;
+  const d=menuState.compDiffs[compIdx];
+  const open=menuState.openDrop===key;
+  let list='';
+  if(open){
+    for(const v in DIFF_LABEL){
+      list+='<button class="ddOpt'+(v===d?' sel':'')+'" onclick="selectDrop(\''+key+'\',\''+v+'\')">'+DIFF_LABEL[v]+'</button>';
+    }
+  }
+  return '<div class="dd">'
+    +'<button class="ddTrig" onclick="toggleDrop(\''+key+'\')">'+DIFF_LABEL[d]+' <span class="ddCaret">'+(open?'▲':'▼')+'</span></button>'
     +(open?'<div class="ddList">'+list+'</div>':'')
     +'</div>';
 }
@@ -242,7 +278,7 @@ function renderMenuPreview(){
     g.fillRect(x*s,y*s,s+0.3,s+0.3);
   }
   const n=menuState.compCount+1;
-  const spawns=SPAWN_POINTS[n];
+  const spawns=getSpawns(n);
   spawns.forEach(([sx,sy],p)=>{
     const px=(sx+0.5)*s, py=(sy+0.5)*s;
     const owner=menuState.spawnIdx.indexOf(p);
@@ -274,7 +310,7 @@ function renderMenuPreview(){
       const r=cv.getBoundingClientRect();
       const s2=cw/MAP_W;
       const cx=(e.clientX-r.left)/s2, cy=(e.clientY-r.top)/s2;
-      const sps=SPAWN_POINTS[menuState.compCount+1];
+      const sps=getSpawns(menuState.compCount+1);
       let best=-1,bd=12;
       sps.forEach(([sx,sy],i)=>{ const d=Math.hypot(cx-sx-0.5,cy-sy-0.5); if(d<bd){bd=d;best=i;} });
       if(best!==-1) setSpawn(menuState.spawnTarget, best);

@@ -9,7 +9,20 @@ class Unit {
     this.x = x; this.y = y;
     this.hp = d.hp; this.maxHp = d.hp;
     this.speed = d.speed; this.r = d.r;
+    const bx = UNIT_BOX[type];
+    this.hw = bx ? bx.hw : d.r*0.85;   // 碰撞箱半宽(方框)
+    this.hh = bx ? bx.hh : d.r*0.85;   // 碰撞箱半高(方框)
+    // 双圆组合碰撞箱(Capsule Approximation):车头/车尾各一个圆,完美包裹 2×1 车身
+    this.colR = Math.min(this.hw, this.hh);                // 碰撞圆半径(≈半宽)
+    this.colOff = Math.max(this.hw, this.hh) - this.colR;  // 头/尾圆圆心到中心距离(0=圆形单位)
+    this.turnTarget = 0;               // 期望朝向角(applyMovement 中 lerpAngle 平滑转向)
     this.armor = d.armor;
+    this.naval = !!d.naval;        // 只能在水中航行
+    this.amphib = !!d.amphib;      // 陆海两栖
+    this.crushTrees = crushesTrees(type);   // 重型单位可碾倒树林(坦克/两栖登陆艇等)
+    this.capacity = d.capacity || 0;
+    this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
+    this.unloadAt = null;          // 运输艇卸载点
     this.facing = 0;
     this.target = null;        // 攻击目标
     this.order = { kind:'none' };
@@ -27,6 +40,15 @@ class Unit {
     this.oreTarget = null; this.refinery = null; this.mineT = 0;
     this.sepT = 0;
   }
+  // 该单位处在 (x,y) 且朝向为 facing 时,两个碰撞圆的中心与半径(胶囊近似)。
+  // 圆形单位(colOff=0)只返回一个圆;长条单位返回车头(+facing)/车尾(-facing)两圆。
+  circlesAt(x, y, facing){
+    const c = this.colOff || 0;
+    if(c <= 0) return [{x, y, r:this.colR}];
+    const fx = Math.cos(facing), fy = Math.sin(facing);
+    return [{ x:x+fx*c, y:y+fy*c, r:this.colR }, { x:x-fx*c, y:y-fy*c, r:this.colR }];
+  }
+  circles(){ return this.circlesAt(this.x, this.y, this.facing); }
   get alive(){ return this.hp > 0; }
   get def(){ return this._def || UNIT_DEFS[this.type]; }
   get speedEff(){ return this.speed * (this.order.kind==='retreat'?0.8:1); }
