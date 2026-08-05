@@ -142,7 +142,8 @@ function updateAI(dt, team){
   const isNaval = gameSetup && gameSetup.map && gameSetup.map.custom==='naval';
   if(isNaval){
     if(time>45 && !aiHas(team,'dock') && credits[team]>500) aiPlaceBuilding(team,'dock');
-    st.trainTargets.destroyer = aiHas(team,'dock') ? 3 : 0;
+    st.trainTargets.destroyer = aiHas(team,'dock') ? 2 : 0;
+    st.trainTargets.transport = aiHas(team,'dock') ? 2 : 0;
   }
 
   // === 中等/残酷:实验室科技研究(先经济后防御,再阵营专属) ===
@@ -247,17 +248,93 @@ function updateAI(dt, team){
   // 敌方阵营的建造厂(优先玩家)
   const enemyBase = st.enemyBase;
   const attacked = time - st.lastAttackT < 8;
-  const minCombat = st.diff==='brutal' ? 2 : 3;   // 残酷兵力更少就开打
-  const wantAttack = enemyBase && combat.length>=minCombat && (st.attackT<=0 || attacked);
-  if(wantAttack){
-    const target = attacked ? {x:st.lastBaseX,y:st.lastBaseY} : {x:enemyBase.x,y:enemyBase.y};
-    const orderU=[];
-    for(const u of combat){ if(u.order.kind!=='attack' || Math.random()<0.5) orderU.push(u); }
-    if(orderU.length>=2){
-      orderMove(orderU, target.x, target.y);
-      // x2=true 表示打完路上遭遇的敌人后继续赶往目标地点
-      for(const u of orderU) u.order.x2 = true;
-      st.attackT = st.diff==='brutal' ? rnd(18,26) : (st.diff==='medium' ? rnd(24,33) : rnd(28,40));
+  if(isNaval){
+    // 海战图:陆地单位过不了水,改由运输艇抢滩登陆,驱逐舰护航
+    updateNavalAI(team, st, enemyBase, dt);
+  } else {
+    const minCombat = st.diff==='brutal' ? 2 : 3;   // 残酷兵力更少就开打
+    const wantAttack = enemyBase && combat.length>=minCombat && (st.attackT<=0 || attacked);
+    if(wantAttack){
+      const target = attacked ? {x:st.lastBaseX,y:st.lastBaseY} : {x:enemyBase.x,y:enemyBase.y};
+      const orderU=[];
+      for(const u of combat){ if(u.order.kind!=='attack' || Math.random()<0.5) orderU.push(u); }
+      if(orderU.length>=2){
+        orderMove(orderU, target.x, target.y);
+        // x2=true 表示打完路上遭遇的敌人后继续赶往目标地点
+        for(const u of orderU) u.order.x2 = true;
+        st.attackT = st.diff==='brutal' ? rnd(18,26) : (st.diff==='medium' ? rnd(24,33) : rnd(28,40));
+      }
     }
+  }
+}
+/* ============ 海战图:运输艇抢滩进攻 ============ */
+// 陆地单位过不了水,由运输艇装船 -> 驶向敌方基地 -> 抵岸卸载 -> 地面部队进攻,
+// 驱逐舰护航/压制。每次重新集结间隔 2 秒,避免每帧全图寻路。
+function updateNavalAI(team, st, enemyBase, dt){
+  if(!enemyBase) return;
+  const tx=enemyBase.x, ty=enemyBase.y;
+  const minCombat = st.diff==='brutal' ? 2 : 3;
+  const transports = units.filter(u=>u.team===team && u.type==='transport' && u.hp>0);
+  // 1) 装船:待命的空运输艇接收未登陆的地面战斗单位
+  if(st.combat.length>=minCombat){
+    for(const tr of transports){
+      if(tr.cargoUnits.length>0 || tr._aiSail) continue;
+      const need = tr.capacity - usedCapacity(tr);
+      if(need<=0) continue;
+      const riders = units.filter(u=>u.team===team && u.hp>0 && !u.naval && u.type!=='harvester' &&
+        transportCost(u)>0 && !u._aiUnloaded && u.order.kind!=='load');
+      let loaded=0;
+      for(const r of riders){
+        if(loaded>=need) break;
+        r.target=null; r.order={kind:'load', transport:tr}; r.path=null;
+        loaded+=transportCost(r);
+      }
+      if(loaded>0){ tr._aiTransport=true; tr._aiLoadT=0; }
+    }
+  }
+  // 2) 航行 + 登陆
+  for(const tr of transports){
+    if(tr.cargoUnits.length>0 && !tr._aiSail){
+      // 等已分配的乘客上齐或超时再出发,避免把小队拆散
+      tr._aiLoadT=(tr._aiLoadT||0)+dt;
+      const waiting = units.some(u=>u.team===team && u.order.kind==='load' && u.order.transport===tr);
+      const full = usedCapacity(tr)>=tr.capacity;
+      if(full || (!waiting && tr._aiLoadT>1) || tr._aiLoadT>4) tr._aiSail=true;
+    }
+    if(tr._aiSail && tr.cargoUnits.length>0){
+      if(tr.order.kind!=='move' || tr.order.x!==tx || tr.order.y!==ty){
+        tr.order={kind:'move', x:tx, y:ty};
+        tr.path=pathFor(tr,tr.x,tr.y,tx,ty); tr.pathIdx=0; tr.repathT=1;
+      }
+      if(dist(tr,enemyBase)<=TILE*8){
+        unloadTransport(tr, {x:tr.x, y:tr.y});
+        tr._aiSail=true;   // 卸完立即返航,避免在敌岛岸边重新接客
+      }
+    } else if(tr._aiSail && tr.cargoUnits.length===0){
+      // 卸完返航,回船坞再接下一批
+      const home = buildings.find(b=>b.team===team && b.defName==='dock' && b.alive);
+      if(home){
+        if(tr.order.kind!=='move' || tr.order.x!==home.x || tr.order.y!==home.y){
+          tr.order={kind:'move', x:home.x, y:home.y};
+          tr.path=pathFor(tr,tr.x,tr.y,home.x,home.y); tr.pathIdx=0; tr.repathT=1;
+        }
+        if(dist(tr,home)<=TILE*6){ tr._aiSail=false; tr.order={kind:'none'}; tr.path=null; }
+      }
+    }
+  }
+  // 3) 已登陆部队与驱逐舰定期重新集结进攻(2 秒一次,避免每帧全图寻路)
+  st._navalMoveT=(st._navalMoveT||0)-dt;
+  if(st._navalMoveT<=0){
+    const landed = units.filter(u=>u.team===team && u.hp>0 && !u.naval && u._aiUnloaded && u.def.range>0);
+    if(landed.length){
+      orderMove(landed, tx, ty);
+      for(const u of landed) u.order.x2=true;
+    }
+    const navy = units.filter(u=>u.team===team && u.hp>0 && u.naval);
+    if(navy.length){
+      orderMove(navy, tx, ty);
+      for(const u of navy) u.order.x2=true;
+    }
+    st._navalMoveT=2;
   }
 }
