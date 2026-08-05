@@ -9,9 +9,11 @@ const MUSIC_FILES = [
 let musicOn = true;
 let musicIdx = 0;
 let musicEl = null;
+const MUSIC_VOLUME = 0.4;   // lower default music volume
 function initMusic(){
   try{
     musicEl = new Audio();
+    musicEl.volume = MUSIC_VOLUME;
     musicEl.addEventListener('ended', ()=>{
       if(!musicOn) return;
       musicIdx = (musicIdx+1) % MUSIC_FILES.length;
