@@ -20,16 +20,35 @@ const MAPS = [
     } },
 ];
 
-// 当前选中地图的出生点(海战图用岛屿出生点,其余回退到通用出生点)
+// 当前选中的地图(主菜单选择):自制地图(map 文件夹)或内置地图
+function currentMap(){
+  const c = menuState ? menuState.mapChoice : null;
+  if(c && c.kind==='custom'){
+    const list = window.CUSTOM_MAPS || [];
+    let m = null;
+    if(c.file) m = list.find(x=>x && x._file===c.file);       // 优先按文件名识别
+    if(!m) m = list.find(x=>x && x.id===c.id);                 // 回退按 id
+    if(m) return m;
+  }
+  const idx = (c && c.kind==='builtin') ? (c.idx||0) : 0;
+  return MAPS[idx] || MAPS[0];
+}
+
+// 当前选中地图的出生点:自制地图用其保存的 spawns;海战图用岛屿出生点;其余回退通用出生点
 function getSpawns(n){
-  const m = MAPS[menuState ? menuState.mapIdx : 0];
+  const m = currentMap();
+  if(m && m.custom==='edited' && Array.isArray(m.spawns) && m.spawns.length) return m.spawns;
   if(m && m.spawns && m.spawns[n]) return m.spawns[n];
   return SPAWN_POINTS[n] || SPAWN_POINTS[2];
 }
 
-// 各队伍数的出生点(格子坐标,单位为格)
+// 各队伍数的出生点(格子坐标,单位为格;最多8人)
 const SPAWN_POINTS = {
   2: [[8,31],[54,31]],
   3: [[8,31],[54,31],[31,7]],
   4: [[8,8],[54,8],[8,40],[54,40]],
+  5: [[8,8],[54,8],[8,40],[54,40],[31,7]],
+  6: [[8,8],[54,8],[8,24],[54,24],[8,40],[54,40]],
+  7: [[8,8],[54,8],[8,24],[54,24],[8,40],[54,40],[31,7]],
+  8: [[8,8],[54,8],[8,24],[54,24],[8,40],[54,40],[31,7],[31,41]],
 };

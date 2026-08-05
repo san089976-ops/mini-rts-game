@@ -82,6 +82,7 @@ function refreshAIStats(team){
   let enemyCommand=null, enemyFallback=null, enemyFallbackD=1e9, playerCommand=null;
   for(const b of buildings){
     if(!b.alive) continue;
+    if(b.team<0) continue;   // 中立建筑不算敌方基地目标
     const tc = buildingCounts[b.team] || (buildingCounts[b.team]={});
     tc[b.defName]=(tc[b.defName]||0)+1;
     if(b.team===team){

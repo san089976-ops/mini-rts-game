@@ -181,7 +181,7 @@ function clickSelect(px,py){
   const wm = worldFromScreen(px,py);
   const ent = entityAt(wm.x, wm.y);
   const add = keys['ShiftLeft']||keys['ShiftRight'];
-  if(ent && ent.team===TEAM_A){
+  if(ent && (ent.team===TEAM_A || (ent instanceof Building && ent.team<0))){
     if(ent instanceof Building){
       if(!add){ selBuilding=ent; selected=[]; }
     } else {

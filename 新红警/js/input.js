@@ -91,18 +91,27 @@ function setupInput(){
   }
   });
   window.addEventListener('keyup', e=>keys[e.code]=false);
-  // 小地图点击
+  // 小地图点击(等比包含缩放,点击位置换算回世界坐标)
+  function mmClickPos(ev, r){
+    const mmw=mmCv.width, mmh=mmCv.height;
+    const s=Math.min(mmw/W, mmh/H);
+    const ox=(mmw-W*s)/2, oy=(mmh-H*s)/2;
+    const cx=(ev.clientX-r.left)/r.width*mmw, cy=(ev.clientY-r.top)/r.height*mmh;
+    return { x:(cx-ox)/s, y:(cy-oy)/s };
+  }
   mmCv.addEventListener('mousedown', e=>{
     if(e.button!==0) return;
     e.preventDefault();
     mouse.mmDown=true;
     const r=mmRect || mmCv.getBoundingClientRect();
-    centerOn((e.clientX-r.left)/r.width*W, (e.clientY-r.top)/r.height*H);
+    const p=mmClickPos(e,r);
+    centerOn(p.x, p.y);
   });
   mmCv.addEventListener('mousemove', e=>{
     if(mouse.mmDown){
       const r=mmRect || mmCv.getBoundingClientRect();
-      centerOn((e.clientX-r.left)/r.width*W, (e.clientY-r.top)/r.height*H);
+      const p=mmClickPos(e,r);
+      centerOn(p.x, p.y);
     }
   });
   // 出售按钮

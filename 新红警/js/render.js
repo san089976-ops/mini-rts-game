@@ -218,7 +218,7 @@ function drawWaterBuildingBase(cx, cy, w, h){
 function drawBuilding(b){
   if(!b.alive) return;
   const x=b.tx*TILE, y=b.ty*TILE, w=b.w*TILE, h=b.h*TILE;
-  const tc=teamCol(b.team);
+  const tc = b.team<0 ? '#c9b58a' : teamCol(b.team);
   const cx=b.x, cy=b.y;
   // 建造厂/战车工厂:使用照片贴图(已去纯白背景),加载失败自动回退程序化绘制
   // 发电站:按升级等级 powerLevel(0/1/2) 选对应贴图 power_0/1/2,不替换建造栏图标 power
@@ -230,8 +230,9 @@ function drawBuilding(b){
   else if(b.defName==='lab') img = imgs['lab_field'];
   else if(b.defName==='turret') img = imgs['turret_field'];
   else if(b.defName==='dock') img = imgs['dock_field'];
+  else if(b.defName==='repair') img = imgs['repair_field'];
   else img = imgs[b.defName];
-  const useImg = img && (b.defName==='command'||b.defName==='factory'||b.defName==='power'||b.defName==='barracks'||b.defName==='refinery'||b.defName==='lab'||b.defName==='turret'||b.defName==='dock');
+  const useImg = !!img;
   // 建造中:地基/阴影按进度淡出(全息投影阶段不投浓影)
   const cAlpha = b.constructing ? 0.35 : 1;
   // ===== 层0:地基/水泥扩展层 =====
@@ -434,7 +435,7 @@ function drawBuilding(b){
     ctx.restore();
     // 队标
     ctx.fillStyle=tc; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
-  } else if(b.defName==='repair'){
+  } else if(b.defName==='repair' && !useImg){
     // 维修站招牌(绿色十字)
     ctx.fillStyle='#2a2f35'; ctx.fillRect(cx-9, y+4, 18, 14);
     ctx.strokeStyle='rgba(0,0,0,.4)'; ctx.strokeRect(cx-9, y+4, 18, 14);
@@ -604,6 +605,8 @@ function unitPhotoImg(u){
   if(t==='tank') return (unitFactionOf(u.team)==='soviet') ? imgs['tank_soviet_field'] : imgs['tank_allies_field'];
   if(t==='abrams' || t==='t90') return imgs[t];
   if(t==='harvester' || t==='destroyer' || t==='transport') return imgs[t+'_field'];
+  if(t==='infantry') return (unitFactionOf(u.team)==='soviet') ? imgs['infantry_soviet_field'] : imgs['infantry_allies_field'];
+  if(t==='exo' || t==='magnet') return imgs[t+'_field'];
   return null;
 }
 /* ---- 预烘焙缓存:滤镜 / 阴影都在第一次用到时烘焙到离屏 Canvas,运行期零 filter 开销 ---- */
@@ -1235,10 +1238,14 @@ function drawUnit(u){
     }
     }
   } else {
-    // 步兵(面向行进/射击方向,分阵营建模)
-    const fac = unitFactionOf(u.team);
-    ctx.rotate(u.facing);
-    const step=Math.sin(time*9)*(u.order.kind==='move'?2.5:0);
+    // 步兵(面向行进/射击方向;有照片贴图则用贴图,否则程序化)
+    if(pImg && pImg.width){
+      ctx.rotate(u.facing);
+      drawUnitImg(u, pImg);
+    } else {
+      const fac = unitFactionOf(u.team);
+      ctx.rotate(u.facing);
+      const step=Math.sin(time*9)*(u.order.kind==='move'?2.5:0);
     // 双脚
     ctx.fillStyle='#1c1c1c';
     ctx.fillRect(-3+step, u.r-3, 3, 3.5);
@@ -1366,6 +1373,7 @@ function drawUnit(u){
       ctx.fillStyle='#3f5238'; ctx.beginPath(); ctx.arc(-1,-5,4.2,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#2f3f2c'; ctx.fillRect(-5.5,-6.2,9,1.8);
       ctx.fillStyle='#c03030'; ctx.fillRect(-1.5,-6.8,3,1.4);
+      }
     }
   }
   ctx.restore();
@@ -1585,31 +1593,33 @@ function drawHudOverlay(){
 }
 function drawMinimap(){
   const mmw=mmCv.width, mmh=mmCv.height;
-  const s=mmw/W;
+  // 等比包含缩放(每世界像素),长或宽任一边贴边即停,并居中
+  const s=Math.min(mmw/W, mmh/H);
+  const ox=(mmw-W*s)/2, oy=(mmh-H*s)/2;
   mmCtx.fillStyle='#1a241a';
   mmCtx.fillRect(0,0,mmw,mmh);
   // 地形
   for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
     const t=terrain[x][y];
     mmCtx.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#273a29');
-    mmCtx.fillRect(x*s,y*s,s+0.4,s+0.4);
+    mmCtx.fillRect(ox+x*TILE*s, oy+y*TILE*s, TILE*s+0.4, TILE*s+0.4);
   }
   // 矿
   mmCtx.fillStyle='#d8b840';
-  for(const o of oreFields) if(o.amount>0) mmCtx.fillRect(o.x*s-2,o.y*s-2,4,4);
+  for(const o of oreFields) if(o.amount>0) mmCtx.fillRect(ox+o.x*s-2, oy+o.y*s-2, 4, 4);
   // 建筑
   for(const b of buildings){
     if(!b.alive) continue;
-    mmCtx.fillStyle=teamCol(b.team);
-    mmCtx.fillRect((b.x-b.w*TILE/2)*s,(b.y-b.h*TILE/2)*s,Math.max(3,b.w*TILE*s),Math.max(3,b.h*TILE*s));
+    mmCtx.fillStyle = b.team<0 ? '#8a8a8a' : teamCol(b.team);
+    mmCtx.fillRect(ox+(b.x-b.w*TILE/2)*s, oy+(b.y-b.h*TILE/2)*s, Math.max(3,b.w*TILE*s), Math.max(3,b.h*TILE*s));
   }
   // 单位
   for(const u of units){
     mmCtx.fillStyle=teamCol(u.team);
-    mmCtx.fillRect(u.x*s-1,u.y*s-1,2,2);
+    mmCtx.fillRect(ox+u.x*s-1, oy+u.y*s-1, 2, 2);
   }
   // 视野框
   mmCtx.strokeStyle='#ffffff';
   mmCtx.lineWidth=1.5;
-  mmCtx.strokeRect(cam.x*s, cam.y*s, viewW()*s, viewH()*s);
+  mmCtx.strokeRect(ox+cam.x*s, oy+cam.y*s, viewW()*s, viewH()*s);
 }

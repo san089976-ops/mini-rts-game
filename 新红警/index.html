@@ -42,7 +42,10 @@
     <div class="mcols">
       <div class="mcol mapcol">
         <h2>选择地图</h2>
-        <div id="mapCards"></div>
+        <div id="mapChoice" class="mapChoice">—</div>
+        <button id="openMapBrowserBtn" class="setRow" onclick="openMapBrowser()">选择地图</button>
+        <button class="setRow" onclick="window.open('map-editor.html','_blank')">打开地图编辑器</button>
+        <p class="teamHint">· 地图来自 map 文件夹(用地图编辑器绘制并保存到该文件夹)<br>· 点「选择地图」浏览可用地图,点选后按「选择地图」确认</p>
       </div>
       <div class="mcol prevcol">
         <h2>出生点 · 先选队伍再点圆点放置</h2>
@@ -71,6 +74,8 @@
     <h1>已暂停</h1>
     <button onclick="resumeGame()">继续游戏</button>
     <button onclick="openSettings()">设 置</button>
+    <button onclick="restartGame()">重新开始</button>
+    <button onclick="quitToMenu()">退 出</button>
     <p class="msub" style="color:#9fc0ac; font-size:13px; letter-spacing:2px;">按 Esc 也可继续</p>
   </div>
   <div id="helpOv">
@@ -98,7 +103,7 @@
         <div class="hrow"><b>提示</b> 电厂保证电力,电力不足时建造/生产减速;采矿车自动采金换钱;维修厂可治疗周围单位</div>
         <div class="hrow"><b>实验室</b> 可研发科技:发电改进 / 矿石精炼 / 高级炮台,以及各阵营专属科技(耗电 100)</div>
         <div class="hrow"><b>船坞</b> 只能整块建在距己方建筑8格内的水面上,生产驱逐舰(海军)/运输艇(两栖);按 I 或点建造按钮后左键水面放置</div>
-        <div class="hrow"><b>装载</b> 选中地面单位右键点运输艇上船(步兵1点/高级步兵2点/矿车·灰熊3点/犀牛4点/基地车·重坦6点,共12点);选中运输艇右键地面=移动到该处(不会自动卸载),到位后选中运输艇点「释放部队」手动卸载</div>
+        <div class="hrow"><b>装载</b> 选中地面单位右键点运输艇上船(步兵1点/高级步兵2点/矿车·M60 3点/T54 4点/基地车·重坦6点,共12点);选中运输艇右键地面=移动到该处(不会自动卸载),到位后选中运输艇点「释放部队」手动卸载</div>
       </div>
       <button id="helpBackBtn" onclick="closeHelp()">返 回</button>
     </div>
@@ -117,6 +122,21 @@
       <button class="setClose" onclick="closeSettings()">关 闭</button>
     </div>
   </div>
+  <div id="mapBrowser">
+    <div class="mapBrowserBox">
+      <h2>选择地图</h2>
+      <p class="msub">点选一个地图文件,再按「选择地图」确认</p>
+      <div class="ovrow">
+        <button onclick="scanMapFolder()">扫描 map 文件夹</button>
+        <span class="ovnote">自动读取文件夹里全部 .js 地图并刷新列表(Chrome/Edge)</span>
+      </div>
+      <div id="mapFileList"></div>
+      <div class="ovbtns">
+        <button id="mapConfirmBtn" onclick="confirmMapChoice()">选择地图</button>
+        <button onclick="closeMapBrowser()">取消</button>
+      </div>
+    </div>
+  </div>
   <div id="soonOv">
     <div class="soonBox">
       <h2>敬请期待</h2>
@@ -125,6 +145,7 @@
     </div>
   </div>
 </div>
+<script src="map/index.js"></script>
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/maps.js"></script>

@@ -145,6 +145,44 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
   border:2px solid #7ac88a; color:#fff; border-radius:12px; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.5); }
 #startBtn:hover { background:linear-gradient(#5ab06a,#3a7a4a); box-shadow:0 0 18px rgba(120,220,140,.5); }
 #menu .mfoot { color:#6f8f7f; font-size:12px; margin-top:4px; letter-spacing:1px; }
+/* ===== 选择地图(文件列表) ===== */
+#mapChoice { color:#ffe27a; font-size:15px; text-align:center; padding:8px 0; min-height:22px; }
+#mapcol .setRow, .mapcol .setRow { width:100%; }
+#mapBrowser {
+  position:absolute; inset:0; background:rgba(0,0,0,.62); z-index:80;
+  display:none; align-items:center; justify-content:center;
+}
+#mapBrowser.show { display:flex; }
+.mapBrowserBox {
+  width:460px; max-width:94%; max-height:84%;
+  background:linear-gradient(#22303a,#141b20);
+  border:2px solid #4a6a5a; border-radius:12px;
+  padding:22px 28px; color:#cfe8d8; font-size:13px;
+  display:flex; flex-direction:column; gap:14px;
+  box-shadow:0 10px 34px rgba(0,0,0,.65);
+}
+.mapBrowserBox h2 { text-align:center; color:#ffe27a; letter-spacing:6px; font-size:22px; }
+.mapBrowserBox .msub { text-align:center; color:#9fc0ac; font-size:12px; }
+#mapFileList { flex:1; overflow-y:auto; border:1px solid #3a5a4a; border-radius:8px; background:rgba(0,0,0,.3); padding:6px; }
+.mapFileRow {
+  display:flex; align-items:center; gap:8px; padding:7px 10px; margin-bottom:4px;
+  border:1px solid #3a5a4a; border-radius:6px; background:linear-gradient(#24342a,#161f18);
+  cursor:pointer; font-size:13px; color:#cfe8d8;
+}
+.mapFileRow:hover { border-color:#7ac88a; }
+.mapFileRow.sel { border-color:#ffe27a; background:#3a4a2a; box-shadow:0 0 10px rgba(255,226,122,.3); }
+.mapFileRow .mfIcon { flex:none; }
+.mapFileRow .mfName { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mapSep { text-align:center; color:#6f8f7f; font-size:11px; margin:8px 0 4px; letter-spacing:2px; }
+.mapEmpty { color:#9fc0ac; font-size:12px; padding:18px 10px; text-align:center; line-height:1.7; }
+.mapBrowserBox .ovbtns { justify-content:center; }
+.ovrow { display:flex; align-items:center; gap:10px; }
+.ovrow button {
+  padding:7px 16px; font-size:13px; letter-spacing:1px; cursor:pointer; flex:none;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a; color:#fff; border-radius:8px;
+}
+.ovrow button:hover { background:linear-gradient(#5ab06a,#3a7a4a); }
+.ovrow .ovnote { font-size:11px; color:#6f8f7f; line-height:1.5; }
 /* ===== 主菜单帮助按钮(左上角,随菜单显示/隐藏) ===== */
 #helpBtn {
   position:fixed; top:16px; left:16px; z-index:65;

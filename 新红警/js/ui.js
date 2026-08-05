@@ -11,9 +11,20 @@ function statRow(label,val){ return '<div class="statrow"><span>'+label+'</span>
 function selImgHTML(key){
   return imgs[key] ? '<img class="selimg" src="'+IMAGES[key]+'">' : '';
 }
+// 面板/介绍栏图标键:坦克按阵营(M60/T54),艾布拉姆用面板专属图,工厂用面板专属图(战场贴图不受影响)
+function unitPanelKey(type, faction){
+  if(type==='tank') return faction==='soviet' ? 'tank_soviet' : 'tank_allies';
+  if(type==='abrams') return 'abrams_panel';
+  if(type==='t90') return 't90_panel';
+  return type;
+}
+function bldPanelKey(defName){
+  if(defName==='factory') return 'factory_panel';
+  return defName;
+}
 function unitStatsHTML(u, multi){
   const d=u.def;
-  let h=selImgHTML(u.type);
+  let h=selImgHTML(unitPanelKey(u.type, unitFactionOf(u.team)));
   h+=hpBarHTML(u.hp,u.maxHp);
   if(multi) h+=statRow('编队生命', selected.reduce((s,x)=>s+x.hp,0)+' / '+selected.reduce((s,x)=>s+x.maxHp,0));
   h+=statRow('伤害', d.damage>0? d.damage+' · '+PROJ_NAME[d.proj] : '—');
@@ -31,7 +42,16 @@ function unitStatsHTML(u, multi){
 }
 function buildingStatsHTML(b){
   const d=b.def;
-  let h=selImgHTML(b.defName);
+  // 中立建筑:只显示属性详情(贴图仅用于战场,不在介绍栏显示)
+  if(b.def.neutral){
+    let h=hpBarHTML(b.hp,b.maxHp);
+    h+=statRow('护甲', ARMOR_NAME[b.armor]||'—');
+    h+=statRow('占地', b.w+'x'+b.h+' 格');
+    if(b.def.dmgMod && b.def.dmgMod.cannon===0.5) h+=statRow('火炮抗性','50%(受火炮伤害减半)');
+    h+='<div class="udesc">'+(b.def.desc||'中立建筑,可被摧毁但不影响胜负')+'</div>';
+    return h;
+  }
+  let h=selImgHTML(bldPanelKey(b.defName));
   h+=hpBarHTML(b.hp,b.maxHp);
   h+=statRow('造价', '$'+d.cost);
   h+=statRow('护甲', ARMOR_NAME[b.armor]||'—');
@@ -68,8 +88,9 @@ function updatePanel(){
     const b=document.createElement('div');
     b.className='btn';
     b.dataset.action='build'; b.dataset.def=defName;
-    const ic = imgs[defName] ? ('style="background-image:url(\''+IMAGES[defName]+'\')"') : '';
-    b.innerHTML='<div class="icon" '+ic+'>'+(imgs[defName]?'':d.name[0])+'</div><div class="bname">'+d.name+'</div><div class="cost">$'+d.cost+'</div>'+(extra||'')+'<span class="num">'+btnIdx+'</span>';
+    const k=bldPanelKey(defName);
+    const ic = imgs[k] ? ('style="background-image:url(\''+IMAGES[k]+'\')"') : '';
+    b.innerHTML='<div class="icon" '+ic+'>'+(imgs[k]?'':d.name[0])+'</div><div class="bname">'+d.name+'</div><div class="cost">$'+d.cost+'</div>'+(extra||'')+'<span class="num">'+btnIdx+'</span>';
     panel.appendChild(b);
   };
   const mkUnit=(defName)=>{
@@ -79,8 +100,9 @@ function updatePanel(){
     const b=document.createElement('div');
     b.className='btn';
     b.dataset.action='train'; b.dataset.def=defName;
-    const ic = imgs[defName] ? ('style="background-image:url(\''+IMAGES[defName]+'\')"') : '';
-    b.innerHTML='<div class="icon" '+ic+'>'+(imgs[defName]?'':d.name[0])+'</div><div class="bname">'+d.name+'</div><div class="cost">$'+d.cost+'</div><span class="cnt">x'+cnt+'</span><span class="num">'+btnIdx+'</span>';
+    const k=unitPanelKey(defName, playerFaction);
+    const ic = imgs[k] ? ('style="background-image:url(\''+IMAGES[k]+'\')"') : '';
+    b.innerHTML='<div class="icon" '+ic+'>'+(imgs[k]?'':d.name[0])+'</div><div class="bname">'+d.name+'</div><div class="cost">$'+d.cost+'</div><span class="cnt">x'+cnt+'</span><span class="num">'+btnIdx+'</span>';
     panel.appendChild(b);
   };
   const mkAction=(label,action,enabled,data)=>{
@@ -99,7 +121,7 @@ function updatePanel(){
     return;
   }
   if(selBuilding && selBuilding.alive){
-    title.textContent = selBuilding.def.name + ' ('+(selBuilding.team===TEAM_A?'我方':'敌方')+')';
+    title.textContent = selBuilding.def.name + (selBuilding.team===TEAM_A?' (我方)':(selBuilding.team<0?' (中立)':' (敌方)'));
     desc.innerHTML = buildingStatsHTML(selBuilding);
     if(selBuilding.team===TEAM_A){
       if(selBuilding.constructing){ mkAction('建造中...','none',false); }
@@ -151,6 +173,8 @@ function updatePanel(){
           mkAction('无功能','none',false);
         }
       }
+    } else if(selBuilding.team<0){
+      mkAction('中立建筑','none',false);
     } else {
       mkAction('敌方建筑','none',false);
     }

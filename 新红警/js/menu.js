@@ -2,18 +2,74 @@
 /* ============ menu.js: 主菜单(地图/队伍/分组/颜色/资金/出生点) ============ */
 const START_MONEY_OPTS = [5000,10000,20000,30000,50000,100000];
 let menuState = {
-  mapIdx: 0,
+  mapChoice: {kind:'builtin', idx:0},          // 当前选中地图: {kind:'custom',file,id} 或 {kind:'builtin',idx}
   startMoney: 10000,             // 我方开局资金(难度)
   openDrop: null,                // 当前展开的下拉: 'money' | 'group-i' | 'color-i'
-  spawnIdx: [0,1,null,null],     // 每队(玩家+电脑1..3)选中的出生点下标,未选=null
+  spawnIdx: [0,1,2,3,4,5,6,7],   // 每队(最多8)选中的出生点下标,不可重复
   spawnTarget: 0,                // 出生点放置模式:当前操作的队伍
   playerFaction: 'allies',
-  compFactions: ['soviet','soviet','soviet'],
-  groups: [1,1,1],               // 电脑所在组 0=A(与玩家同盟,蓝)/1=B/2=C/3=D(敌对,红)
-  compDiffs: ['easy','easy','easy'],  // 电脑难度: easy简单 / medium中等 / brutal残酷(会研发实验室科技)
-  colors: [6,3,2,8],             // 每队所选颜色下标(黄黑青红深红绿蓝天蓝紫)
-  compCount: 1,
+  compFactions: ['soviet','soviet','soviet','soviet','soviet','soviet','soviet'],
+  groups: [1,1,1,1,1,1,1],       // 电脑所在组 0=A(与玩家同盟,蓝)/1..3=敌对(红)
+  compDiffs: ['easy','easy','easy','easy','easy','easy','easy'],  // 电脑难度
+  colors: [6,3,2,8,4,1,5,7],     // 每队所选颜色下标(最多8)
+  compCount: 1,                  // 内置地图可选的电脑数(总队伍=compCount+1,最大8)
 };
+let customMapsLoaded = false;
+
+/* ============ 队伍数:内置地图可选 2~8;自制地图由出生点数决定(固定) ============ */
+function teamCount(){
+  const m=currentMap();
+  if(m && m.custom==='edited' && Array.isArray(m.spawns)){
+    const c = m.spawns.length;
+    return (c>=2 && c<=8) ? c : 2;
+  }
+  return Math.max(2, Math.min(8, (menuState.compCount||0)+1));
+}
+function isCustomMap(){ const m=currentMap(); return !!(m && m.custom==='edited'); }
+/* 让每队各占一个出生点(不可重复);空位自动补剩余点 */
+function initSpawnIdx(){
+  const n=teamCount();
+  const spawns=getSpawns(n);
+  for(let i=0;i<n;i++){
+    const si=menuState.spawnIdx[i];
+    if(si===null || si===undefined || si<0 || si>=spawns.length) menuState.spawnIdx[i]=null;
+  }
+  const seen=new Set();
+  for(let i=0;i<n;i++){
+    if(menuState.spawnIdx[i]!==null){
+      if(seen.has(menuState.spawnIdx[i])) menuState.spawnIdx[i]=null;
+      else seen.add(menuState.spawnIdx[i]);
+    }
+  }
+  const free=[]; for(let j=0;j<spawns.length;j++) if(!seen.has(j)) free.push(j);
+  let fi=0;
+  for(let i=0;i<n;i++){
+    if(menuState.spawnIdx[i]===null){
+      menuState.spawnIdx[i] = free[fi]!==undefined ? free[fi] : (i % Math.max(1,spawns.length));
+      seen.add(menuState.spawnIdx[i]);
+      if(free[fi]!==undefined) fi++;
+    }
+  }
+}
+
+/* ============ 加载 map 文件夹的地图(map/index.js 给出文件名,逐个注入) ============ */
+function loadCustomMaps(done){
+  window.CUSTOM_MAPS = window.CUSTOM_MAPS || [];
+  const idx = window.CUSTOM_MAPS_INDEX || [];
+  if(!idx.length){ customMapsLoaded=true; if(done) done(); return; }
+  let remaining = idx.length;
+  for(const name of idx){
+    const start = window.CUSTOM_MAPS.length;
+    const s=document.createElement('script');
+    s.src='map/'+name;
+    s.onload=()=>{
+      for(let i=start;i<window.CUSTOM_MAPS.length;i++){ const m=window.CUSTOM_MAPS[i]; if(m && !m._file) m._file=name; }
+      remaining--; if(remaining<=0){ customMapsLoaded=true; if(done) done(); }
+    };
+    s.onerror=()=>{ remaining--; if(remaining<=0){ customMapsLoaded=true; if(done) done(); } };
+    document.head.appendChild(s);
+  }
+}
 
 /* ============ 模式选择页(登陆页) ============ */
 function enterSkirmish(){
@@ -36,52 +92,46 @@ function openSettings(){ document.getElementById('settingsOv').classList.add('sh
 function closeSettings(){ document.getElementById('settingsOv').classList.remove('show'); }
 
 /* ============ 出生点分配辅助 ============ */
-function normalizeSpawns(){
-  const n=menuState.compCount+1;
-  const used=new Set();
-  for(let i=0;i<n;i++){
-    const v=menuState.spawnIdx[i];
-    if(v!==null && v>=0 && v<n && !used.has(v)){ used.add(v); }
-    else menuState.spawnIdx[i]=null;
-  }
-  let k=0;
-  for(let i=0;i<n;i++){
-    if(menuState.spawnIdx[i]===null){
-      while(k<n && used.has(k)) k++;
-      if(k<n){ menuState.spawnIdx[i]=k; used.add(k); }
-    }
-  }
-}
 
 function buildGameSetup(){
-  const teams=[{name:'玩家', faction:menuState.playerFaction, group:0, ai:false, color:menuState.colors[0], startMoney:menuState.startMoney}];
-  for(let i=0;i<menuState.compCount;i++){
-    teams.push({name:'电脑'+(i+1), faction:menuState.compFactions[i], group:menuState.groups[i], ai:true, color:menuState.colors[i+1], diff:menuState.compDiffs[i]});
-  }
-  const n=teams.length;
-  const spawns=getSpawns(n);
-  // 出生点:优先用已选点,重复/未选自动补剩余点
+  const n = teamCount();
+  const map = currentMap();
+  const spawns = getSpawns(n);
+  initSpawnIdx();
+  // 按出生点下标给每队分配点位(不可重复)
   const used=new Set();
-  const assign=teams.map((t,i)=>{
-    const idx=menuState.spawnIdx[i];
-    if(idx!==null && idx>=0 && idx<n && !used.has(idx)){ used.add(idx); return spawns[idx]; }
-    return null;
-  });
-  const free=[]; for(let i=0;i<n;i++) if(!used.has(i)) free.push(i);
+  const assign=[];
+  for(let i=0;i<n;i++){
+    const si=menuState.spawnIdx[i];
+    if(si!==null && si>=0 && si<spawns.length && !used.has(si)){ assign[i]=spawns[si]; used.add(si); }
+    else assign[i]=null;
+  }
+  const free=[]; for(let j=0;j<spawns.length;j++) if(!used.has(j)) free.push(j);
   let fi=0;
-  for(let i=0;i<teams.length;i++) if(!assign[i]){ assign[i]=spawns[free[fi]!==undefined?free[fi]:0]; fi++; }
-  teams.forEach((t,i)=>t.spawn=assign[i]);
-  return { map: MAPS[menuState.mapIdx], teams };
+  for(let i=0;i<n;i++){
+    if(!assign[i]){
+      const sp = free[fi]!==undefined ? spawns[free[fi]] : (SPAWN_POINTS[n] ? SPAWN_POINTS[n][i] : null);
+      assign[i] = (sp && sp[0]!==undefined) ? [sp[0], sp[1]] : [8+i*8, 8];
+      if(free[fi]!==undefined) fi++;
+    }
+  }
+  const teams=[];
+  teams.push({name:'玩家', faction:menuState.playerFaction, group:0, ai:false, color:menuState.colors[0], startMoney:menuState.startMoney, spawn:assign[0]||[8,8]});
+  for(let i=1;i<n;i++){
+    teams.push({name:'电脑'+i, faction:menuState.compFactions[i-1], group:menuState.groups[i-1], ai:true,
+      color:menuState.colors[i], diff:menuState.compDiffs[i-1], spawn:assign[i]||[8+i,8]});
+  }
+  return { map, teams };
 }
 
 function selectMap(i){
-  menuState.mapIdx=i;
+  menuState.mapChoice = {kind:'builtin', idx:i};
   buildMenu(true);
 }
 function setCompCount(n){
-  menuState.compCount=n;
-  menuState.spawnTarget=Math.min(menuState.spawnTarget, n);
-  normalizeSpawns();
+  menuState.compCount=n;   // n=电脑数量(总队伍=n+1,最大8)
+  menuState.spawnTarget=Math.min(menuState.spawnTarget, Math.max(0,n));
+  initSpawnIdx();
   buildMenu(true);
 }
 function setTeamFaction(i,fac){
@@ -101,14 +151,38 @@ function setSpawn(teamIdx, pointIdx){
   normalizeSpawns();
   buildMenu(false);
 }
+function normalizeSpawns(){
+  const n=teamCount();
+  const spawns=getSpawns(n);
+  const used=new Set();
+  for(let i=0;i<n;i++){
+    const v=menuState.spawnIdx[i];
+    if(v!==null && v>=0 && v<spawns.length && !used.has(v)){ used.add(v); }
+    else menuState.spawnIdx[i]=null;
+  }
+  let k=0;
+  for(let i=0;i<n;i++){
+    if(menuState.spawnIdx[i]===null){
+      while(k<spawns.length && used.has(k)) k++;
+      if(k<spawns.length){ menuState.spawnIdx[i]=k; used.add(k); }
+    }
+  }
+}
 
 function buildMenu(regen){
   if(regen){ gameSetup=buildGameSetup(); genTerrain(); }
-  renderMapCards();
+  renderMapChoice();
   renderMoneyRow();
   renderTeamRows();
   renderSpawnButtons();
   renderMenuPreview();
+}
+
+function renderMapChoice(){
+  const el=document.getElementById('mapChoice');
+  if(!el) return;
+  const m=currentMap();
+  el.textContent = (m.custom==='edited' ? '📄 ' : '内置 · ') + (m.name||'未命名');
 }
 
 function renderMoneyRow(){
@@ -121,13 +195,148 @@ function renderMapCards(){
   const el=document.getElementById('mapCards');
   if(!el) return;
   el.innerHTML='';
+}
+
+/* ============ 地图浏览(文件列表样式,来源 map 文件夹 + 内置) ============ */
+let pendingMapChoice = null;
+function esc(s){ return String(s).replace(/[<>&"]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+function openMapBrowser(){
+  pendingMapChoice = menuState.mapChoice;
+  renderMapFileList();
+  document.getElementById('mapBrowser').classList.add('show');
+}
+function renderMapFileList(){
+  const el=document.getElementById('mapFileList');
+  el.innerHTML='';
+  const list = window.CUSTOM_MAPS || [];
+  if(!list.length){
+    const p=document.createElement('div');
+    p.className='mapEmpty';
+    p.textContent='map 文件夹还没有地图。点「扫描 map 文件夹」读取,或打开地图编辑器绘制并保存。';
+    el.appendChild(p);
+  } else {
+    for(const m of list){
+      const row=document.createElement('div');
+      row.className='mapFileRow';
+      row._file = m._file;
+      row._cid = m.id;
+      row.innerHTML='<span class="mfIcon">📄</span><span class="mfName">'+esc(m._file || ((m.name||m.id||'未命名')+'.js'))+'</span>';
+      row.onclick=()=>{
+        for(const r of el.children) r.classList.remove('sel');
+        row.classList.add('sel');
+        pendingMapChoice={kind:'custom', file:m._file, id:m.id};
+      };
+      el.appendChild(row);
+    }
+  }
+  const sep=document.createElement('div');
+  sep.className='mapSep';
+  sep.textContent='— 内置地图(程序生成) —';
+  el.appendChild(sep);
   MAPS.forEach((m,i)=>{
-    const c=document.createElement('div');
-    c.className='mapcard'+(i===menuState.mapIdx?' sel':'');
-    c.innerHTML='<div class="mname">'+m.name+'</div><div class="mdesc">'+m.desc+'</div>';
-    c.onclick=()=>selectMap(i);
-    el.appendChild(c);
+    const row=document.createElement('div');
+    row.className='mapFileRow';
+    row._bidx=i;
+    row.innerHTML='<span class="mfIcon">🗺</span><span class="mfName">内置 · '+esc(m.name)+'</span>';
+    row.onclick=()=>{
+      for(const r of el.children) r.classList.remove('sel');
+      row.classList.add('sel');
+      pendingMapChoice={kind:'builtin', idx:i};
+    };
+    el.appendChild(row);
   });
+  // 高亮当前已选
+  const cur=menuState.mapChoice;
+  if(cur){
+    for(const r of el.querySelectorAll('.mapFileRow')){
+      if(cur.kind==='custom' && (r._file && cur.file && r._file===cur.file)){ r.classList.add('sel'); }
+      else if(cur.kind==='custom' && (!cur.file || cur.file===cur.id) && r._cid===cur.id){ r.classList.add('sel'); }
+      else if(cur.kind==='builtin' && r._bidx===cur.idx){ r.classList.add('sel'); }
+    }
+  }
+}
+function confirmMapChoice(){
+  if(!pendingMapChoice) return;
+  menuState.mapChoice = pendingMapChoice;
+  pendingMapChoice=null;
+  closeMapBrowser();
+  buildMenu(true);
+}
+function closeMapBrowser(){
+  pendingMapChoice=null;
+  document.getElementById('mapBrowser').classList.remove('show');
+}
+
+/* ============ 扫描 map 文件夹(文件系统访问 API,Chrome/Edge) ============ */
+let mapDirHandle = null;
+function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('minira_mapdb',1); r.onupgradeneeded=()=>{ r.result.createObjectStore('kv'); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbGet(key){ try{ const db=await idbOpen(); return await new Promise((res,rej)=>{ const tx=db.transaction('kv','readonly').objectStore('kv').get(key); tx.onsuccess=()=>res(tx.result); tx.onerror=()=>rej(tx.error); }); }catch(e){ return null; } }
+async function idbSet(key,val){ try{ const db=await idbOpen(); await new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite').objectStore('kv').put(val,key); tx.onsuccess=res; tx.onerror=()=>rej(tx.error); }); }catch(e){} }
+async function readMapsFromHandle(h){
+  const maps=[];
+  for await (const [name, fh] of h.entries()){
+    if(!name.endsWith('.js') || name==='index.js') continue;
+    try{
+      const file=await fh.getFile();
+      const text=await file.text();
+      const prev=window.CUSTOM_MAPS||[];
+      window.CUSTOM_MAPS=[];
+      (0,eval)(text);
+      const m=window.CUSTOM_MAPS && window.CUSTOM_MAPS[0];
+      window.CUSTOM_MAPS=prev;
+      if(m){ m._file=name; maps.push(m); }
+    }catch(e){}
+  }
+  maps.sort((a,b)=>String(a._file).localeCompare(String(b._file)));
+  return maps;
+}
+async function writeMapIndex(h, names){
+  try{
+    names=names.filter(n=>n && n.endsWith('.js') && n!=='index.js').sort();
+    const fh=await h.getFileHandle('index.js',{create:true});
+    const w=await fh.createWritable();
+    await w.write('window.CUSTOM_MAPS_INDEX='+JSON.stringify(names)+';\n');
+    await w.close();
+  }catch(e){}
+}
+async function scanMapFolder(){
+  if(!('showDirectoryPicker' in window)){ alert('当前浏览器不支持直接读取文件夹,请用 Chrome/Edge,或在地图编辑器里保存(自动生成 index.js)。'); return; }
+  try{
+    const h=await window.showDirectoryPicker();
+    mapDirHandle=h;
+    const maps=await readMapsFromHandle(h);
+    if(maps.length){ window.CUSTOM_MAPS=maps; }
+    else { window.CUSTOM_MAPS=[]; }
+    await writeMapIndex(h, maps.map(m=>m._file));   // 顺手刷新 index.js,下次启动自动生效
+    await idbSet('dirHandle', h);
+    customMapsLoaded=true;
+    setMenuStatus('已扫描 map 文件夹: '+maps.length+' 张地图');
+    // 若当前正打开弹层则刷新列表
+    if(document.getElementById('mapBrowser').classList.contains('show')){
+      pendingMapChoice = menuState.mapChoice;
+      renderMapFileList();
+    }
+    buildMenu(true);
+  }catch(e){ if(e && e.name!=='AbortError') setMenuStatus('扫描失败: '+e.message); }
+}
+// 启动时若有已保存的文件夹句柄,自动扫描刷新(不用手动重新连接;无用户手势时可能被浏览器拒,失败则保留 index.js 的列表)
+async function autoScanStored(){
+  const h=await idbGet('dirHandle');
+  if(!h) return;
+  mapDirHandle=h;
+  try{
+    if(h.queryPermission && (await h.queryPermission({mode:'read'}))!=='granted'){
+      if(h.requestPermission){ try{ await h.requestPermission({mode:'read'}); }catch(e){} }
+    }
+    const maps=await readMapsFromHandle(h);
+    if(maps.length){ window.CUSTOM_MAPS=maps; }
+    customMapsLoaded=true;
+  }catch(e){}
+  buildMenu(true);
+}
+function setMenuStatus(s){
+  const el=document.getElementById('status');
+  if(el) el.textContent=s;
 }
 
 function teamRowHTML(name, fac, teamIdx, compIdx){
@@ -236,17 +445,25 @@ function renderTeamRows(){
   const el=document.getElementById('teamRows');
   if(!el) return;
   el.innerHTML='';
-  const cnt=document.createElement('div');
-  cnt.className='trow cntrow';
-  let cntHtml='<span class="tname">队伍数</span>';
-  [2,3,4].forEach(n=>{
-    cntHtml+='<button class="facBtn'+(menuState.compCount===n-1?' sel':'')+'" onclick="setCompCount('+(n-1)+')">'+n+'</button>';
-  });
-  cnt.innerHTML=cntHtml;
-  el.appendChild(cnt);
+  const n=teamCount();
+  if(isCustomMap()){
+    const c=document.createElement('div');
+    c.className='trow';
+    c.innerHTML='<span class="tname">队伍数</span><span style="color:#ffe27a">该地图固定 '+n+' 名玩家</span>';
+    el.appendChild(c);
+  } else {
+    const cnt=document.createElement('div');
+    cnt.className='trow cntrow';
+    let cntHtml='<span class="tname">队伍数</span>';
+    [2,3,4,5,6,7,8].forEach(nn=>{
+      cntHtml+='<button class="facBtn'+(menuState.compCount===nn-1?' sel':'')+'" onclick="setCompCount('+(nn-1)+')">'+nn+'</button>';
+    });
+    cnt.innerHTML=cntHtml;
+    el.appendChild(cnt);
+  }
   el.appendChild(teamRowHTML('玩家', menuState.playerFaction, 0, null));
-  for(let i=0;i<menuState.compCount;i++){
-    el.appendChild(teamRowHTML('电脑'+(i+1), menuState.compFactions[i], i+1, i));
+  for(let i=1;i<n;i++){
+    el.appendChild(teamRowHTML('电脑'+i, menuState.compFactions[i-1], i, i-1));
   }
 }
 
@@ -254,7 +471,13 @@ function renderSpawnButtons(){
   const el=document.getElementById('spawnSel');
   if(!el) return;
   el.innerHTML='';
-  const n=menuState.compCount+1;
+  const n=teamCount();
+  if(isCustomMap()){
+    const h=document.createElement('div');
+    h.className='teamHint';
+    h.textContent='该地图固定 '+n+' 名玩家 · 先点下方玩家按钮,再点预览图上的出生点圆点分配点位(不可重复)';
+    el.appendChild(h);
+  }
   for(let i=0;i<n;i++){
     const b=document.createElement('button');
     b.className='spawnBtn'+(menuState.spawnTarget===i?' sel':'');
@@ -270,18 +493,23 @@ function renderMenuPreview(){
   if(!cv) return;
   const cw=cv.width, ch=cv.height;
   const g=cv.getContext('2d');
-  const s=cw/MAP_W;
+  // 等比包含缩放:直到长或宽任一边与画板等距(正方形/竖长图也能完整显示),并居中
+  const s = Math.min(cw/MAP_W, ch/MAP_H);
+  const ox = (cw - MAP_W*s)/2, oy = (ch - MAP_H*s)/2;
   g.fillStyle='#0a120c'; g.fillRect(0,0,cw,ch);
   for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
     const t=terrain[x][y];
     g.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#2a4a2e');
-    g.fillRect(x*s,y*s,s+0.3,s+0.3);
+    g.fillRect(ox+x*s, oy+y*s, s+0.4, s+0.4);
   }
-  const n=menuState.compCount+1;
+  // 金矿
+  g.fillStyle='#d8b840';
+  for(const o of oreFields) if(o.amount>0) g.fillRect(ox+o.x*s-1.5, oy+o.y*s-1.5, 3, 3);
+  const n=teamCount();
   const spawns=getSpawns(n);
   spawns.forEach(([sx,sy],p)=>{
-    const px=(sx+0.5)*s, py=(sy+0.5)*s;
-    const owner=menuState.spawnIdx.indexOf(p);
+    const px=ox+(sx+0.5)*s, py=oy+(sy+0.5)*s;
+    const owner=menuState.spawnIdx.indexOf(p);   // 哪个队占了该点(-1=空闲)
     const isActive=owner===menuState.spawnTarget;
     // 底座
     g.beginPath(); g.arc(px,py,7,0,Math.PI*2);
@@ -308,9 +536,10 @@ function renderMenuPreview(){
     cv._bound=true;
     cv.addEventListener('click', e=>{
       const r=cv.getBoundingClientRect();
-      const s2=cw/MAP_W;
-      const cx=(e.clientX-r.left)/s2, cy=(e.clientY-r.top)/s2;
-      const sps=getSpawns(menuState.compCount+1);
+      const s2 = Math.min(cw/MAP_W, ch/MAP_H);
+      const o2x = (cw - MAP_W*s2)/2, o2y = (ch - MAP_H*s2)/2;
+      const cx=(e.clientX-r.left-o2x)/s2, cy=(e.clientY-r.top-o2y)/s2;
+      const sps=getSpawns(teamCount());
       let best=-1,bd=12;
       sps.forEach(([sx,sy],i)=>{ const d=Math.hypot(cx-sx-0.5,cy-sy-0.5); if(d<bd){bd=d;best=i;} });
       if(best!==-1) setSpawn(menuState.spawnTarget, best);

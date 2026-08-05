@@ -20,15 +20,21 @@ function setupGame(){
   for(let i=0;i<gameTeams.length;i++) researches[i] = {};
   controlGroups = {};   // 每局清空数字编队
   genTerrain();
-  // 布置所有队伍:出生点上方空地生成初始单位
-  for(let i=0;i<gameTeams.length;i++){
-    const [bx,by] = gameTeams[i].spawn;
-    placeBuilding(i,'command',bx,by);
-    if(i===0) placeBuilding(i,'power',bx+3,by-1);
-    units.push(new Unit('infantry',i,bx*TILE+TILE/2,(by-1)*TILE+TILE/2));
-    units.push(new Unit('infantry',i,(bx+1)*TILE+TILE/2,(by-1)*TILE+TILE/2));
-    units.push(new Unit('harvester',i,(bx+2)*TILE+TILE/2,(by-1)*TILE+TILE/2));
+  // 布置所有队伍:自制地图按保存的数据放建筑/单位;其余地图出生点上方空地生成初始单位
+  if(gameSetup.map.custom==='edited'){
+    placeMapEntities(gameSetup.map);
+  } else {
+    for(let i=0;i<gameTeams.length;i++){
+      const [bx,by] = gameTeams[i].spawn;
+      placeBuilding(i,'command',bx,by);
+      if(i===0) placeBuilding(i,'power',bx+3,by-1);
+      units.push(new Unit('infantry',i,bx*TILE+TILE/2,(by-1)*TILE+TILE/2));
+      units.push(new Unit('infantry',i,(bx+1)*TILE+TILE/2,(by-1)*TILE+TILE/2));
+      units.push(new Unit('harvester',i,(bx+2)*TILE+TILE/2,(by-1)*TILE+TILE/2));
+    }
   }
+  // 兜底:有出生点但该队没有建造厂时自动补一个
+  ensureTeamCommands();
   initAI();
   updatePanel();
   const [bx0,by0] = gameTeams[0].spawn;
@@ -96,6 +102,11 @@ function resumeGame(){
   paused=false;
   document.getElementById('pauseOv').classList.remove('show');
 }
+function quitToMenu(){
+  paused=true;   // 冻结后台逻辑,避免隐藏的战场上继续运行
+  document.getElementById('pauseOv').classList.remove('show');
+  showMenu();
+}
 
 window.addEventListener('error', e=>{
   const ov=document.getElementById('overlay');
@@ -117,6 +128,8 @@ window.addEventListener('load',()=>{
   resize();
   window.addEventListener('resize',resize);
   setupInput();
-  buildMenu(true);         // 生成菜单:地图卡片/队伍/预览(内部会生成地图)
+  buildMenu(true);         // 生成菜单:地图/队伍/预览(内部会生成地图)
+  loadCustomMaps(()=>buildMenu(true));   // 加载 map/index.js 列出的自制地图后刷新地图列表
+  autoScanStored();                       // 若有已保存的 map 文件夹句柄,自动扫描刷新(尽力而为)
   requestAnimationFrame(frame);
 });

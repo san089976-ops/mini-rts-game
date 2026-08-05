@@ -59,6 +59,8 @@ function armorMod(ent, proj, attacker){
   const armor = ent && ent.armor ? ent.armor : 'wood';
   // 磁暴步兵:对布甲修正比提升至 150%
   if(attacker && attacker.type==='magnet' && armor==='cloth') return 1.5;
+  // 建筑专属弹丸修正(如核电站/五角大楼:火炮伤害 50%)
+  if(ent && ent.def && ent.def.dmgMod && ent.def.dmgMod[proj] !== undefined) return ent.def.dmgMod[proj];
   const row = ARMOR_MOD[armor];
   return (row && row[proj]) || 1;
 }
@@ -77,7 +79,7 @@ const UNIT_BOX = {
 const TURN_RATE = 6;
 const BASE_UNITS = {
   infantry: { name:'动员兵', hp:90, speed:74, range:72, damage:9, rof:0.9, cost:100, r:9,  build:4, armor:'cloth', proj:'bullet', desc:'低造价轻步兵,前期侦察与骚扰的主力' },
-  tank:     { name:'灰熊坦克', hp:330, speed:60, range:118, damage:38, rof:0.55, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'中型主战坦克,火力与装甲均衡,战场中坚' },
+  tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:0.55, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
   harvester:{ name:'采矿车', hp:1200, speed:56, range:0, damage:0, rof:0, cost:700, r:13, build:11, capacity:500, armor:'castiron', proj:null, desc:'自动往返采集金矿并送回基地换钱,经济命脉' },
   mcv:      { name:'基地车', hp:900, speed:45, range:0, damage:0, rof:0, cost:1800, r:14, build:14, armor:'titanium', proj:null, desc:'可移动的基地核心,在空地展开(快捷键 E)后变成新的建造厂' },
 };
@@ -116,7 +118,7 @@ function getUnitDefs(faction){
   } else {
     defs = {
       infantry:{ ...BASE_UNITS.infantry },
-      tank:    { ...BASE_UNITS.tank, name:'犀牛坦克', hp:450, damage:45, cost:650, r:14 },
+      tank:    { ...BASE_UNITS.tank, name:'T54', hp:450, damage:45, cost:650, r:14 },
       harvester:{ ...BASE_UNITS.harvester },
       mcv:      { ...BASE_UNITS.mcv },
       t90:     { name:'T90坦克', hp:900, speed:72, range:116, damage:80, rof:0.9, cost:1000, r:13, build:9, armor:'titanium', proj:'cannon', desc:'苏军主战坦克,机动灵活射速快,需升级战车工厂' },
@@ -151,6 +153,15 @@ const BLD_DEFS = {
   repair:   { name:'维修厂',  w:2,h:2, hp:560,  cost:500, power:0, buildTime:8,  train:[],  color:'#7a6a4a', armor:'wood', weapon:null },
   lab:      { name:'实验室',  w:2,h:2, hp:600,  cost:1000, power:0, buildTime:20, build:[],  color:'#5a5a8a', armor:'wood', weapon:null },
   dock:     { name:'船坞',    w:2,h:2, hp:720,  cost:600, power:0, buildTime:10, train:['destroyer','transport'], color:'#4a7a8a', armor:'wood', weapon:null, water:true },
+  /* ============ 中立建筑(不可建造:不出现在任何可建列表,仅地图装饰) ============ */
+  school:   { name:'学校',     w:2,h:2, hp:1000, cost:0, power:0, buildTime:0, build:[], color:'#c9b58a', armor:'concrete', weapon:null, neutral:true, desc:'中立建筑:城市学校,占地2x2,混凝土护甲。可被摧毁,但不影响胜负' },
+  hospital: { name:'医院',     w:2,h:2, hp:1200, cost:0, power:0, buildTime:0, build:[], color:'#d8a0a0', armor:'concrete', weapon:null, neutral:true, desc:'中立建筑:城市医院,占地2x2,混凝土护甲。可被摧毁,但不影响胜负' },
+  house_jp1:{ name:'日式独栋别墅1', w:1,h:1, hp:500, cost:0, power:0, buildTime:0, build:[], color:'#b09a7a', armor:'wood', weapon:null, neutral:true, desc:'中立建筑:日式独栋别墅,占地1x1,木制护甲' },
+  house_jp2:{ name:'日式独栋别墅2', w:1,h:1, hp:500, cost:0, power:0, buildTime:0, build:[], color:'#b09a7a', armor:'wood', weapon:null, neutral:true, desc:'中立建筑:日式独栋别墅,占地1x1,木制护甲' },
+  house_us:{ name:'美式独栋建筑', w:1,h:1, hp:600, cost:0, power:0, buildTime:0, build:[], color:'#c0b0a0', armor:'wood', weapon:null, neutral:true, desc:'中立建筑:美式独栋住宅,占地1x1,木制护甲' },
+  nuclear:  { name:'核电站',   w:3,h:3, hp:2300, cost:0, power:0, buildTime:0, build:[], color:'#7a8a5a', armor:'concrete', weapon:null, neutral:true, dmgMod:{cannon:0.5}, desc:'中立建筑:核电站,占地3x3,混凝土护甲,受火炮伤害修正比为50%' },
+  mall:     { name:'综合商业体', w:4,h:4, hp:4000, cost:0, power:0, buildTime:0, build:[], color:'#a09a8a', armor:'wood', weapon:null, neutral:true, desc:'中立建筑:综合商业体,占地4x4,木制护甲' },
+  pentagon: { name:'五角大楼', w:4,h:4, hp:5000, cost:0, power:0, buildTime:0, build:[], color:'#9a9a8a', armor:'concrete', weapon:null, neutral:true, dmgMod:{cannon:0.5}, desc:'中立建筑:五角大楼,占地4x4,混凝土护甲,受火炮伤害修正比为50%' },
 };
 // 船坞可建造范围:整块落水的同时,须距离最近己方建筑 ≤ 此格数(贴近基地下海,不能乱修)
 const DOCK_BUILD_RANGE = 8;
@@ -188,23 +199,44 @@ function hasResearch(team, id){
 /* ============ 贴图配置 ============ */
 // 单位/建筑贴图映射。单位素材统一放 img/units/ 目录,以后替换单位素材直接改这个文件夹里的同名文件即可
 const IMAGES = {
-  infantry:'img/units/infantry.png', tank:'img/units/tank.png', harvester:'img/units/harvester.png',
+  infantry:'img/units/infantry.png', tank:'img/units/tank.png', harvester:'img/harvester.png',
   command:'img/command.png', power:'img/power.png', barracks:'img/barracks.png',
   factory:'img/factory.png', refinery:'img/refinery.png', turret:'img/turret.png',
   abrams:'img/units/abrams.png', t90:'img/units/t90.png',
+  // 建造栏/介绍栏专属图标(战场贴图用各自 _field,互不影响)
+  tank_allies:'img/tank_allies.png',       // 灰熊(M60)面板图标
+  tank_soviet:'img/tank_soviet.png',       // 犀牛(T54)面板图标
+  abrams_panel:'img/abrams_panel.png',     // 艾布拉姆斯面板图标
+  t90_panel:'img/t90_panel.png',           // T90面板图标(战场用 img/units/t90.png)
+  factory_panel:'img/factory_panel.png',   // 战车工厂面板图标
+  lab:'img/lab.png',                       // 实验室面板图标(战场用 lab_field)
+  repair:'img/repair.png',                 // 维修厂面板图标(战场用 repair_field)
+  dock:'img/dock.png',                     // 船坞面板图标(战场用 dock_field)
+  destroyer:'img/destroyer.png',           // 驱逐舰面板图标(战场用 destroyer_field)
+  transport:'img/transport.jpg',           // 登陆艇面板图标(战场用 transport_field)
   // 发电站战场等级贴图(powerLevel 0/1/2),与建造栏图标 power 分开
   power0:'img/power_0.png', power1:'img/power_1.png', power2:'img/power_2.png',
   // 兵营/精炼厂战场贴图,与建造栏/解释栏图标 barracks/refinery 分开
   barracks_field:'img/barracks_field.png', refinery_field:'img/refinery_field.png',
-  lab_field:'img/lab_field.png',
+  lab_field:'img/lab_field.png', repair_field:'img/repair_field.png',
   turret_field:'img/turret_field.png', dock_field:'img/dock_field.png',
   harvester_field:'img/harvester_field.png',   // 采矿车战场本体贴图(已顺时针90°,车头朝上)
   destroyer_field:'img/destroyer_field.png',   // 驱逐舰战场贴图(照片本就车头朝上)
   transport_field:'img/transport_field.png',   // 登陆艇战场贴图(照片本就车头朝上)
-  tank_allies_field:'img/tank_allies_field.png',  // 灰熊坦克(盟军,已旋转180°车头朝上)
-  tank_soviet_field:'img/tank_soviet_field.png',  // 犀牛坦克(苏军,照片本就车头朝上)
+  // 步兵战场贴图(北约士兵/动员兵/外骨骼/磁暴),已去白底
+  infantry_allies_field:'img/infantry_allies_field.png',   // 北约士兵(盟军步兵)
+  infantry_soviet_field:'img/infantry_soviet_field.png',   // 动员兵(苏军步兵)
+  exo_field:'img/exo_field.png',                           // 外骨骼大兵(盟军高级步兵)
+  magnet_field:'img/magnet_field.png',                     // 磁暴步兵战场贴图(苏军高级步兵)
+  magnet:'img/magnet.png',                                 // 磁暴步兵建造栏/介绍栏图标
+  tank_allies_field:'img/tank_allies_field.png',  // M60(盟军,已旋转180°车头朝上)
+  tank_soviet_field:'img/tank_soviet_field.png',  // T54(苏军,照片本就车头朝上)
   goldmine:'img/goldmine.png',
   tree:'img/tree.png',                          // 树林战场背景贴图(整张压缩,未切块)
+  // 中立建筑战场贴图(仅战场贴图,不出现在介绍栏/建造栏)
+  school:'img/school.png', hospital:'img/hospital.png',
+  house_jp1:'img/house_jp1.png', house_jp2:'img/house_jp2.png', house_us:'img/house_us.png',
+  nuclear:'img/nuclear.png', mall:'img/mall.png', pentagon:'img/pentagon.png',
 };
 
 /* ============ 单位光影 / 接地渲染调参(全部可改,让坦克"置身于场景中") ============ */
@@ -242,11 +274,10 @@ const imgs = {};
 // 坦克照片已用脚本预处理:背景(纯黑/纯白)透明化 + 内容居中
 // 各贴图"炮管/车头"自然朝向(图像坐标系,顺时针,+X=右),绘制时旋转对齐到单位朝向前方。
 // 艾布拉姆/ T90 的炮管都在贴图左侧(向左),因此转角均为 180°(π),开火闪光画在贴图左侧即炮口。
-const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2 };
-// 照片贴图额外缩放(采矿车默认太大缩小,驱逐舰加大)
-const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4 };
-// 各照片贴图"炮口/车头"在图像坐标系的方向(用于开火闪光位置)
-const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1] };
+const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2 };
+// 照片贴图额外缩放(步兵照片用 0.42,让小人贴合碰撞箱大小)
+const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42 };
+const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1] };
 // 草地贴图块:由 tools/split-terrain.js 从"草地.png"切成 4x4=16 块,
 // 每个草地格随机取一块平铺,提升陆地细致度
 const TERRAIN_TILE_COUNT = 16;

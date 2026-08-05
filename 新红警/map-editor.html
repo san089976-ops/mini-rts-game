@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>迷你红警 · 地图编辑器</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#0a120c; color:#cfe8d8; font-family:"Microsoft YaHei",sans-serif; }
+#wrap { display:flex; flex-direction:column; height:100%; }
+#topbar {
+  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  padding:8px 14px; background:linear-gradient(#22303a,#141b20); border-bottom:2px solid #4a6a5a;
+}
+#topbar .grp { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+#topbar label { font-size:12px; color:#9fc0ac; }
+#topbar input, #topbar select {
+  background:#1a241e; color:#d8f0e0; border:1px solid #4a6a5a; border-radius:6px; padding:5px 8px; font-size:13px;
+}
+#topbar .btn {
+  padding:6px 14px; font-size:13px; letter-spacing:1px; cursor:pointer;
+  background:linear-gradient(#3a5a4a,#22372a); color:#d8f0e0; border:1px solid #5a8a6a; border-radius:7px;
+}
+#topbar .btn:hover { border-color:#7ac88a; color:#fff; }
+#topbar .btn.primary { background:linear-gradient(#4a9a5a,#2f6a3f); border-color:#7ac88a; color:#fff; }
+#topbar .btn.primary:hover { background:linear-gradient(#5ab06a,#3a7a4a); }
+#mapInfo { padding:4px 14px; font-size:12px; color:#9fc0ac; background:#0f1a12; border-bottom:1px solid #2c3c32; }
+#main { flex:1; display:flex; min-height:0; }
+#canvasWrap { flex:1; overflow:auto; padding:12px; }
+#cv { display:block; border:1px solid #2c3c32; border-radius:4px; image-rendering:auto; }
+#palette {
+  width:300px; flex:none; overflow-y:auto; padding:12px; gap:12px; display:flex; flex-direction:column;
+  background:linear-gradient(#1c2a22,#101810); border-left:2px solid #3a5a4a;
+}
+.pTitle { font-size:13px; color:#ffe27a; letter-spacing:2px; margin-bottom:6px; }
+.pBox { border:1px solid #2c3c32; border-radius:8px; padding:10px; background:rgba(0,0,0,.25); }
+.pBox.hidden { display:none; }
+.hint { font-size:11px; color:#6f8f7f; margin-top:6px; line-height:1.6; }
+.toolRow { display:flex; flex-wrap:wrap; gap:6px; }
+.toolBtn {
+  padding:6px 10px; font-size:12px; cursor:pointer; background:#2c3c32; color:#d8f0e0;
+  border:1px solid #4a6a5a; border-radius:6px;
+}
+.toolBtn:hover { border-color:#7ac88a; }
+.toolBtn.sel { background:#3a7a4a; border-color:#7ac88a; color:#fff; }
+.pGrid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+.pitem {
+  display:flex; align-items:center; gap:6px; padding:5px 7px; font-size:11px; cursor:pointer;
+  background:#24342a; border:1px solid #3a5a4a; border-radius:6px; overflow:hidden; white-space:nowrap;
+}
+.pitem:hover { border-color:#7ac88a; }
+.pitem.picksel { border-color:#ffe27a; background:#3a4a2a; box-shadow:0 0 8px rgba(255,226,122,.3); }
+.pitem .sw { width:14px; height:14px; border-radius:3px; border:1px solid rgba(255,255,255,.25); flex:none; }
+.propTitle { font-size:13px; color:#ffe27a; margin-bottom:8px; }
+.propRow { font-size:12px; color:#9fc0ac; margin-bottom:6px; }
+.teamBtns { display:grid; grid-template-columns:repeat(8,1fr); gap:4px; }
+.teamBtns .tBtn {
+  padding:7px 0; font-size:13px; cursor:pointer; background:#2c3c32; color:#d8f0e0;
+  border:1px solid #4a6a5a; border-radius:6px;
+}
+.teamBtns .tBtn:hover { border-color:#7ac88a; }
+.teamBtns .tBtn.sel { background:#3a7a4a; border-color:#ffe27a; color:#fff; }
+.teamBtns .tBtn.neutral { background:#3a3a3a; color:#cfc6b8; grid-column: span 8; }
+.propBtns { margin-top:10px; }
+.delBtn { width:100%; padding:9px 0; font-size:13px; cursor:pointer; background:#5a2a2a; color:#ffb0a0; border:1px solid #8a4a4a; border-radius:7px; }
+.delBtn:hover { background:#7a2a2a; }
+#status { padding:5px 14px; font-size:12px; color:#9fc0ac; background:#0f1a12; border-top:1px solid #2c3c32; }
+#openOv {
+  position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+  display:none; align-items:center; justify-content:center;
+}
+#openOv.show { display:flex; }
+.ovBox {
+  width:420px; max-width:94%; max-height:80%; background:linear-gradient(#22303a,#141b20);
+  border:2px solid #4a6a5a; border-radius:12px; padding:20px 24px;
+  display:flex; flex-direction:column; gap:14px; box-shadow:0 10px 34px rgba(0,0,0,.65);
+}
+.ovBox h2 { text-align:center; color:#ffe27a; letter-spacing:6px; font-size:20px; }
+#openList { flex:1; overflow-y:auto; border:1px solid #3a5a4a; border-radius:8px; padding:6px; }
+.mapFileRow {
+  display:flex; align-items:center; gap:8px; padding:8px 10px; margin-bottom:4px;
+  border:1px solid #3a5a4a; border-radius:6px; background:linear-gradient(#24342a,#161f18);
+  cursor:pointer; font-size:13px;
+}
+.mapFileRow:hover { border-color:#7ac88a; }
+.mapEmpty { color:#9fc0ac; font-size:12px; padding:16px; text-align:center; }
+.ovBox > button { padding:10px 0; font-size:15px; letter-spacing:3px; cursor:pointer;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a; color:#fff; border-radius:9px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="topbar">
+    <div class="grp">
+      <label>地图名</label><input id="mapName" value="未命名地图" size="12">
+      <label>宽(格)</label><input id="mapW" type="number" min="4" max="220" value="64">
+      <label>高(格)</label><input id="mapH" type="number" min="4" max="220" value="48">
+      <label>缩放</label>
+      <select id="zoomSel"><option value="0.125">0.125x</option><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option></select>
+      <button class="btn" onclick="newMap()">新建</button>
+    </div>
+    <div class="grp">
+      <button class="btn primary" onclick="connectFolder()">连接地图文件夹</button>
+      <button class="btn primary" onclick="saveMap()">保存到 map</button>
+      <button class="btn" onclick="downloadMap()">下载地图文件</button>
+      <button class="btn" onclick="openMaps()">打开</button>
+      <button class="btn" onclick="location.href='index.html'">返回游戏</button>
+    </div>
+  </div>
+  <div id="mapInfo"></div>
+  <div id="main">
+    <div id="canvasWrap"><canvas id="cv"></canvas></div>
+    <div id="palette">
+      <div class="pTitle">工具</div>
+      <div class="toolRow">
+        <button class="toolBtn sel" data-tool="terrain">地形</button>
+        <button class="toolBtn" data-tool="ore">金矿</button>
+        <button class="toolBtn" data-tool="building">建筑</button>
+        <button class="toolBtn" data-tool="unit">单位</button>
+        <button class="toolBtn" data-tool="spawn">出生点</button>
+        <button class="toolBtn" data-tool="select">选择</button>
+      </div>
+      <div id="matBox" class="pBox">
+        <div class="pTitle">地形材质(点选后点画布)</div>
+        <div id="terrainMat" class="pGrid"></div>
+        <p class="hint">树林/水域画笔支持长按拖动连续替换草地,画得更快</p>
+      </div>
+      <div id="bldBox" class="pBox">
+        <div class="pTitle">建筑(点选素材→点画布放置;点已有建筑可改所属玩家)</div>
+        <div id="bldPalette" class="pGrid"></div>
+      </div>
+      <div id="unitBox" class="pBox">
+        <div class="pTitle">单位(点选素材→点画布放置;点已有单位可改所属玩家)</div>
+        <div id="unitPalette" class="pGrid"></div>
+      </div>
+      <div id="propBox" class="pBox hidden">
+        <div id="propContent"></div>
+      </div>
+    </div>
+  </div>
+  <div id="status">就绪 · 先点「连接地图文件夹」选择 map 目录,即可直接保存/打开</div>
+  <div id="openOv">
+    <div class="ovBox">
+      <h2>打开地图</h2>
+      <p style="color:#9fc0ac;font-size:12px;text-align:center">选择要修改的地图</p>
+      <div id="openList"></div>
+      <button onclick="document.getElementById('openOv').classList.remove('show')">取消</button>
+    </div>
+  </div>
+</div>
+<script src="js/config.js"></script>
+<script src="map/index.js"></script>
+<script src="map-editor.js"></script>
+</body>
+</html>

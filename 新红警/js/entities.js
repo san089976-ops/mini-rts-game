@@ -63,6 +63,8 @@ class Building {
     this.x = tx*TILE + d.w*TILE/2; this.y = ty*TILE + d.h*TILE/2;
     this.hp = d.hp; this.maxHp = d.hp;
     this.constructing = true; this.progress = 0; this.buildTime = d.buildTime;
+    // 中立建筑(team=-1):出生即完工,不参与建造流程
+    if(team < 0){ this.constructing = false; this.progress = 0; this.hp = d.hp; }
     this.armor = d.armor;
     this.queue = []; this.spawnWait = 0;
     this.repairT = 0;         // 自动维修计时器

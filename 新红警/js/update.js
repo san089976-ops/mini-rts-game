@@ -708,7 +708,7 @@ function findEnemyNear(u, range){
     if(d<bd){ bd=d; best=v; }
   }
   if(best) return best;
-  for(const b of buildings){ if(!b.alive||!isEnemy(u.team,b.team)) continue; const d=dist(u,b); if(d<range && d<bd){bd=d;best=b;} }
+  for(const b of buildings){ if(!b.alive || b.team<0 || !isEnemy(u.team,b.team)) continue; const d=dist(u,b); if(d<range && d<bd){bd=d;best=b;} }
   return best;
 }
 function fireAt(u,target){

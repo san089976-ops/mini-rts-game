@@ -2,11 +2,14 @@
 /* ============ map.js: 地图生成 ============ */
 function genTerrain(){
   terrain=[]; blocked=[]; structBlocked=[]; oreFields=[]; oreGrid=[];
-  const m = gameSetup ? gameSetup.map : MAPS[0];
+  const m = gameSetup ? gameSetup.map : (currentMap() || MAPS[0]);
   setMapSize(m.width || 64, m.height || 48);   // 按地图定制尺寸(海战图更大)
   for(let x=0;x<MAP_W;x++){ terrain[x]=[]; blocked[x]=[]; structBlocked[x]=[]; for(let y=0;y<MAP_H;y++){ terrain[x][y]='grass'; blocked[x][y]=false; structBlocked[x][y]=false; } }
   const nTeams = gameSetup ? gameSetup.teams.length : 2;
-  if(m.custom==='naval'){
+  if(m.custom==='edited'){
+    // 自制地图:地形/金矿直接来自保存的数据
+    loadEditedMap(m);
+  } else if(m.custom==='naval'){
     genNavalTerrain(m);
   } else {
     // 随机水塘与树丛(障碍)
@@ -20,11 +23,13 @@ function genTerrain(){
       }
     }
   }
-  // 保证所有出生点周边畅通
+  // 保证所有出生点周边畅通(自制地图用较小清空半径,保留设计师布置)
   const spawns = getSpawns(nTeams);
-  for(const [sx,sy] of spawns){ clearZone(sx, sy, m.clearW, m.clearH); }
-  // 金矿:每格 5000,以"金矿堆"形式生成——找离出生点较远的簇心,再在其周围聚成一撮
-  if(m.custom!=='naval'){
+  const cw = (m.custom==='edited') ? 2 : (m.clearW || 0);
+  const ch = (m.custom==='edited') ? 2 : (m.clearH || 0);
+  for(const [sx,sy] of spawns){ clearZone(sx, sy, cw, ch); }
+  // 金矿:非海战图/非自制地图时随机生成;自制地图的矿来自数据
+  if(m.custom!=='naval' && m.custom!=='edited'){
     const spawns = getSpawns(nTeams);
     const clusterN = Math.max(1, Math.round(m.ore/3));   // 金矿堆数量(每堆约3格)
     let placed=0;
@@ -42,6 +47,93 @@ function genTerrain(){
       if(cx<0) break;
       placed += addGoldCluster(cx, cy, Math.min(3, m.ore-placed));
     }
+  }
+  // 中立建筑(城市装饰):随机铺几座,不可建造、可查看详情(自制地图由设计师自己摆)
+  if(m.custom!=='edited') placeNeutralBuildings();
+}
+/* ============ 开局兜底:有出生点但该队没有建造厂时,在出生点自动补一个(出生点即建造厂中心) ============ */
+function ensureTeamCommands(){
+  for(let i=0;i<gameTeams.length;i++){
+    if(buildings.some(b=>b.team===i && b.alive && b.defName==='command')) continue;
+    const sp = gameTeams[i] && gameTeams[i].spawn;
+    if(!sp || sp[0]===undefined) continue;
+    const tx=sp[0]-1, ty=sp[1]-1;
+    if(!canDeployAt(tx,ty)) continue;
+    const b=new Building('command', i, tx, ty);
+    b.constructing=false; b.progress=0; b.hp=b.maxHp;
+    buildings.push(b);
+    markBlocked(b,true);
+  }
+}
+/* ============ 自制地图:按保存的数据加载地形/金矿 ============ */
+function loadEditedMap(m){
+  const t = m.terrain || [];
+  for(let x=0;x<MAP_W;x++){
+    const col = t[x] || [];
+    for(let y=0;y<MAP_H;y++){
+      const c = col[y] || 'grass';
+      terrain[x][y] = (c==='tree'||c==='water') ? c : 'grass';
+      blocked[x][y] = (c==='tree'||c==='water');
+    }
+  }
+  if(Array.isArray(m.ores)) for(const o of m.ores){
+    if(Array.isArray(o) && o.length>=2 && o[0]>=0 && o[1]>=0 && o[0]<MAP_W && o[1]<MAP_H) addGoldMine(o[0],o[1]);
+  }
+}
+/* ============ 自制地图:开局放置建筑/单位(队伍数不足的跳过,中立=team -1) ============ */
+function placeMapEntities(m){
+  for(const bb of (m.buildings||[])){
+    if(!bb || !BLD_DEFS[bb.def]) continue;
+    const team = (bb.team===undefined || bb.team===null) ? -1 : bb.team;
+    if(team>=0 && team>=gameTeams.length) continue;
+    const b = new Building(bb.def, team, bb.tx, bb.ty);
+    b.constructing=false; b.progress=0; b.hp=b.maxHp;   // 地图上预置的建筑直接完工
+    buildings.push(b);
+    markBlocked(b, true);
+  }
+  for(const uu of (m.units||[])){
+    if(!uu) continue;
+    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1};
+    if(!KNOWN[uu.type]) continue;
+    const team = (uu.team===undefined || uu.team===null) ? -1 : uu.team;
+    if(team>=0 && team>=gameTeams.length) continue;
+    const u = new Unit(uu.type, team, uu.x*TILE + TILE/2, uu.y*TILE + TILE/2);
+    u.order={kind:'none'};
+    units.push(u);
+  }
+}
+/* ============ 中立建筑(随机铺到地图上,供查看/摧毁) ============ */
+const NEUTRAL_BUILDINGS = ['school','hospital','house_jp1','house_jp2','house_us','nuclear','mall','pentagon'];
+function placeNeutralBuildings(){
+  if(gameSetup && gameSetup.map && gameSetup.map.custom==='naval') return;  // 海战图岛小,不铺市区
+  const nTeams = gameSetup ? gameSetup.teams.length : 2;
+  const spawns = getSpawns(nTeams);
+  const picks = NEUTRAL_BUILDINGS.slice().sort(()=>Math.random()-0.5);
+  const count = 4 + Math.floor(Math.random()*3);   // 每局随机 4~6 座
+  let placed = 0;
+  for(const dn of picks){
+    if(placed >= count) break;
+    const d = BLD_DEFS[dn];
+    let ok=false, tx=-1, ty=-1;
+    for(let a=0; a<200 && !ok; a++){
+      tx = Math.floor(rnd(3, MAP_W-d.w-3)); ty = Math.floor(rnd(3, MAP_H-d.h-3));
+      ok = true;
+      // 整块草地、无矿、无建筑占用
+      for(let x=tx; x<tx+d.w; x++) for(let y=ty; y<ty+d.h; y++){
+        if(terrain[x][y]!=='grass' || blocked[x][y] || structBlocked[x][y] || (oreGrid[x]&&oreGrid[x][y])){ ok=false; break; }
+      }
+      if(!ok) continue;
+      // 离所有出生点足够远(避免贴脸基地)
+      for(const [sx,sy] of spawns){
+        if(Math.abs(tx-sx) < 20 && Math.abs(ty-sy) < 20){ ok=false; break; }
+      }
+    }
+    if(!ok) continue;
+    const b = new Building(dn, -1, tx, ty);
+    b.constructing=false; b.progress=0; b.hp=b.maxHp;
+    buildings.push(b);
+    markBlocked(b, true);
+    placed++;
   }
 }
 /* ============ 金矿(单格,每格 ORE_PER_TILE,采完即消失) ============ */

@@ -164,8 +164,8 @@
   SPRITE_ROT：炮管朝左的两张图转角均为 Math.PI；开火炮口闪光画在贴图左侧(-dw/2)。
   替换素材流程：把新照片放 img/units/，用 process-sprite.js 处理，确认 SPRITE_ROT。
 
-【建筑照片贴图（建造厂 / 战车工厂 / 发电站等级 / 兵营 / 精炼厂 / 实验室）】
-  各建筑可用玩家照片做战场本体;发电站按等级分 3 张贴图;兵营/精炼厂用独立战场贴图。
+【建筑照片贴图（建造厂 / 战车工厂 / 发电站等级 / 兵营 / 精炼厂 / 实验室 / 维修厂）】
+  各建筑可用玩家照片做战场本体;发电站按等级分 3 张贴图;兵营/精炼厂/维修厂用独立战场贴图。
   process-sprite.js 支持输出目录参数(默认 img/units)，例：
     node tools/process-sprite.js "建造厂.png" command img 512
     node tools/process-sprite.js "发电站1.png" power_0 img 512   (等级0/1/2 → power_0/1/2)
@@ -174,8 +174,10 @@
     node tools/process-sprite.js "实验室.png" lab_field img 512
     node tools/process-sprite.js "碉堡.png" turret_field img 256
     node tools/process-sprite.js "船坞.png" dock_field img 256
+    node tools/process-sprite.js "维修厂.png" repair_field img 512  (维修厂战场贴图)
   碉堡贴图下仍绘制旋转机枪(贴图中心,朝 turretTarget 转动,发射原有 machinegun,
-    开火闪光),程序化底座/沙袋仅在无贴图时画;船坞贴图替换 drawDockBody。
+    开火闪光),程序化底座/沙袋仅在无贴图时画;船坞贴图替换 drawDockBody;
+    维修厂贴图替换程序化的招牌/液压平台/吊臂(治疗光环动画保留)。
   单位照片贴图:采矿车战场本体用 harvester_field(处理时旋转参数把车头摆正朝上,
     node tools/process-sprite.js "采矿车.png" harvester_field img 512 90,
     游戏里 SPRITE_ROT.harvester=Math.PI/2 对齐朝向前方,SPRITE_SCALE.harvester=0.7 缩小,
