@@ -39,10 +39,15 @@ function update(dt){
   for(const u of units){ updateUnit(u, dt); }
   // 上船处理(等遍历结束再移除,避免改数组跳过元素)
   for(const u of units.slice()){ if(u._boarded) doBoard(u); }
+<<<<<<< HEAD:钢铁指挥/js/update.js
   // 进驻建筑处理
   for(const u of units.slice()){ if(u._garrisoning) doGarrison(u); }
   buildGrid();   // 上船/进驻会移除单位,重建空间网格避免下标错乱
   arbitrateFlow();   // 方向仲裁:交叉/对头冲突时高优先级先走,低优先级倒车让行
+=======
+  buildGrid();   // 上船会移除单位,重建空间网格避免下标错乱
+  arbitrateFlow();   // 方向仲裁:交叉/对头冲突时高优先级先走,低优先级等待
+>>>>>>> 9d5cc8234426324ff75f2f13f5a7637d89ed2ffe:新红警/js/update.js
   // 局部防挤压:计算每个单位的分离速度(不直接改坐标,由 applyMovement 统一积分)
   separateAll();
   for(const u of units){ applyMovement(u, dt); }
@@ -214,8 +219,8 @@ function updateBuilding(b, dt, teamPower){
       else { b.spawnWait+=dt; }
     }
   }
-  // 自动维修:每 1 秒扣 1 资金,恢复 10 点生命
-  if(b.hp>0 && b.hp<b.maxHp){
+  // 自动维修:每 1 秒扣 1 资金,恢复 10 点生命(建造中的建筑不维修,避免白扣钱)
+  if(!b.constructing && b.hp>0 && b.hp<b.maxHp){
     b.repairT += dt;
     if(b.repairT >= 1){
       b.repairT = 0;
@@ -426,7 +431,11 @@ function resolveStuckAfterRigid(u, dt){
     if(u.path && u.pathIdx>=u.path.length){
       if(u.order.kind==='move'){ finishMove(u); return; }
       // 攻击指令不清除,只清路径并继续走下面的横向滑出,
+<<<<<<< HEAD:钢铁指挥/js/update.js
       // 同时记失败时间做寻路退避,避免在原地反复算 A* 转圈
+=======
+      // 同时记失败时间做重寻退避,避免在原地反复算 A* 转圈
+>>>>>>> 9d5cc8234426324ff75f2f13f5a7637d89ed2ffe:新红警/js/update.js
       u.path=null; u.wantVx=0; u.wantVy=0;
       u._lastPathFail = time;
     } else {
@@ -443,7 +452,11 @@ function resolveStuckAfterRigid(u, dt){
       if(!inBounds(nx,ny) || uBodyBlocked(u,nx,ny)) continue;
       if(hasUnitOverlapAt(u,nx,ny)) continue;
       u.x = nx; u.y = ny;
+<<<<<<< HEAD:钢铁指挥/js/update.js
       u._yieldT = 0.6 + Math.random()*0.8;   // 滑开停一下,打破对称死锁
+=======
+      u._yieldT = 0.6 + Math.random()*0.8;
+>>>>>>> 9d5cc8234426324ff75f2f13f5a7637d89ed2ffe:新红警/js/update.js
       return;
     }
   }
@@ -451,6 +464,77 @@ function resolveStuckAfterRigid(u, dt){
 /* ============ 转向行为(Steering):分离 / 积分 ============ */
 const STEER_RATE = 8;        // 转向/加减速平滑系数(越大响应越快)
 const SEPARATE_STRENGTH = 300; // 分离力强度
+/* ============ 方向仲裁(交叉/对头冲突) ============ */
+// 单位在窄道/交叉口互相顶住时,给每次移动指令分配随机优先级:
+// 冲突范围内优先级最高的单位先走,其余原地等待;等待还会向后传播,
+// 避免后面的同队单位把等待者顶回死锁点。
+function flowDir(u){
+  if(!u || !u.order) return null;
+  if(u.order.kind==='attack' && u.target && u.target.hp>0){
+    const d=Math.hypot(u.target.x-u.x,u.target.y-u.y);
+    if(d<1) return null;
+    return {x:(u.target.x-u.x)/d, y:(u.target.y-u.y)/d};
+  }
+  if(u.order.kind==='move' && u.order.x!==undefined){
+    const d=Math.hypot(u.order.x-u.x,u.order.y-u.y);
+    if(d<1) return null;
+    return {x:(u.order.x-u.x)/d, y:(u.order.y-u.y)/d};
+  }
+  const m=Math.hypot(u.wantVx,u.wantVy);
+  return m>1 ? {x:u.wantVx/m, y:u.wantVy/m} : null;
+}
+function flowPriority(u){
+  if(u._flowTX!==u.order.x || u._flowTY!==u.order.y){
+    u._flow=Math.random();
+    u._flowTX=u.order.x; u._flowTY=u.order.y;
+  }
+  return u._flow;
+}
+function arbitrateFlow(){
+  const moveKind = k => k==='move' || k==='attack';
+  for(const u of units){
+    if(!moveKind(u.order.kind)) continue;
+    const du=flowDir(u); if(!du) continue;
+    const cand=gridCollect(u.x, u.y, 110);
+    for(let c=0;c<cand.length;c++){
+      const v=units[cand[c]];
+      if(v===u || v.hp<=0 || !moveKind(v.order.kind)) continue;
+      const dv=flowDir(v); if(!dv) continue;
+      if(du.x*dv.x + du.y*dv.y > 0.2) continue;   // 同向,不冲突
+      if(dist(u,v) > 110) continue;
+      const csU=u.circles(), csV=v.circles();
+      let near=false;
+      for(const A of csU) for(const B of csV){
+        if(Math.hypot(A.x-B.x, A.y-B.y) < A.r+B.r+48){ near=true; break; }
+      }
+      if(!near) continue;
+      if(flowPriority(v) > flowPriority(u)){
+        // 低优先级倒车:沿自己前进方向的反方向持续后退让行,
+        // 即使暂时脱离冲突也继续退满 0.9 秒,避免刚退开又折返顶回
+        u._backing = {t:0.9, dir:{x:-du.x, y:-du.y}};
+        break;
+      }
+    }
+  }
+  // 后退向后传播:正后方有后退者时,自己也跟着后退,避免把后退者顶回死锁点
+  let changed=true, guard=0;
+  while(changed && guard++<units.length){
+    changed=false;
+    for(const u of units){
+      if(u._backing || !moveKind(u.order.kind)) continue;
+      const du=flowDir(u); if(!du) continue;
+      const cand=gridCollect(u.x, u.y, 70);
+      for(let c=0;c<cand.length;c++){
+        const v=units[cand[c]];
+        if(v===u || v.hp<=0 || !v._backing) continue;
+        const dx=v.x-u.x, dy=v.y-u.y;
+        const d=Math.hypot(dx,dy);
+        if(d>60) continue;
+        if(du.x*(dx/d) + du.y*(dy/d) > 0.7){ u._backing={t:v._backing.t, dir:v._backing.dir}; changed=true; break; }
+      }
+    }
+  }
+}
 function seekVelocity(u, tx, ty){
   const dx=tx-u.x, dy=ty-u.y;
   const d=Math.hypot(dx,dy);
@@ -708,7 +792,11 @@ function applyMovement(u, dt){
       if(!hasUnitOverlapAt(u,nx,ny)){
         u.x=nx; u.y=ny;
         u.vx=dirs[di][0]*sp*0.5; u.vy=dirs[di][1]*sp*0.5;
+<<<<<<< HEAD:钢铁指挥/js/update.js
         u._yieldT = 0.4 + Math.random()*0.6;   // 脱困后让一步,打破双向车流对称死锁
+=======
+        u._yieldT = 0.4 + Math.random()*0.6;
+>>>>>>> 9d5cc8234426324ff75f2f13f5a7637d89ed2ffe:新红警/js/update.js
         escaped=true;
         break;
       }
@@ -1198,7 +1286,11 @@ function unloadTransport(t, at){
     const np=nearestLand(pt.x, pt.y);
     if(np){
       const u=new Unit(c.type, t.team, np.x, np.y);
+<<<<<<< HEAD:钢铁指挥/js/update.js
       if(t._aiTransport) u._aiUnloaded = true;   // 标记:AI 运输艇卸载的部队,抢滩后不再重新装船
+=======
+      if(t._aiTransport) u._aiUnloaded = true;
+>>>>>>> 9d5cc8234426324ff75f2f13f5a7637d89ed2ffe:新红警/js/update.js
       u.hp=Math.min(u.maxHp, c.hp);
       if(u.type==='harvester'){
         u.cargo = c.cargo||0;
