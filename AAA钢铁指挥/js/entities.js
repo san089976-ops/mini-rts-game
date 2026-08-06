@@ -24,6 +24,7 @@ class Unit {
     this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
     this.unloadAt = null;          // 运输艇卸载点
     this.facing = 0;
+    this.turretAng = 0;        // 独立旋转炮塔角度(美洲狮等:仅攻击时转动,车体不动时负责瞄准)
     this.target = null;        // 攻击目标
     this.order = { kind:'none' };
     this.path = null; this.pathIdx = 0; this.repathT = 0;
@@ -41,6 +42,11 @@ class Unit {
     this.sepT = 0;
     // 挑战者坦克升级状态(0/1/2 级)
     this.upgradeLvl = 0; this.upgrading = false; this.upgradeProg = 0;
+    // 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利)
+    this.atgm = false;              // 是否已装备反坦克导弹模块
+    this.atgmUpgrading = false;     // 正在安装模块
+    this.atgmProg = 0;              // 安装进度
+    this.atgmReload = 0;            // 导弹装填倒计时(0=就绪)
     // 上次收到玩家移动指令的时间:用于战斗脱离保护期(刚被拉动时不被拉回战斗)
     this._lastMoveCmd = -99;
     // 载具物理感渲染状态(只影响绘制偏移,不改逻辑坐标)
@@ -110,5 +116,24 @@ class Projectile {
     this.proj=proj;
     this.dead=false;
   }
+}
+/* ============ 反坦克导弹:自动制导的"类单位"飞行物 ============ */
+class Missile {
+  constructor(x, y, target, team, attacker, spriteType){
+    this.x=x; this.y=y;
+    this.target=target;      // 制导目标(单位/建筑)
+    this.team=team; this.attacker=attacker;
+    this.spriteType=spriteType;        // 'tow' | 'spike'
+    this.speed=ATGM_SPEED*ATGM_START_FACTOR;   // 先加速
+    this.maxSpeed=ATGM_SPEED;
+    this.accel=ATGM_ACCEL;
+    this.ang=Math.atan2(target.y-y, target.x-x);   // 当前朝向(稍微转弯逼近)
+    this.travelled=0;
+    this.maxRange=ATGM_RANGE;
+    this.damage=ATGM_DAMAGE;
+    this.explodeR=ATGM_AOE_RADIUS;
+    this.dead=false;
+  }
+  get alive(){ return !this.dead; }
 }
 class Effect { constructor(x,y,type,r){ this.x=x;this.y=y;this.type=type;this.r=r;this.life=0.45;this.maxLife=0.45; } }

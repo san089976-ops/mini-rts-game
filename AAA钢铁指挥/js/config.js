@@ -17,7 +17,7 @@ function setMapSize(w, h){
 // 渲染分辨率倍率:画布按"设备像素比(1.5~4)与 RENDER_SCALE 取较大值"放大,再缩回窗口显示,让画面更清晰。
 // 4x 下艾布拉姆/T90 贴图在同一屏幕大小内获得 2 倍于之前的像素,细节更清晰。
 // 若感到卡顿可改成 3 或 2。
-const RENDER_SCALE = 4;
+const RENDER_SCALE = 2;
 
 // 阵营:盟军(蓝)/苏军(红)。地图上盟友/自己=蓝,敌人=红;模型按各自阵营
 let playerFaction = 'allies';
@@ -45,7 +45,7 @@ function teamColor(team){ return (teamColors && teamColors[team]) ? TEAM_COLORS[
 
 /* ============ 弹丸 / 护甲系统 ============ */
 // 弹丸类型:火炮 cannon / 子弹 bullet / 机炮 machinegun
-const PROJ_NAME = { cannon:'火炮', bullet:'子弹', machinegun:'机炮' };
+const PROJ_NAME = { cannon:'火炮', bullet:'子弹', machinegun:'机炮', missile:'导弹' };
 // 护甲类型:布甲 / 钢甲 / 铸铁甲 / 钛合金甲 / 混泥土甲 / 木甲
 const ARMOR_NAME = { cloth:'布甲', steel:'钢甲', castiron:'铸铁甲', titanium:'钛合金甲', concrete:'混泥土甲', wood:'木甲' };
 // 伤害修正表: 修正比 = 该护甲对某种弹丸的伤害倍率(1.0=100%)
@@ -57,12 +57,16 @@ const ARMOR_MOD = {
   concrete: { cannon:1.0, bullet:0.4, machinegun:0.6 },
   wood:     { cannon:1.0, bullet:1.0, machinegun:1.0 },
 };
+// 反坦克导弹伤害修正(proj='missile' 时用):铸铁甲/钢甲 120%,钛合金 90%,布甲/木甲/混泥土甲 80%
+const MISSILE_MOD = { castiron:1.2, steel:1.2, titanium:0.9, cloth:0.8, wood:0.8, concrete:0.8 };
 function armorMod(ent, proj, attacker){
   const armor = ent && ent.armor ? ent.armor : 'wood';
   // 磁暴步兵:对布甲修正比提升至 150%
   if(attacker && attacker.type==='magnet' && armor==='cloth') return 1.5;
   // 建筑专属弹丸修正(如核电站/五角大楼:火炮伤害 50%)
   if(ent && ent.def && ent.def.dmgMod && ent.def.dmgMod[proj] !== undefined) return ent.def.dmgMod[proj];
+  // 反坦克导弹:独立修正表
+  if(proj==='missile') return MISSILE_MOD[armor] || 1;
   const row = ARMOR_MOD[armor];
   return (row && row[proj]) || 1;
 }
@@ -79,6 +83,7 @@ const UNIT_BOX = {
   airfield_car:{hw:32, hh:13},
   bradley:{hw:30, hh:12}, b11:{hw:28, hh:12}, marder:{hw:30, hh:12},
   leclerc:{hw:36, hh:14}, leopard:{hw:36, hh:14}, challenger:{hw:37, hh:15},
+  puma:{hw:33, hh:13},
 };
 // 战车转向角速度(弧度/秒):朝向用 lerpAngle 平滑插值,产生履带战车转向效果,而非瞬间硬转
 const TURN_RATE = 6;
@@ -94,10 +99,10 @@ const VEHICLE_ALIGN_GATE = 0.35;
 const FIRE_RECOIL = 8;        // 开火后坐力初始偏移(px)
 const RECOIL_DECAY = 14;      // 后坐力恢复速率(1/s,越大回弹越快,约0.1~0.2s恢复)
 // 有履带压痕的载具(除海军驱逐舰/登陆艇外的所有车辆)
-const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1 };
+const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1, puma:1 };
 const BASE_UNITS = {
   infantry: { name:'动员兵', hp:90, speed:74, range:72, damage:9, rof:0.9, cost:100, r:9,  build:4, armor:'cloth', proj:'bullet', desc:'低造价轻步兵,前期侦察与骚扰的主力' },
-  tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:0.55, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
+  tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:1.0, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
   harvester:{ name:'采矿车', hp:1200, speed:56, range:0, damage:0, rof:0, cost:700, r:13, build:11, capacity:500, armor:'castiron', proj:null, desc:'自动往返采集金矿并送回基地换钱,经济命脉' },
   mcv:      { name:'基地车', hp:900, speed:45, range:0, damage:0, rof:0, cost:1800, r:14, build:14, armor:'titanium', proj:null, desc:'可移动的基地核心,在空地展开(快捷键 E)后变成新的建造厂' },
   airfield_car:{ name:'机场建筑车', hp:600, speed:52, range:105, damage:15, rof:0.6, cost:1200, r:13, build:12, armor:'castiron', proj:'bullet', desc:'由升级建造厂生产的机场工程车,装有自卫机枪,可在空地展开(E)变成机场(占地2x3)' },
@@ -118,7 +123,7 @@ function transportCost(u){  if(!u) return 0;
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? 4 : 3;
   if(u.type==='airfield_car') return 4;
   if(u.type==='mcv' || u.type==='abrams' || u.type==='t90') return 6;
-  if(u.type==='bradley' || u.type==='b11' || u.type==='marder' || u.type==='leclerc' || u.type==='leopard' || u.type==='challenger') return 6;
+  if(u.type==='bradley' || u.type==='b11' || u.type==='marder' || u.type==='leclerc' || u.type==='leopard' || u.type==='challenger' || u.type==='puma') return 6;
   return 1;
 }
 function usedCapacity(t){ return t.cargoUnits ? t.cargoUnits.reduce((s,c)=>s+transportCost(c),0) : 0; }
@@ -130,6 +135,41 @@ function canBoardUnit(carrier, u){
   if(carrier.type==='transport') return true;
   return u.type==='infantry' || u.type==='exo' || u.type==='magnet';
 }
+/* ============ 25mm 机炮弹(步兵战车专属:贴图弹丸 + 先加速后匀速) ============ */
+const IFV_TYPES = ['puma','bradley','marder','b11'];
+function isIFV25(u){ return !!u && IFV_TYPES.indexOf(u.type)!==-1; }
+// 独立旋转炮塔的载具(车身+炮塔结构,仿美洲狮):美洲狮/艾布拉姆/T90
+function isTurretUnit(u){ return !!u && (u.type==='puma'||u.type==='abrams'||u.type==='t90'); }
+// 炮塔相对车身中心向车头(+facing)前移量(px,最终渲染尺寸)。
+// 艾布拉姆/T90 均向远离车头(车尾方向)移动 20px:艾布拉姆 12→-8,T90 16→-4(负值=偏向车尾);
+// 美洲狮炮塔保持车身正中间。
+function turretFrontOffset(u){
+  if(u.type==='abrams') return -10;
+  if(u.type==='t90') return -8;
+  return 0;
+}
+const IFV_ACCEL = 2600;        // 弹丸加速度(px/s²):先加速后匀速,起步有劲道
+const IFV_START_FACTOR = 0.25; // 弹丸初速 = 最大速度 × 该系数
+const BULLET_25MM_LEN = 8;     // 25mm 弹丸渲染长度(px)
+/* ============ 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利) ============ */
+const ATGM_TYPES = ['puma','bradley','marder'];          // 可装反坦克导弹的战车
+const ATGM_COST = 150;                                   // 模块价格
+const ATGM_UPGRADE_TIME = 6;                             // 模块安装耗时(秒)
+const ATGM_RANGE = 180;                                  // 导弹射程
+const ATGM_DAMAGE = 300;                                 // 单发伤害(单体)
+const ATGM_SPEED = 210;                                  // 导弹最大速度
+const ATGM_ACCEL = 1200;                                 // 导弹加速度(先加速后匀速)
+const ATGM_START_FACTOR = 0.3;                           // 导弹初速 = 最大速度 × 该系数
+const ATGM_RELOAD = 15;                                  // 每次装填时间(秒)
+const ATGM_TURN_RATE = 3;                                // 导弹转向角速度(rad/s,稍微转弯)
+const ATGM_AOE_RADIUS = 34;                              // 范围伤害半径(不要太大)
+const ATGM_AOE_FACTOR = 0.5;                             // 范围伤害比例(单体满伤,其它×该系数)
+const ATGM_HIT_R = 12;                                   // 命中/被挡判定半径(px)
+const TOW_MISSILE_LEN = 28;                              // TOW 导弹渲染长度(px)
+const SPIKE_MISSILE_LEN = 25;                            // 长钉(Spike)导弹渲染长度(px)
+/* ============ 坦克炮弹(125mm 贴图,车头朝左,长18px,匀速) ============ */
+const TANK_SHELL_LEN = 18;                               // 坦克炮弹渲染长度(px)
+function isTankShellUnit(u){ return !!u && (u.type==='tank'||u.type==='abrams'||u.type==='t90'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'); }
 function getUnitDefs(faction){
   if(UNIT_DEF_CACHE[faction]) return UNIT_DEF_CACHE[faction];
   let defs;
@@ -149,6 +189,7 @@ function getUnitDefs(faction){
       leclerc: { name:'法制勒克莱尔', hp:1100, speed:66, range:145, damage:100, rof:0.9, cost:1350, r:14, build:14, armor:'titanium', proj:'cannon', desc:'盟军第三代主战坦克:射程火力兼备,机动优于艾布拉姆斯,需升级战车工厂' },
       leopard: { name:'豹2A4', hp:950, speed:66, range:140, damage:110, rof:0.95, cost:1200, r:14, build:14, armor:'titanium', proj:'cannon', desc:'盟军主战坦克:火力凶猛的德系战车,机动良好,需升级战车工厂' },
       challenger:{ name:'挑战者号', hp:1050, speed:56, range:140, damage:110, rof:0.95, cost:1500, r:14, build:14, armor:'titanium', proj:'cannon', upgradeable:true, desc:'盟军重型主战坦克:装甲厚重,可两次升级为挑战者2号/3号(每次+15伤害+120血),需升级战车工厂' },
+      puma:     { name:'美洲狮步战车', hp:450, speed:70, range:135, damage:25, rof:0.35, cost:750, r:12, build:10, armor:'titanium', proj:'machinegun', desc:'高速轮式步战车:炮塔独立360°旋转,炮口对准射程内目标才开火,需升级战车工厂' },
     };
   } else {
     defs = {
@@ -251,6 +292,9 @@ const IMAGES = {
   command:'img/command.png', power:'img/power.png', barracks:'img/barracks.png',
   factory:'img/factory.png', refinery:'img/refinery.png', turret:'img/turret.png',
   abrams:'img/units/abrams.png', t90:'img/units/t90.png',
+  // 艾布拉姆/T90 车身+炮塔(独立旋转炮塔,仿美洲狮;横向车头朝左,已挖白底)
+  abrams_body:'img/units/abrams_body.png', abrams_turret:'img/units/abrams_turret.png',
+  t90_body:'img/units/t90_body.png', t90_turret:'img/units/t90_turret.png',
   // 建造栏/介绍栏专属图标(战场贴图用各自 _field,互不影响)
   tank_allies:'img/tank_allies.png',       // 灰熊(M60)面板图标
   tank_soviet:'img/tank_soviet.png',       // 犀牛(T54)面板图标
@@ -286,6 +330,12 @@ const IMAGES = {
   leclerc:'img/units/leclerc_field.png', leclerc_field:'img/units/leclerc_field.png',
   leopard:'img/units/leopard_field.png', leopard_field:'img/units/leopard_field.png',
   challenger:'img/units/challenger_field.png', challenger_field:'img/units/challenger_field.png',
+  // 美洲狮步战车(车身+炮台分开两张:车身面板图标用车身图;两图均白底已挖、车头朝上)
+  puma:'img/units/puma_body.png', puma_body:'img/units/puma_body.png', puma_turret:'img/units/puma_turret.png',
+  bullet_25mm:'img/units/bullet_25mm.png',   // 25mm 机炮弹(步兵战车专属弹丸,已挖白底、车头朝上)
+  tow_missile:'img/units/tow_missile.png',   // TOW 反坦克导弹(黄鼠狼/布拉德利,横向车头朝右)
+  spike_missile:'img/units/spike_missile.png', // 长钉反坦克导弹(美洲狮,横向车头朝右)
+  shell_125mm:'img/units/shell_125mm.png',   // 125mm 坦克炮弹(横向车头朝左)
   // 基地车/机场建筑车战场贴图(照片白底已处理,基地车车头朝下/机场建筑车车头朝上,SPRITE_ROT 对齐)
   mcv:'img/units/mcv_field.png',                  // 基地车面板图标(战场用同一张)
   mcv_field:'img/units/mcv_field.png',            // 基地车战场本体贴图
@@ -303,6 +353,8 @@ const IMAGES = {
 /* ============ 单位光影 / 接地渲染调参(全部可改,让坦克"置身于场景中") ============ */
 // 方向性阴影偏移(px):全局光来自左上方,阴影落在右下方。偏移不宜过大,否则会"脱开车身"显得悬浮
 const UNIT_SHADOW_OFFSET = { x:5, y:8 };
+// 剪影 L 形投影偏移(px):用"车体贴图剪影"当阴影,相对车体只偏移一点点,露出右下角 L 形黑边
+const UNIT_SHADOW_L_OFFSET = { x:4, y:6 };
 // 剪影阴影不透明度(0.4~0.6 之间效果自然)
 const UNIT_SHADOW_ALPHA = 0.45;
 // 阴影预烘焙高斯模糊半径(px):烘焙一次,运行期直接 drawImage,零每帧滤镜开销
@@ -337,9 +389,9 @@ const imgs = {};
 // 坦克照片已用脚本预处理:背景(纯黑/纯白)透明化 + 内容居中
 // 各贴图"炮管/车头"自然朝向(图像坐标系,顺时针,+X=右),绘制时旋转对齐到单位朝向前方。
 // 艾布拉姆/ T90 的炮管都在贴图左侧(向左),因此转角均为 180°(π),开火闪光画在贴图左侧即炮口。
-const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2 };
+const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2, puma: Math.PI/2 };
 // 照片贴图额外缩放(步兵照片用 0.42,让小人贴合碰撞箱大小;步兵战车整体缩小到 0.7)
-const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.7, marder: 0.7, b11: 0.7 };
+const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.7, marder: 0.7, b11: 0.7, puma: 0.6776, abrams: 0.8, t90: 0.8 };  // 艾布拉姆/T90 整体模型缩小为原来的0.8倍
 const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1], mcv:[0,1], airfield_car:[0,-1], bradley:[0,-1], marder:[0,-1], leclerc:[0,-1], leopard:[0,-1], challenger:[0,-1], b11:[0,1] };
 // 草地贴图块:由 tools/split-terrain.js 从"草地.png"切成 4x4=16 块,
 // 每个草地格随机取一块平铺,提升陆地细致度
@@ -373,12 +425,12 @@ function preloadImages(){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-const GAME_VERSION = 'v22';
+const GAME_VERSION = 'v39';
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');
   vb.id='verBadge';
-  vb.textContent='版本 '+GAME_VERSION+' (攻击修正)';
+  vb.textContent='版本 '+GAME_VERSION+' (新增美洲狮)';
   vb.style.cssText='position:fixed;right:10px;bottom:160px;z-index:9999;font:12px "Microsoft YaHei";color:#ffe27a;background:rgba(20,10,0,.8);padding:3px 10px;border-radius:5px;border:2px solid #ffe27a;pointer-events:none;';
   document.body.appendChild(vb);
 }catch(e){}

@@ -38,6 +38,10 @@ function unitStatsHTML(u, multi){
   if(isCarrier(u)) h+=statRow('运载', usedCapacity(u)+' / '+u.capacity+' 点'+(u.def.carrier?'(可装步兵)':''));
   if(!isCarrier(u) && !u.naval && transportCost(u)>0) h+=statRow('占点', transportCost(u)+' 点');
   if(u.type==='challenger') h+=statRow('等级', u.upgrading ? ('升级中 '+Math.floor(u.upgradeProg/CHALL_UPGRADE_TIME*100)+'%') : (u.upgradeLvl>0 ? (u.upgradeLvl+' 级 · '+CHALL_NAMES[u.upgradeLvl]) : '未升级(可升级)'));
+  if(u.atgm || u.atgmUpgrading){
+    h+=statRow('反坦克导弹', u.atgmUpgrading ? ('安装中 '+Math.floor(u.atgmProg/ATGM_UPGRADE_TIME*100)+'%') :
+      (u.atgm ? ('射程'+ATGM_RANGE+' · 伤害'+ATGM_DAMAGE+(u.atgmReload>0?(' · 装填 '+Math.ceil(u.atgmReload)+'s'):' · 已就绪')) : ''));
+  }
   h+='<div class="udesc">'+(d.desc||UNIT_DESC[u.type]||'')+'</div>';
   return h;
 }
@@ -169,7 +173,7 @@ function updatePanel(){
         if(selBuilding.defName==='factory'){
           if(selBuilding.upgraded){
             const facUnits = unitFactionOf(TEAM_A)==='allies'
-              ? ['abrams','bradley','marder','leclerc','leopard','challenger','mcv']
+              ? ['abrams','bradley','marder','leclerc','leopard','challenger','puma','mcv']
               : ['t90','b11','mcv'];
             for(const t of facUnits) mkUnit(t);
           }
@@ -224,6 +228,10 @@ function updatePanel(){
       if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/CHALL_UPGRADE_TIME*100)+'%','none',false);
       else if(first.upgradeLvl<2) mkAction('升级 → '+CHALL_NAMES[first.upgradeLvl+1]+' $'+CHALL_UPGRADE_COST,'challUpgrade',true);
       else mkAction('已满级 '+CHALL_NAMES[2],'none',false);
+    }
+    if(ATGM_TYPES.indexOf(first.type)!==-1){
+      if(first.atgmUpgrading) mkAction('反坦克导弹模块 安装中 '+Math.floor(first.atgmProg/ATGM_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.atgm) mkAction('反坦克导弹模块 $'+ATGM_COST,'atgmUp',true);
     }
     mkAction('全选作战单位','selectall',true);
     return;

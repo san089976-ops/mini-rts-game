@@ -235,12 +235,28 @@ function updateAI(dt, team){
       st.queuedCounts[ifv]=(st.queuedCounts[ifv]||0)+1;
     }
     if(unitFactionOf(team)==='allies'){
+      const pumaCur=(st.unitCounts[team] ? (st.unitCounts[team]['puma']||0) : 0)+(st.queuedCounts['puma']||0);
+      if(upFac && pumaCur<2 && upFac.queue.length<st.queueDepth && canTrain(team,'puma')){
+        credits[team]-=defs['puma'].cost;
+        upFac.queue.push({type:'puma',progress:0});
+        st.queuedCounts['puma']=(st.queuedCounts['puma']||0)+1;
+      }
       const mbt='leopard';
       const mbtCur=(st.unitCounts[team] ? (st.unitCounts[team][mbt]||0) : 0)+(st.queuedCounts[mbt]||0);
       if(upFac && mbtCur<2 && upFac.queue.length<st.queueDepth && canTrain(team, mbt)){
         credits[team]-=defs[mbt].cost;
         upFac.queue.push({type:mbt,progress:0});
         st.queuedCounts[mbt]=(st.queuedCounts[mbt]||0)+1;
+      }
+    }
+  }
+
+  // === 反坦克导弹模块:给已生产的美洲狮/黄鼠狼/布拉德利安装(中等/残酷) ===
+  if(st.diff!=='easy'){
+    for(const u of units){
+      if(u.team===team && u.hp>0 && ATGM_TYPES.indexOf(u.type)!==-1 && !u.atgm && !u.atgmUpgrading && credits[team]>=ATGM_COST+200){
+        startATGMAttach(u);
+        break;
       }
     }
   }

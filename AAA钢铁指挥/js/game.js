@@ -2,6 +2,7 @@
 /* ============ game.js: 游戏流程与主循环 ============ */
 function setupGame(){
   units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; placing=null;
+  missiles=[];
   trackMarks=[];
   paused=false;
   if(selling) setSelling(false);
@@ -20,6 +21,7 @@ function setupGame(){
   for(let i=0;i<gameTeams.length;i++) researches[i] = {};
   controlGroups = {};   // 每局清空数字编队
   genTerrain();
+  resetPathCache();
   // 布置所有队伍:自制地图按保存的数据放建筑/单位;其余地图出生点上方空地生成初始单位
   if(gameSetup.map.custom==='edited'){
     placeMapEntities(gameSetup.map);
