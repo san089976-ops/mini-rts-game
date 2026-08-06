@@ -20,6 +20,7 @@ function setupGame(){
   for(let i=0;i<gameTeams.length;i++) researches[i] = {};
   controlGroups = {};   // 每局清空数字编队
   genTerrain();
+  resetPathCache();
   // 布置所有队伍:自制地图按保存的数据放建筑/单位;其余地图出生点上方空地生成初始单位
   if(gameSetup.map.custom==='edited'){
     placeMapEntities(gameSetup.map);

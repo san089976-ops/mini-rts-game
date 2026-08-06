@@ -1,5 +1,10 @@
 "use strict";
 /* ============ render.js: 渲染 ============ */
+let mmTerrainCache = null;
+let mmTerrainKey = '';
+let terrainCache = null;
+let terrainCacheKey = '';
+function onView(x,y,m){ return x>cam.x-m && x<cam.x+viewW()+m && y>cam.y-m && y<cam.y+viewH()+m; }
 function render(){
   ctx.clearRect(0,0,viewW(),viewH());
   ctx.save();
@@ -9,8 +14,8 @@ function render(){
   drawCloudShadows();
   drawOre();
   drawTrackMarks();
-  for(const b of buildings) drawBuilding(b);
-  for(const u of units) drawUnit(u);
+  for(const b of buildings){ if(b.alive && onView(b.x,b.y,180)) drawBuilding(b); }
+  for(const u of units){ if(onView(u.x,u.y,180)) drawUnit(u); }
   drawProjectiles();
   drawEffects();
   drawTexts();
@@ -22,7 +27,67 @@ function render(){
   drawMinimap();
 }
 function tileVariation(x,y){ return ((x*374761393 + y*668265263) >>> 0) % 1000; }
+function buildTerrainCache(){
+  if(!terrainCache) terrainCache=document.createElement('canvas');
+  terrainCache.width=W; terrainCache.height=H;
+  const g=terrainCache.getContext('2d');
+  for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
+    const px=x*TILE, py=y*TILE;
+    const v=tileVariation(x,y);
+    const t=terrain[x][y];
+    if(t==='water'){
+      const wtile=waterTiles[(x*11+y*7+v)%WATER_TILE_COUNT];
+      if(wtile){ g.drawImage(wtile, px, py, TILE, TILE); }
+      else { g.fillStyle='#2a5a8a'; g.fillRect(px,py,TILE,TILE); g.fillStyle='#2f6396'; g.fillRect(px,py,TILE,TILE*0.5); }
+    } else if(t==='tree'){
+      const tile=imgs['tree'];
+      if(tile){ const s=Math.min(TILE/tile.width, TILE/tile.height); const dw=tile.width*s, dh=tile.height*s; g.drawImage(tile, px+(TILE-dw)/2, py+(TILE-dh)/2, dw, dh); }
+      else {
+        g.fillStyle=((x+y)%2===0)?'#4a9a5a':'#3f8a4e'; g.fillRect(px,py,TILE,TILE);
+        const cx=px+16, cy=py+16;
+        g.fillStyle='#4a3018'; g.fillRect(cx-2,cy+2,5,9);
+        g.fillStyle='#2f7a3a'; g.beginPath(); g.arc(cx,cy-2,9,0,Math.PI*2); g.fill();
+        g.fillStyle='#3f8f4e'; g.beginPath(); g.arc(cx-4,cy-6,6.5,0,Math.PI*2); g.fill();
+        g.fillStyle='#347f42'; g.beginPath(); g.arc(cx+4,cy-5,6,0,Math.PI*2); g.fill();
+        g.fillStyle='rgba(255,255,255,.12)'; g.beginPath(); g.arc(cx-3,cy-8,3,0,Math.PI*2); g.fill();
+      }
+    } else {
+      const tile=terrainTiles[(x*7+y*13+v)%TERRAIN_TILE_COUNT];
+      if(tile){ g.drawImage(tile, px, py, TILE, TILE); }
+      else {
+        const base=(x+y)%2===0?'#4a9a5a':'#3f8a4e';
+        g.fillStyle=base; g.fillRect(px,py,TILE,TILE);
+        if(v%5===0){ g.fillStyle='rgba(0,0,0,.05)'; g.fillRect(px,py,TILE,TILE); }
+        else if(v%7===0){ g.fillStyle='rgba(255,255,255,.05)'; g.fillRect(px,py,TILE,TILE); }
+        const d=v%100;
+        if(d<14){
+          g.strokeStyle='#2f7a3a'; g.lineWidth=1.2;
+          const gx=px+(v%28)+3, gy=py+10+((v>>2)%14);
+          g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx-3,gy-6); g.moveTo(gx,gy); g.lineTo(gx+1,gy-7); g.moveTo(gx,gy); g.lineTo(gx+4,gy-5); g.stroke();
+        } else if(d<18){
+          const fx=px+(v%28)+6, fy=py+14+((v>>3)%12);
+          g.fillStyle='#e8e8e8'; g.beginPath(); g.arc(fx,fy,1.8,0,Math.PI*2); g.fill();
+          g.fillStyle='#ffe27a'; g.beginPath(); g.arc(fx,fy,0.9,0,Math.PI*2); g.fill();
+        } else if(d>=97){
+          g.fillStyle='#6a7468'; g.beginPath(); g.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); g.fill();
+          g.fillStyle='#7d8778'; g.beginPath(); g.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); g.fill();
+        }
+      }
+    }
+  }
+}
+
 function drawTerrain(){
+  const cacheKey = MAP_W+'x'+MAP_H+':'+mapVersion;
+  if(W*H <= 4096*4096){
+    if(!terrainCache || terrainCache.width!==W || terrainCache.height!==H || terrainCacheKey!==cacheKey){
+      buildTerrainCache();
+      terrainCacheKey=cacheKey;
+    }
+    ctx.drawImage(terrainCache, cam.x, cam.y, viewW(), viewH(), cam.x, cam.y, viewW(), viewH());
+    for(const b of buildings){ if(b.alive && b.defName==='command') drawOwnZone(b); }
+    return;
+  }
   const x0=Math.max(0,Math.floor(cam.x/TILE)-1), x1=Math.min(MAP_W,Math.ceil((cam.x+viewW())/TILE)+1);
   const y0=Math.max(0,Math.floor(cam.y/TILE)-1), y1=Math.min(MAP_H,Math.ceil((cam.y+viewH())/TILE)+1);
   for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++){
@@ -601,6 +666,7 @@ function drawHPBar(cx, y, w, pct, isConstruct){  if(pct>1)pct=1; if(pct<0)pct=0;
 // 坦克/车辆移动时在身后生成的低透明度地面残影,随时间淡出,增强"与地面的互动感"
 function drawTrackMarks(){
   for(const m of trackMarks){
+    if(!onView(m.x,m.y,48)) continue;
     const k=m.life/m.maxLife;
     ctx.save();
     ctx.translate(m.x, m.y);
@@ -1497,6 +1563,7 @@ function drawUnit(u){
 }
 function drawProjectiles(){
   for(const p of projectiles){
+    if(!onView(p.x,p.y,64)) continue;
     const dx=p.tx-p.x, dy=p.ty-p.y; const d=Math.hypot(dx,dy)||1;
     // 拖尾
     ctx.strokeStyle=teamGroup(p.team)===0?'rgba(255,224,138,.45)':'rgba(255,128,128,.45)';
@@ -1511,6 +1578,7 @@ function drawProjectiles(){
 }
 function drawEffects(){
   for(const e of effects){
+    if(!onView(e.x,e.y,220)) continue;
     const k=clamp(e.life/e.maxLife,0,1);
     if(e.type==='explode'){
       // 白闪
@@ -1605,6 +1673,7 @@ function drawTexts(){
   ctx.textAlign='center';
   ctx.lineJoin='round';
   for(const t of texts){
+    if(!onView(t.x,t.y,32)) continue;
     const a=clamp(t.life/0.4,0,1);
     ctx.globalAlpha=a;
     ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,.65)'; ctx.strokeText(t.str, t.x, t.y);
@@ -1710,14 +1779,21 @@ function drawMinimap(){
   // 等比包含缩放(每世界像素),长或宽任一边贴边即停,并居中
   const s=Math.min(mmw/W, mmh/H);
   const ox=(mmw-W*s)/2, oy=(mmh-H*s)/2;
-  mmCtx.fillStyle='#1a241a';
-  mmCtx.fillRect(0,0,mmw,mmh);
-  // 地形
-  for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
-    const t=terrain[x][y];
-    mmCtx.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#273a29');
-    mmCtx.fillRect(ox+x*TILE*s, oy+y*TILE*s, TILE*s+0.4, TILE*s+0.4);
+  const cacheKey = mmw+'x'+mmh+':'+MAP_W+'x'+MAP_H+':'+mapVersion;
+  if(!mmTerrainCache || mmTerrainCache.width!==mmw || mmTerrainCache.height!==mmh || mmTerrainKey!==cacheKey){
+    if(!mmTerrainCache) mmTerrainCache=document.createElement('canvas');
+    mmTerrainCache.width=mmw; mmTerrainCache.height=mmh;
+    const g=mmTerrainCache.getContext('2d');
+    g.fillStyle='#1a241a'; g.fillRect(0,0,mmw,mmh);
+    for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
+      const t=terrain[x][y];
+      g.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#273a29');
+      g.fillRect(ox+x*TILE*s, oy+y*TILE*s, TILE*s+0.4, TILE*s+0.4);
+    }
+    mmTerrainKey=cacheKey;
   }
+  // 地形
+  mmCtx.drawImage(mmTerrainCache,0,0);
   // 矿
   mmCtx.fillStyle='#d8b840';
   for(const o of oreFields) if(o.amount>0) mmCtx.fillRect(ox+o.x*s-2, oy+o.y*s-2, 4, 4);
