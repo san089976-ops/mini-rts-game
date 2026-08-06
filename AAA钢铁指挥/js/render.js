@@ -682,7 +682,7 @@ function drawTrackMarks(){
 function unitPhotoImg(u){
   const t=u.type;
   if(t==='tank') return (unitFactionOf(u.team)==='soviet') ? imgs['tank_soviet_field'] : imgs['tank_allies_field'];
-  if(t==='abrams' || t==='t90') return imgs[t];
+  if(t==='abrams' || t==='t90') return imgs[t+'_body'];   // 车身+炮塔结构:阴影用车身
   if(t==='bradley' || t==='b11' || t==='marder' || t==='leclerc' || t==='leopard' || t==='challenger') return imgs[t+'_field'];
   if(t==='harvester' || t==='destroyer' || t==='transport') return imgs[t+'_field'];
   if(t==='mcv' || t==='airfield_car') return imgs[t+'_field'];
@@ -858,6 +858,43 @@ function drawHarvesterWheels(u, img){
     ctx.fillStyle='#6a7076'; ctx.beginPath(); ctx.arc(wx,wy,1.2,0,Math.PI*2); ctx.fill();
   }
 }
+/* ============ 车身 + 独立旋转炮塔(仿美洲狮;艾布拉姆/T90 通用) ============
+   车身/炮塔两张贴图都已用 process-sprite 挖掉白底。rotOff 用于把贴图"自然朝向"
+   对齐到朝向前方(facing=0 为 +x):车头朝上贴图=π/2,水平向左贴图=π。
+   tip=[tx,ty](相对中心比例)是炮口/炮塔前端,用于开火闪光。 */
+function drawHullTurretUnit(u, body, tur, rotOff, sc, tip, turOff){
+  const sBase = Math.max(1, (body&&body.width) ? Math.max(body.width, body.height) : 1);
+  const s = (u.r*2.9*1.8*sc)/sBase;
+  ctx.rotate(u.facing);
+  // 车身
+  if(body && body.width){
+    const dw=body.width*s, dh=body.height*s;
+    ctx.save();
+    ctx.rotate(rotOff);
+    ctx.drawImage(bakedTone(body), -dw/2, -dh/2, dw, dh);
+    ctx.restore();
+  }
+  // 炮塔:向车头(+facing)前移 turOff 后,绕"旋转点"独立朝 turretAng 旋转。
+  // 旋转点:把炮塔贴图沿长轴分3节点,取"距正方向端 2/3 处"(≈贴图中心 +1/6 长),即绕炮塔头转动;
+  // 美洲狮保持贴图中心。
+  if(tur && tur.width){
+    const tw=tur.width*s, th=tur.height*s;
+    const pivX = (u.type==='abrams'||u.type==='t90') ? tw/6 : 0;   // 旋转点相对贴图中心(px)
+    const pivY = 0;
+    ctx.save();
+    ctx.translate(turOff||0, 0);
+    ctx.translate(pivX, pivY);
+    ctx.rotate((u.turretAng - u.facing) + rotOff);
+    ctx.drawImage(bakedTone(tur), -tw/2-pivX, -th/2-pivY, tw, th);
+    // 开火闪光(炮口=炮塔图前端,相对旋转点)
+    if(u.fireT>u.def.rof-0.1 && u.target){
+      const fx=tip[0]*tw-pivX, fy=tip[1]*th-pivY;
+      ctx.fillStyle='rgba(255,220,120,.9)'; ctx.beginPath(); ctx.arc(fx,fy,4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(fx,fy,2,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
 function drawUnit(u){
   const d=u.def;
   const tc=teamCol(u.team);
@@ -885,7 +922,12 @@ function drawUnit(u){
   }
   // 车体渲染偏移(起步/刹车俯仰 + 开火后坐力):阴影/选中圈保持接地,车体位移
   if(u.renderOx || u.renderOy) ctx.translate(u.renderOx, u.renderOy);
-  if(u.type==='tank'||u.type==='abrams'||u.type==='t90'){
+  if(isTurretUnit(u) && imgs[u.type+'_body'] && imgs[u.type+'_body'].width){
+    // 车身 + 独立旋转炮塔(美洲狮/艾布拉姆/T90,完全仿美洲狮结构)
+    const rotOff = u.type==='puma' ? Math.PI/2 : Math.PI;   // 车头朝上=π/2,水平向左=π
+    const tip = u.type==='puma' ? [0,-0.5] : [-0.5,0];       // 炮口:车头朝上=顶部,水平向左=左侧
+    drawHullTurretUnit(u, imgs[u.type+'_body'], imgs[u.type+'_turret'], rotOff, SPRITE_SCALE[u.type]||1, tip, turretFrontOffset(u));
+  } else if(u.type==='tank'||u.type==='abrams'||u.type==='t90'){
     const heavy = unitFactionOf(u.team)==='soviet';
     ctx.rotate(u.facing);
     // 灰熊(盟军)/犀牛(苏军)照片贴图按阵营选,照片车头朝上(SPRITE_ROT 对齐)

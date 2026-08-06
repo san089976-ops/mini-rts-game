@@ -138,6 +138,16 @@ function canBoardUnit(carrier, u){
 /* ============ 25mm 机炮弹(步兵战车专属:贴图弹丸 + 先加速后匀速) ============ */
 const IFV_TYPES = ['puma','bradley','marder','b11'];
 function isIFV25(u){ return !!u && IFV_TYPES.indexOf(u.type)!==-1; }
+// 独立旋转炮塔的载具(车身+炮塔结构,仿美洲狮):美洲狮/艾布拉姆/T90
+function isTurretUnit(u){ return !!u && (u.type==='puma'||u.type==='abrams'||u.type==='t90'); }
+// 炮塔相对车身中心向车头(+facing)前移量(px,最终渲染尺寸)。
+// 艾布拉姆/T90 均向远离车头(车尾方向)移动 20px:艾布拉姆 12→-8,T90 16→-4(负值=偏向车尾);
+// 美洲狮炮塔保持车身正中间。
+function turretFrontOffset(u){
+  if(u.type==='abrams') return -10;
+  if(u.type==='t90') return -8;
+  return 0;
+}
 const IFV_ACCEL = 2600;        // 弹丸加速度(px/s²):先加速后匀速,起步有劲道
 const IFV_START_FACTOR = 0.25; // 弹丸初速 = 最大速度 × 该系数
 const BULLET_25MM_LEN = 8;     // 25mm 弹丸渲染长度(px)
@@ -282,6 +292,9 @@ const IMAGES = {
   command:'img/command.png', power:'img/power.png', barracks:'img/barracks.png',
   factory:'img/factory.png', refinery:'img/refinery.png', turret:'img/turret.png',
   abrams:'img/units/abrams.png', t90:'img/units/t90.png',
+  // 艾布拉姆/T90 车身+炮塔(独立旋转炮塔,仿美洲狮;横向车头朝左,已挖白底)
+  abrams_body:'img/units/abrams_body.png', abrams_turret:'img/units/abrams_turret.png',
+  t90_body:'img/units/t90_body.png', t90_turret:'img/units/t90_turret.png',
   // 建造栏/介绍栏专属图标(战场贴图用各自 _field,互不影响)
   tank_allies:'img/tank_allies.png',       // 灰熊(M60)面板图标
   tank_soviet:'img/tank_soviet.png',       // 犀牛(T54)面板图标
@@ -378,7 +391,7 @@ const imgs = {};
 // 艾布拉姆/ T90 的炮管都在贴图左侧(向左),因此转角均为 180°(π),开火闪光画在贴图左侧即炮口。
 const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2, puma: Math.PI/2 };
 // 照片贴图额外缩放(步兵照片用 0.42,让小人贴合碰撞箱大小;步兵战车整体缩小到 0.7)
-const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.7, marder: 0.7, b11: 0.7, puma: 0.6776 };  // puma: 0.7*0.8(缩小)*1.1*1.1(两次放大)=0.6776
+const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.7, marder: 0.7, b11: 0.7, puma: 0.6776, abrams: 0.8, t90: 0.8 };  // 艾布拉姆/T90 整体模型缩小为原来的0.8倍
 const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1], mcv:[0,1], airfield_car:[0,-1], bradley:[0,-1], marder:[0,-1], leclerc:[0,-1], leopard:[0,-1], challenger:[0,-1], b11:[0,1] };
 // 草地贴图块:由 tools/split-terrain.js 从"草地.png"切成 4x4=16 块,
 // 每个草地格随机取一块平铺,提升陆地细致度
@@ -412,7 +425,7 @@ function preloadImages(){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-const GAME_VERSION = 'v32';
+const GAME_VERSION = 'v39';
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');

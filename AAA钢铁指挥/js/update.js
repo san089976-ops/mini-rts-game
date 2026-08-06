@@ -313,7 +313,7 @@ function updateUnit(u, dt){
   u.fireT-=dt;
   if(u._lineT>0) u._lineT-=dt;   // 攻击指示红线倒计时
   u.wantVx=0; u.wantVy=0;   // 每帧重置期望速度,由下方指令逻辑重新计算
-  if(u.type==='puma') u._turretAiming = false;   // 美洲狮每帧重置:本轮是否在索敌开火(独立转炮塔)
+  if(isTurretUnit(u)) u._turretAiming = false;   // 独立炮塔载具每帧重置:本轮是否在索敌开火(独立转炮塔)
   u._standFire = false;                          // 每帧重置:是否"战斗中钉住不动"(射程内原地射击)
   // 反应装甲:T90 护盾每秒恢复 15(被打破后也能从 0 重新生成)
   if(u.type==='t90' && u.shield<REACTIVE_SHIELD && hasResearch(u.team,'reactiveArmor')){
@@ -390,8 +390,8 @@ function updateUnit(u, dt){
     if(u.def.range>0){
       const en=findEnemyNear(u, u.def.range);
       if(en){
-        if(u.type==='puma'){
-          u._turretAiming = true;   // 美洲狮:移动中索敌开火时炮塔独立转向目标
+        if(isTurretUnit(u)){
+          u._turretAiming = true;   // 独立炮塔载具:移动中索敌开火时炮塔独立转向目标
           u.turretAng = lerpAngle(u.turretAng, Math.atan2(en.y-u.y, en.x-u.x), Math.min(1, PUMA_TURRET_RATE*dt));
         }
         u.turnTarget=Math.atan2(en.y-u.y,en.x-u.x);
@@ -410,8 +410,8 @@ function updateUnit(u, dt){
          Math.hypot(at.x-u._homeX, at.y-u._homeY) > u.def.range*2.2){
         u.target=null; u.order={kind:'none'}; u.path=null;
       } else {
-        if(u.type==='puma'){
-          // 美洲狮:炮塔独立 360° 瞄准,炮口对准目标且射程内才开火;
+        if(isTurretUnit(u)){
+          // 独立炮塔载具(美洲狮/艾布拉姆/T90):炮塔独立 360° 瞄准,炮口对准目标且射程内才开火;
           // 射程外则炮塔边转、车体边寻路推进,进入射程后车体停住只转炮塔打。
           u._turretAiming = true;   // 索敌开火:本轮炮塔独立旋转(不随车体)
           const d=dist(u,at);
@@ -924,8 +924,8 @@ function applyMovement(u, dt){
   }
   u.x=clamp(u.x,u.hw,W-u.hw); u.y=clamp(u.y,u.hh,H-u.hh);
   // 朝向:向目标方向角做 lerpAngle 平滑插值,产生真实的履带战车转向效果,而非瞬间硬转。
-  // 美洲狮(puma)车体不参与瞄准:瞄准由独立炮塔负责,车体只跟移动方向,原地攻击时保持朝向。
-  const aiming = u.type!=='puma' && u.order.kind==='attack' && u.target && u.target.hp>0 && dist(u,u.target)<=u.def.range;
+  // 独立炮塔载具(美洲狮/艾布拉姆/T90)车体不参与瞄准:瞄准由炮塔负责,车体只跟移动方向。
+  const aiming = !isTurretUnit(u) && u.order.kind==='attack' && u.target && u.target.hp>0 && dist(u,u.target)<=u.def.range;
   let tgt = u.facing;
   if(aiming){
     // 攻击瞄准:朝当前目标方向平滑转过去
@@ -934,7 +934,7 @@ function applyMovement(u, dt){
     const wm = Math.hypot(u.wantVx, u.wantVy);
     if(wm > 2){
       tgt = Math.atan2(u.wantVy, u.wantVx);          // 有寻路意图:朝前进方向转
-    } else if(u.order.kind==='attack' && u.target && u.type!=='puma'){
+    } else if(u.order.kind==='attack' && u.target && !isTurretUnit(u)){
       tgt = (u.turnTarget !== undefined) ? u.turnTarget : Math.atan2(u.target.y-u.y, u.target.x-u.x);  // 追击途中朝目标
     }
     // 空闲/移动到位:保持当前朝向,不再回弹到上次战斗残留的 turnTarget 角度
@@ -951,8 +951,8 @@ function applyMovement(u, dt){
   }
   // 载具渲染物理:起步/刹车俯仰 + 开火后坐力
   if(isVehicle) updateRenderPhysics(u, dt);
-  // 美洲狮:无索敌开火时炮塔以炮塔转速慢慢转回车头方向(不瞬移);锁定目标时由 updateUnit 独立瞄准
-  if(u.type==='puma' && !u._turretAiming){
+  // 独立炮塔载具:无索敌开火时炮塔以炮塔转速慢慢转回车头方向(不瞬移);锁定目标时由 updateUnit 独立瞄准
+  if(isTurretUnit(u) && !u._turretAiming){
     u.turretAng = lerpAngle(u.turretAng, u.facing, Math.min(1, PUMA_TURRET_RATE*dt));
   }
 }
@@ -1054,11 +1054,21 @@ function fireAt(u,target){
   const bolt = u.type==='magnet';
   const speed = bolt ? 1400 : (u.type==='tank'||u.type==='destroyer'?400 : (u.type==='infantry'?430: (u.type==='transport'?520:420)));
   let px, py;
-  if(u.type==='puma'){
-    // 美洲狮炮口:炮塔在车体正中心,沿炮塔朝向伸出一段(开火不带动车身抽动)
+  if(isTurretUnit(u)){
+    // 独立炮塔载具:炮口 = 旋转点 + 沿炮塔朝向伸出。旋转点在车身前移处;
+    // 艾布拉姆/T90 旋转点距前端2/3(即炮口到旋转点=2/3长),美洲狮旋转点在中心(炮口=半高)
     const fx=Math.cos(u.turretAng), fy=Math.sin(u.turretAng);
-    px = u.x + fx*(u.r+6);
-    py = u.y + fy*(u.r+6);
+    let muzzleDist = u.r+6;
+    const tur = imgs[u.type+'_turret'], bdy = imgs[u.type+'_body'];
+    if(tur && tur.width){
+      const sBase = Math.max(1, (bdy && bdy.width) ? Math.max(bdy.width, bdy.height) : 1);
+      const sc2 = (u.r*2.9*1.8*(SPRITE_SCALE[u.type]||1))/sBase;
+      const tw=tur.width*sc2, th=tur.height*sc2;
+      muzzleDist = (u.type==='abrams'||u.type==='t90') ? tw*(2/3) + 2 : th*0.5 + 2;
+    }
+    const fOff = turretFrontOffset(u);   // 艾布拉姆/T90 炮塔向车头前移
+    px = u.x + Math.cos(u.facing)*fOff + fx*muzzleDist;
+    py = u.y + Math.sin(u.facing)*fOff + fy*muzzleDist;
   } else {
     px=u.x+Math.cos(u.facing)*(u.r+4), py=u.y+Math.sin(u.facing)*(u.r+4);
   }
