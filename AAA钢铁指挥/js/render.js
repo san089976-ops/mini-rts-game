@@ -737,6 +737,7 @@ function bakedShadow(img){
   }catch(e){ _shadowCache[key] = null; return null; }
 }
 const _rectShadowCache = {};
+<<<<<<< Updated upstream
 // 剪影 L 形投影烘焙:把车体贴图压成黑色剪影,再按"渲染尺寸×16%"的高斯模糊一次。
 // 相对车体只偏移一点点(UNIT_SHADOW_L_OFFSET),露出右下 L 形黑边;模糊+低不透明度=淡化纯黑。
 const _lShadowCache = {};
@@ -762,6 +763,8 @@ function bakedLSilhouette(img, dw, dh){
     return c;
   }catch(e){ _lShadowCache[key]=null; return null; }
 }
+=======
+>>>>>>> Stashed changes
 // 长方形阴影(预烘焙):车体足迹同尺寸的实心黑色矩形 + 高斯模糊,边缘柔和,
 // 一次性烘焙缓存,运行期零 filter 开销(与剪影阴影同思路)
 function bakedRectShadow(w, h, blurPx){
@@ -784,6 +787,7 @@ function bakedRectShadow(w, h, blurPx){
 // 阴影是"与车体足迹同尺寸的长方形"整体向右下偏移,边缘高斯模糊,
 // 形成长方体落到地面的方形投影;AO 负责贴地防悬浮。
 function drawShadowSprite(u, img){
+<<<<<<< Updated upstream
   // 美洲狮贴图 0.8×(×1.1)² ≈ 0.968,阴影跟随同比例,保持"贴图多大阴影多大"
   const vs = (u.type==='puma') ? 0.968 : 1;
   // 车体贴图同尺寸的"剪影阴影":大小≈贴图,只偏移一点点露出右下 L 形黑边,
@@ -807,6 +811,40 @@ function drawShadowSprite(u, img){
   ctx.globalAlpha = 0.10;
   ctx.rotate(u.facing + rot);
   ctx.drawImage(sh, -dw/2-pad, -dh/2-pad);
+=======
+  // ① 接地接触阴影(AO):与车体足迹(hw/hh)同尺寸的暗色椭圆,旋转随车头,紧贴车身正下方
+  ctx.save();
+  ctx.translate(2, 4);                       // 极小的下移,让阴影"贴地"
+  ctx.rotate(u.facing);
+  ctx.fillStyle = '#000';
+  ctx.globalAlpha = UNIT_SHADOW_AO*0.7;      // 内层:紧贴足迹
+  ctx.beginPath();
+  ctx.ellipse(0, 0, u.hw*0.98, u.hh*1.06, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = UNIT_SHADOW_AO*0.4;      // 外层:更大更淡的 AO 过渡,消除贴图硬边
+  ctx.beginPath();
+  ctx.ellipse(0, 0, u.hw*1.3, u.hh*1.38, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+  // ② 方向性长方形阴影:车体足迹(hw/hh)同尺寸的黑色矩形,整体向右下偏移(光在左上),
+  //    边缘高斯模糊(预烘焙),旋转随车头——呈现"长方体落地"的方形投影
+  const bw = Math.max(12, u.hw*2.1);
+  const bh = Math.max(12, u.hh*2.1);
+  const sh = bakedRectShadow(bw, bh, UNIT_SHADOW_RECT_BLUR);
+  if(!sh) return;
+  ctx.save();
+  ctx.translate(UNIT_SHADOW_OFFSET.x, UNIT_SHADOW_OFFSET.y);
+  ctx.rotate(u.facing);
+  // 外层:更大更淡的扩展影,加强模糊层级感
+  ctx.save();
+  ctx.scale(1.4, 1.4);
+  ctx.globalAlpha = UNIT_SHADOW_ALPHA*0.4;
+  ctx.drawImage(sh, -sh.width/2, -sh.height/2);
+  ctx.restore();
+  // 本体:清晰的模糊长方形
+  ctx.globalAlpha = UNIT_SHADOW_ALPHA;
+  ctx.drawImage(sh, -sh.width/2, -sh.height/2);
+>>>>>>> Stashed changes
   ctx.restore();
 }
 // 水上单位(驱逐舰/运输艇):不做陆地阴影,只留一个很淡的椭圆投影,避免"黑影贴在水面上"

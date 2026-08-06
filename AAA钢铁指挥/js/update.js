@@ -410,6 +410,7 @@ function updateUnit(u, dt){
          Math.hypot(at.x-u._homeX, at.y-u._homeY) > u.def.range*2.2){
         u.target=null; u.order={kind:'none'}; u.path=null;
       } else {
+<<<<<<< Updated upstream
         if(u.type==='puma'){
           // 美洲狮:炮塔独立 360° 瞄准,炮口对准目标且射程内才开火;
           // 射程外则炮塔边转、车体边寻路推进,进入射程后车体停住只转炮塔打。
@@ -448,6 +449,22 @@ function updateUnit(u, dt){
       launchATGM(u, at);
       u.atgmReload = ATGM_RELOAD;
     }
+=======
+        const d=dist(u,at);
+        // 到位距离:停在自己射程边缘即可打到目标(刚好能开火的距离)
+        const stopD = u.def.range;
+        if(d > stopD){
+          followPathToEntity(u, at, dt);   // 没到位:寻路向目标推进
+        } else {
+          u.path=null;                     // 到位:停止移动
+        }
+        if(d <= u.def.range){              // 进入射程就持续向目标开火
+          u.turnTarget=Math.atan2(at.y-u.y, at.x-u.x);
+          if(u.fireT<=0){ u.fireT=u.def.rof; fireAt(u,at); }
+        }
+      }
+    }
+>>>>>>> Stashed changes
     if(!at || at.hp<=0){
       u.target=null;
       if(u.prevOrder){ u.order=u.prevOrder; u.prevOrder=null; }
@@ -721,15 +738,23 @@ function dampedTurn(u, target, dt){
   delta = ((delta + Math.PI) % (Math.PI*2) + Math.PI*2) % (Math.PI*2) - Math.PI;   // 最短转角 [-π, π]
   const abs = Math.abs(delta);
   if(abs < 0.008){ u.facing = target; u.angVel = 0; return target; }
+<<<<<<< Updated upstream
   const maxV = (u.type==='puma') ? PUMA_TURN_MAX_SPEED : TURN_MAX_SPEED;
   const accel = (u.type==='puma') ? PUMA_TURN_ACCEL : TURN_ACCEL;
+=======
+  const maxV = TURN_MAX_SPEED;
+>>>>>>> Stashed changes
   const dir = delta > 0 ? 1 : -1;
   // 期望角速度:匀速;最后 0.4rad 线性减速,避免到位硬停
   let want = dir * maxV;
   if(abs < 0.4) want = dir * maxV * (abs/0.4);
   // 以固定角加速度逼近(起步加速 / 换向减速)
   const dv = want - u.angVel;
+<<<<<<< Updated upstream
   u.angVel += Math.sign(dv) * Math.min(accel*dt, Math.abs(dv));
+=======
+  u.angVel += Math.sign(dv) * Math.min(TURN_ACCEL*dt, Math.abs(dv));
+>>>>>>> Stashed changes
   if(Math.abs(u.angVel) > maxV) u.angVel = Math.sign(u.angVel)*maxV;
   // 环形到位判定:检查下一帧角度与目标的最短角差,而非线性比较
   const next = u.facing + u.angVel*dt;
@@ -764,6 +789,7 @@ function applyMovement(u, dt){
   // 前进方向分量只做有限减速——否则队列中前后车互相抵消会整群死锁
   const sp = u.speedEff;
   const isVehicle = u.hw > u.hh && !u.naval;   // 履带/长条形载具(海军除外)
+<<<<<<< Updated upstream
   // 兜底:单位中心格被建筑/障碍压住(卡在建筑里出不来)-> 拉到最近可通行格。
   // 每 0.8s 检查一次(不是每帧寻路,不影响寻路系统;只在"真被埋住"时触发)
   u._obsT = (u._obsT||0) + dt;
@@ -777,6 +803,8 @@ function applyMovement(u, dt){
     u._backing = null; u._escapeT = 0; u._yieldT = 0;
     u.wantVx = 0; u.wantVy = 0;
   }
+=======
+>>>>>>> Stashed changes
   // 让行:卡住滑开后暂停片刻,打破双向车流对称死锁(随机时差分先后)
   if(u._yieldT>0){
     u._yieldT -= dt;
@@ -827,6 +855,7 @@ function applyMovement(u, dt){
     vx = wx + px*sPerpC + ux*parSlow;
     vy = wy + py*sPerpC + uy*parSlow;
   } else {
+<<<<<<< Updated upstream
     // 无前进目标(已到位/待命):被挤压时轻微推开,让先到位的单位散开腾出空间。
     // 战斗钉住(_standFire)的单位不被推挤,保持原地射击。
     if(u._standFire){ vx=0; vy=0; }
@@ -837,6 +866,26 @@ function applyMovement(u, dt){
         vx=u.sepVx*k; vy=u.sepVy*k;
       } else { vx=0; vy=0; }
     }
+  }
+  // 履带载具几乎不能横移:把速度分解为"沿车头/垂直车头",削减横移分量,
+  // 让坦克"先转向(匀速)再沿车头前进/倒退",而不是被指令拉着横着飘
+  if(isVehicle){
+    const m0=Math.hypot(vx,vy);
+    if(m0>1){
+      const fx2=Math.cos(u.facing), fy2=Math.sin(u.facing);
+      const fwd = vx*fx2 + vy*fy2;                  // 沿车头分量(前=正)
+      const lat = vx*(-fy2) + vy*fx2;               // 垂直车头分量
+      vx = fx2*fwd + (-fy2)*(lat*VEHICLE_LATERAL);
+      vy = fy2*fwd + fx2*(lat*VEHICLE_LATERAL);
+    }
+=======
+    // 无前进目标(已到位/待命):被挤压时轻微推开,让先到位的单位散开腾出空间
+    const s=Math.hypot(u.sepVx,u.sepVy);
+    if(s>SEPARATE_STRENGTH*0.2){
+      const k=Math.min(1, 15/s);      // 空闲单位被推幅度封顶 15px/s(更沉,几乎不漂)
+      vx=u.sepVx*k; vy=u.sepVy*k;
+    } else { vx=0; vy=0; }
+>>>>>>> Stashed changes
   }
   // 履带载具几乎不能横移:把速度分解为"沿车头/垂直车头",削减横移分量,
   // 让坦克"先转向(匀速)再沿车头前进/倒退",而不是被指令拉着横着飘
@@ -948,13 +997,18 @@ function applyMovement(u, dt){
     if(u.facing > Math.PI || u.facing < -Math.PI){
       u.facing = ((u.facing + Math.PI) % (Math.PI*2) + Math.PI*2) % (Math.PI*2) - Math.PI;
     }
+<<<<<<< Updated upstream
   }
   // 载具渲染物理:起步/刹车俯仰 + 开火后坐力
   if(isVehicle) updateRenderPhysics(u, dt);
   // 美洲狮:无索敌开火时炮塔以炮塔转速慢慢转回车头方向(不瞬移);锁定目标时由 updateUnit 独立瞄准
   if(u.type==='puma' && !u._turretAiming){
     u.turretAng = lerpAngle(u.turretAng, u.facing, Math.min(1, PUMA_TURRET_RATE*dt));
+=======
+>>>>>>> Stashed changes
   }
+  // 载具渲染物理:起步/刹车俯仰 + 开火后坐力
+  if(isVehicle) updateRenderPhysics(u, dt);
 }
 /* ============ 履带/轮子接地细节:压痕 + 扬尘 ============ */
 // 移动中的履带车辆按"走过的距离"生成压痕,并在较快时扬起尘土
@@ -1079,7 +1133,11 @@ function fireAt(u,target){
     pr.tankShell = true;
   }
   projectiles.push(pr);
+<<<<<<< Updated upstream
   // 所有坦克/载具开火不再产生后坐力位移(避免车身开火抽动)
+=======
+  if(u.hw > u.hh && !u.naval) u.fireRecoil = FIRE_RECOIL;   // 载具开火后坐力(车身反向震动)
+>>>>>>> Stashed changes
   if(bolt){
     // 磁暴步兵:释放一段闪电特效(纯视觉,命中伤害走弹体)
     const e=new Effect(target.x,target.y,'bolt',0);
@@ -1103,9 +1161,15 @@ function followPathToEntity(u, target, dt){
   // 路径走完但目标还没到位 -> 立即重寻,避免停在半路干瞪眼。
   // 到位距离取一个比射程更小的值,保证推进途中路径走完都会立刻重寻,不会僵停。
   const chaseD = Math.max(24, u.r + 12);
+<<<<<<< Updated upstream
   if((!u.path || u.pathIdx>=u.path.length) && !u._pendingPath && u.target && u.target.hp>0 && dist(u,u.target)>chaseD && pathRetryReady(u)){
     queuePath(u, target.x, target.y, u.order);
     u.repathT = 0.7;
+=======
+  if((!u.path || u.pathIdx>=u.path.length) && u.target && u.target.hp>0 && dist(u,u.target)>chaseD && pathRetryReady(u)){
+    const p=pathFor(u,u.x,u.y,target.x,target.y);
+    if(p){ u.path=p; u.pathIdx=0; } else { u._lastPathFail = time; }
+>>>>>>> Stashed changes
   }
 }
 function followPath(u,dt){
