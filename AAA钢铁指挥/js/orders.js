@@ -47,14 +47,17 @@ function orderMove(list, x, y){
     u._lastMoveCmd=time;              // 记录移动指令时间:刚拉走的单位 1.5 秒内不被拉回战斗
     if(u.type==='harvester'){ u.mode='mine'; u.oreTarget=null; }
     u.order={kind:'move', x:tx, y:ty};
-    const p=pathFor(u,u.x,u.y,tx,ty);
-    u.path=p; u.pathIdx=0; u.repathT=1.0;
+    u.path=null; u.pathIdx=0; u.repathT=1.0;
+    queuePath(u, tx, ty, u.order);
   }
 }
 function orderAttack(list, enemy, force){
   for(const u of list){
     if(u.def.range<=0) continue;
+    u.target = enemy;                                // 关键:攻击目标必须写入 u.target(全局攻击判断都读它)
+    u._lineT = RED_LINE_TIME;                        // 攻击指示红线:短暂显示后消失
     u.order={kind:'attack', target:enemy, force:!!force}; u.path=null;
+    queuePath(u, enemy.x, enemy.y, u.order);
   }
 }
 // 攻击移动:朝目标点移动,途中攻击遇到的敌人(不打断移动)
@@ -66,7 +69,8 @@ function orderAttackMove(list, x, y){
     const ty = targets ? targets[i].y : y;
     u.target=null;
     u.order={kind:'move', x:tx, y:ty, x2:true};
-    u.path=pathFor(u,u.x,u.y,tx,ty); u.pathIdx=0; u.repathT=1.0;
+    u.path=null; u.pathIdx=0; u.repathT=1.0;
+    queuePath(u, tx, ty, u.order);
   }
 }
 
@@ -92,7 +96,7 @@ function mouseWorld(){
   return { x: mouse.x + cam.x, y: mouse.y + cam.y };
 }
 function entityAt(wx,wy){
-  for(let i=units.length-1;i>=0;i--){ const u=units[i]; if(Math.hypot(u.x-wx,u.y-wy)<=u.r+4) return u; }
+  for(let i=units.length-1;i>=0;i--){ const u=units[i]; if(Math.hypot(u.x-wx,u.y-wy)<=Math.max(u.r+8, (u.hw||u.r)+4)) return u; }
   for(let i=buildings.length-1;i>=0;i--){ const b=buildings[i]; if(b.alive&&wx>=b.tx*TILE&&wy>=b.ty*TILE&&wx<(b.tx+b.w)*TILE&&wy<(b.ty+b.h)*TILE) return b; }
   return null;
 }
@@ -172,7 +176,8 @@ function giveOrder(ctrl){
     for(const t of transports){
       t.target=null;
       t.order={kind:'move', x:mw.x, y:mw.y};
-      t.path=pathFor(t,t.x,t.y,mw.x,mw.y);
+      t.path=null; t.pathIdx=0; t.repathT=1.0;
+      queuePath(t, mw.x, mw.y, t.order);
       t.unloadAt=null;   // 不自动卸载,玩家手动释放
     }
     remaining = list.filter(u=>u.type!=='transport');
@@ -203,11 +208,29 @@ function giveOrder(ctrl){
       return;
     }
   }
-  if(enemy && isEnemy(remaining[0]?remaining[0].team:selBuilding.team, enemy.team) && !(enemy instanceof Building && !enemy.alive)){
+  // 攻击判定:右键点中敌人 -> 攻击并显示红线;若点击没精确命中敌人,
+  // 则在点击处附近(约1.5格)找最近敌人判定为攻击,让右键攻击更可靠
+  const selTeam = (remaining[0]||selBuilding||{team:0}).team;
+  let atkTarget = enemy;
+  if(!(atkTarget && atkTarget.alive!==false && isEnemy(selTeam, atkTarget.team))){
+    let best=null, bd=48;
+    for(const u of units){
+      if(u.hp<=0) continue;
+      const d=Math.hypot(u.x-mw.x, u.y-mw.y);
+      if(d<bd && isEnemy(selTeam, u.team)){ bd=d; best=u; }
+    }
+    for(const b of buildings){
+      if(!b.alive) continue;
+      const d=Math.hypot(b.x-mw.x, b.y-mw.y);
+      if(d<bd && isEnemy(selTeam, b.team)){ bd=d; best=b; }
+    }
+    if(best) atkTarget=best;
+  }
+  if(atkTarget && atkTarget.alive!==false && isEnemy(selTeam, atkTarget.team)){
     // 攻击(采矿车/运输艇不参与主动攻击)
     const attackers = remaining.filter(u=>u.type!=='harvester' && u.type!=='transport');
-    orderAttack(attackers, enemy);
-    if(attackers.length) textPopup(attackers[0].x,attackers[0].y-20,'攻击 '+(enemy.defName||enemy.def.name||enemy.type),'#ffb0b0');
+    orderAttack(attackers, atkTarget);
+    if(attackers.length) textPopup(attackers[0].x,attackers[0].y-20,'攻击 '+(atkTarget.defName||atkTarget.def.name||atkTarget.type),'#ffb0b0');
   } else if(remaining.length){
     orderMove(remaining, mw.x, mw.y);
   }

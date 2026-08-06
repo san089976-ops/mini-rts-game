@@ -1,5 +1,10 @@
 "use strict";
 /* ============ render.js: 渲染 ============ */
+let mmTerrainCache = null;
+let mmTerrainKey = '';
+let terrainCache = null;
+let terrainCacheKey = '';
+function onView(x,y,m){ return x>cam.x-m && x<cam.x+viewW()+m && y>cam.y-m && y<cam.y+viewH()+m; }
 function render(){
   ctx.clearRect(0,0,viewW(),viewH());
   ctx.save();
@@ -9,9 +14,10 @@ function render(){
   drawCloudShadows();
   drawOre();
   drawTrackMarks();
-  for(const b of buildings) drawBuilding(b);
-  for(const u of units) drawUnit(u);
+  for(const b of buildings){ if(b.alive && onView(b.x,b.y,180)) drawBuilding(b); }
+  for(const u of units){ if(onView(u.x,u.y,180)) drawUnit(u); }
   drawProjectiles();
+  drawMissiles();
   drawEffects();
   drawTexts();
   drawSel();
@@ -22,7 +28,67 @@ function render(){
   drawMinimap();
 }
 function tileVariation(x,y){ return ((x*374761393 + y*668265263) >>> 0) % 1000; }
+function buildTerrainCache(){
+  if(!terrainCache) terrainCache=document.createElement('canvas');
+  terrainCache.width=W; terrainCache.height=H;
+  const g=terrainCache.getContext('2d');
+  for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
+    const px=x*TILE, py=y*TILE;
+    const v=tileVariation(x,y);
+    const t=terrain[x][y];
+    if(t==='water'){
+      const wtile=waterTiles[(x*11+y*7+v)%WATER_TILE_COUNT];
+      if(wtile){ g.drawImage(wtile, px, py, TILE, TILE); }
+      else { g.fillStyle='#2a5a8a'; g.fillRect(px,py,TILE,TILE); g.fillStyle='#2f6396'; g.fillRect(px,py,TILE,TILE*0.5); }
+    } else if(t==='tree'){
+      const tile=imgs['tree'];
+      if(tile){ const s=Math.min(TILE/tile.width, TILE/tile.height); const dw=tile.width*s, dh=tile.height*s; g.drawImage(tile, px+(TILE-dw)/2, py+(TILE-dh)/2, dw, dh); }
+      else {
+        g.fillStyle=((x+y)%2===0)?'#4a9a5a':'#3f8a4e'; g.fillRect(px,py,TILE,TILE);
+        const cx=px+16, cy=py+16;
+        g.fillStyle='#4a3018'; g.fillRect(cx-2,cy+2,5,9);
+        g.fillStyle='#2f7a3a'; g.beginPath(); g.arc(cx,cy-2,9,0,Math.PI*2); g.fill();
+        g.fillStyle='#3f8f4e'; g.beginPath(); g.arc(cx-4,cy-6,6.5,0,Math.PI*2); g.fill();
+        g.fillStyle='#347f42'; g.beginPath(); g.arc(cx+4,cy-5,6,0,Math.PI*2); g.fill();
+        g.fillStyle='rgba(255,255,255,.12)'; g.beginPath(); g.arc(cx-3,cy-8,3,0,Math.PI*2); g.fill();
+      }
+    } else {
+      const tile=terrainTiles[(x*7+y*13+v)%TERRAIN_TILE_COUNT];
+      if(tile){ g.drawImage(tile, px, py, TILE, TILE); }
+      else {
+        const base=(x+y)%2===0?'#4a9a5a':'#3f8a4e';
+        g.fillStyle=base; g.fillRect(px,py,TILE,TILE);
+        if(v%5===0){ g.fillStyle='rgba(0,0,0,.05)'; g.fillRect(px,py,TILE,TILE); }
+        else if(v%7===0){ g.fillStyle='rgba(255,255,255,.05)'; g.fillRect(px,py,TILE,TILE); }
+        const d=v%100;
+        if(d<14){
+          g.strokeStyle='#2f7a3a'; g.lineWidth=1.2;
+          const gx=px+(v%28)+3, gy=py+10+((v>>2)%14);
+          g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx-3,gy-6); g.moveTo(gx,gy); g.lineTo(gx+1,gy-7); g.moveTo(gx,gy); g.lineTo(gx+4,gy-5); g.stroke();
+        } else if(d<18){
+          const fx=px+(v%28)+6, fy=py+14+((v>>3)%12);
+          g.fillStyle='#e8e8e8'; g.beginPath(); g.arc(fx,fy,1.8,0,Math.PI*2); g.fill();
+          g.fillStyle='#ffe27a'; g.beginPath(); g.arc(fx,fy,0.9,0,Math.PI*2); g.fill();
+        } else if(d>=97){
+          g.fillStyle='#6a7468'; g.beginPath(); g.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); g.fill();
+          g.fillStyle='#7d8778'; g.beginPath(); g.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); g.fill();
+        }
+      }
+    }
+  }
+}
+
 function drawTerrain(){
+  const cacheKey = MAP_W+'x'+MAP_H+':'+mapVersion;
+  if(W*H <= 4096*4096){
+    if(!terrainCache || terrainCache.width!==W || terrainCache.height!==H || terrainCacheKey!==cacheKey){
+      buildTerrainCache();
+      terrainCacheKey=cacheKey;
+    }
+    ctx.drawImage(terrainCache, cam.x, cam.y, viewW(), viewH(), cam.x, cam.y, viewW(), viewH());
+    for(const b of buildings){ if(b.alive && b.defName==='command') drawOwnZone(b); }
+    return;
+  }
   const x0=Math.max(0,Math.floor(cam.x/TILE)-1), x1=Math.min(MAP_W,Math.ceil((cam.x+viewW())/TILE)+1);
   const y0=Math.max(0,Math.floor(cam.y/TILE)-1), y1=Math.min(MAP_H,Math.ceil((cam.y+viewH())/TILE)+1);
   for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++){
@@ -601,11 +667,12 @@ function drawHPBar(cx, y, w, pct, isConstruct){  if(pct>1)pct=1; if(pct<0)pct=0;
 // 坦克/车辆移动时在身后生成的低透明度地面残影,随时间淡出,增强"与地面的互动感"
 function drawTrackMarks(){
   for(const m of trackMarks){
+    if(!onView(m.x,m.y,48)) continue;
     const k=m.life/m.maxLife;
     ctx.save();
     ctx.translate(m.x, m.y);
     ctx.rotate(m.a);
-    ctx.globalAlpha = 0.08 + 0.08*k;          // 很淡的深色土痕,越老越透明
+    ctx.globalAlpha = 0.14 + 0.32*k;   // 泥土灰压痕,随时间淡出
     ctx.fillStyle = '#2c3428';
     ctx.fillRect(-m.l/2, -m.w/2, m.l, m.w);
     ctx.restore();
@@ -619,6 +686,7 @@ function unitPhotoImg(u){
   if(t==='bradley' || t==='b11' || t==='marder' || t==='leclerc' || t==='leopard' || t==='challenger') return imgs[t+'_field'];
   if(t==='harvester' || t==='destroyer' || t==='transport') return imgs[t+'_field'];
   if(t==='mcv' || t==='airfield_car') return imgs[t+'_field'];
+  if(t==='puma') return imgs['puma_body'];
   if(t==='infantry') return (unitFactionOf(u.team)==='soviet') ? imgs['infantry_soviet_field'] : imgs['infantry_allies_field'];
   if(t==='exo' || t==='magnet') return imgs[t+'_field'];
   return null;
@@ -668,35 +736,77 @@ function bakedShadow(img){
     return c;
   }catch(e){ _shadowCache[key] = null; return null; }
 }
-// 方向性剪影阴影 + 接地接触阴影(AO)。核心:接地阴影必须与"车体足迹"同尺寸、
-// 紧贴车身正下方,坦克才不会看起来悬浮在草地上。
+const _rectShadowCache = {};
+// 剪影 L 形投影烘焙:把车体贴图压成黑色剪影,再按"渲染尺寸×16%"的高斯模糊一次。
+// 相对车体只偏移一点点(UNIT_SHADOW_L_OFFSET),露出右下 L 形黑边;模糊+低不透明度=淡化纯黑。
+const _lShadowCache = {};
+function bakedLSilhouette(img, dw, dh){
+  const key=(img.src||'')+'@'+Math.round(dw)+'x'+Math.round(dh);
+  if(_lShadowCache[key]) return _lShadowCache[key];
+  try{
+    const W=Math.max(1,Math.round(dw)), H=Math.max(1,Math.round(dh));
+    const sil=document.createElement('canvas'); sil.width=W; sil.height=H;
+    const g1=sil.getContext('2d');
+    g1.drawImage(img,0,0,W,H);
+    g1.globalCompositeOperation='source-in';
+    g1.fillStyle='#000';
+    g1.fillRect(0,0,W,H);
+    g1.globalCompositeOperation='source-over';
+    const blur=Math.max(1,Math.round(Math.min(W,H)*0.16));
+    const c=document.createElement('canvas'); c.width=W+blur*2; c.height=H+blur*2;
+    const g2=c.getContext('2d');
+    g2.filter='blur('+blur+'px)';
+    g2.drawImage(sil,blur,blur);
+    g2.filter='none';
+    _lShadowCache[key]=c;
+    return c;
+  }catch(e){ _lShadowCache[key]=null; return null; }
+}
+// 长方形阴影(预烘焙):车体足迹同尺寸的实心黑色矩形 + 高斯模糊,边缘柔和,
+// 一次性烘焙缓存,运行期零 filter 开销(与剪影阴影同思路)
+function bakedRectShadow(w, h, blurPx){
+  const key = Math.round(w)+'x'+Math.round(h)+'_'+blurPx;
+  if(_rectShadowCache[key]) return _rectShadowCache[key];
+  try{
+    const pad = Math.max(2, Math.ceil(blurPx*2));
+    const cw = Math.ceil(w + pad*2), ch = Math.ceil(h + pad*2);
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const g = c.getContext('2d');
+    g.filter = 'blur('+blurPx+'px)';
+    g.fillStyle = '#000';
+    g.fillRect(pad, pad, w, h);
+    g.filter = 'none';
+    _rectShadowCache[key] = c;
+    return c;
+  }catch(e){ _rectShadowCache[key] = null; return null; }
+}
+// 方向性矩形阴影 + 接地接触阴影(AO)。坦克/步兵战车等长条形车辆:
+// 阴影是"与车体足迹同尺寸的长方形"整体向右下偏移,边缘高斯模糊,
+// 形成长方体落到地面的方形投影;AO 负责贴地防悬浮。
 function drawShadowSprite(u, img){
-  // ① 接地接触阴影(AO):与车体足迹(hw/hh)同尺寸的暗色椭圆,旋转随车头,紧贴车身正下方
-  ctx.save();
-  ctx.translate(2, 4);                       // 极小的下移,让阴影"贴地"
-  ctx.rotate(u.facing);
-  ctx.fillStyle = '#000';
-  ctx.globalAlpha = UNIT_SHADOW_AO;          // 内层:紧贴足迹
-  ctx.beginPath();
-  ctx.ellipse(0, 0, u.hw*0.98, u.hh*1.06, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.globalAlpha = UNIT_SHADOW_AO*0.5;      // 外层:更大更淡的 AO 过渡,消除贴图硬边
-  ctx.beginPath();
-  ctx.ellipse(0, 0, u.hw*1.3, u.hh*1.38, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.restore();
-  // ② 方向性剪影阴影:继承坦克纹理形状,整体偏移(光在左上方),旋转与车身同步
-  const sh = bakedShadow(img);
-  if(!sh) return;
+  // 美洲狮贴图 0.8×(×1.1)² ≈ 0.968,阴影跟随同比例,保持"贴图多大阴影多大"
+  const vs = (u.type==='puma') ? 0.968 : 1;
+  // 车体贴图同尺寸的"剪影阴影":大小≈贴图,只偏移一点点露出右下 L 形黑边,
+  // 边缘高斯模糊、黑色淡化(非纯黑),让坦克"压在地面上"而不是贴一张方片。
+  const sc = SPRITE_SCALE[u.type] || 1;
+  const s = (u.r*2.9*1.8*sc)/Math.max(1, Math.max(img.width, img.height));
+  const dw = img.width*s*vs, dh = img.height*s*vs;
   const rot = SPRITE_ROT[u.type] || 0;
-  const sc  = SPRITE_SCALE[u.type] || 1;
-  const s   = (u.r*2.9*1.8*sc)/Math.max(img.width, img.height);
-  const dw  = img.width*s, dh = img.height*s;
+  const sh = bakedLSilhouette(img, dw, dh);
+  if(!sh) return;
+  const pad = (sh.width - dw)/2;
+  // ① 方向性 L 形投影:相对车体只偏移一点点(光在左上,影落右下),露出 L 形边
   ctx.save();
-  ctx.translate(UNIT_SHADOW_OFFSET.x, UNIT_SHADOW_OFFSET.y);
-  ctx.rotate(u.facing + rot);
   ctx.globalAlpha = UNIT_SHADOW_ALPHA;
-  ctx.drawImage(sh, -dw/2, -dh/2, dw, dh);
+  ctx.translate(UNIT_SHADOW_L_OFFSET.x, UNIT_SHADOW_L_OFFSET.y);
+  ctx.rotate(u.facing + rot);
+  ctx.drawImage(sh, -dw/2-pad, -dh/2-pad);
+  ctx.restore();
+  // ② 车底接触投影:同尺寸、几乎不偏移,极淡,压实地面(不产生明显边)
+  ctx.save();
+  ctx.globalAlpha = 0.10;
+  ctx.rotate(u.facing + rot);
+  ctx.drawImage(sh, -dw/2-pad, -dh/2-pad);
   ctx.restore();
 }
 // 水上单位(驱逐舰/运输艇):不做陆地阴影,只留一个很淡的椭圆投影,避免"黑影贴在水面上"
@@ -773,6 +883,8 @@ function drawUnit(u){
     ctx.fillStyle='rgba(80,180,255,.08)';
     ctx.beginPath(); ctx.arc(0,0,u.r+4,0,Math.PI*2); ctx.fill();
   }
+  // 车体渲染偏移(起步/刹车俯仰 + 开火后坐力):阴影/选中圈保持接地,车体位移
+  if(u.renderOx || u.renderOy) ctx.translate(u.renderOx, u.renderOy);
   if(u.type==='tank'||u.type==='abrams'||u.type==='t90'){
     const heavy = unitFactionOf(u.team)==='soviet';
     ctx.rotate(u.facing);
@@ -1098,6 +1210,35 @@ function drawUnit(u){
           ctx.beginPath(); ctx.arc(R+9,0,1.8,0,Math.PI*2); ctx.fill();
         }
       }
+    }
+  } else if(u.type==='puma'){
+    // ===== 美洲狮步战车:车身 + 独立旋转炮塔(360°) =====
+    // 车身/炮台照片都已用 tools/process-sprite.js 挖掉白底并旋转为"车头朝上";
+    // 车身与炮台共用一个缩放系数 s(以车身图为准),保持相对大小贴合原照片。
+    const body=imgs['puma_body'], tur=imgs['puma_turret'];
+    const sBase=Math.max(1,(body&&body.width)?Math.max(body.width,body.height):1);
+    const s=(u.r*2.9*1.8*(SPRITE_SCALE.puma||1))/sBase;
+    ctx.rotate(u.facing);
+    // 车身(照片车头朝上 -> 旋转 +90° 对齐到车头朝向前方)
+    if(body && body.width){
+      const dw=body.width*s, dh=body.height*s;
+      ctx.save();
+      ctx.rotate(Math.PI/2);
+      ctx.drawImage(bakedTone(body), -dw/2, -dh/2, dw, dh);
+      ctx.restore();
+    }
+    // 炮塔:完全放在车体的长中间/宽中间(即车体正中心),独立朝 turretAng 旋转
+    if(tur && tur.width){
+      const tw=tur.width*s, th=tur.height*s;
+      ctx.save();
+      ctx.rotate((u.turretAng - u.facing) + Math.PI/2);
+      ctx.drawImage(bakedTone(tur), -tw/2, -th/2, tw, th);
+      // 开火闪光(炮口=炮塔图最前端)
+      if(u.fireT>u.def.rof-0.1 && u.target){
+        ctx.fillStyle='rgba(255,220,120,.9)'; ctx.beginPath(); ctx.arc(0,-th/2,4,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(0,-th/2,2,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
     }
   } else if(u.type==='harvester'){
     if(imgs['harvester_field']){
@@ -1469,7 +1610,53 @@ function drawUnit(u){
 }
 function drawProjectiles(){
   for(const p of projectiles){
+    if(!onView(p.x,p.y,64)) continue;
     const dx=p.tx-p.x, dy=p.ty-p.y; const d=Math.hypot(dx,dy)||1;
+    if(p.tankShell){
+      // 坦克炮弹(125mm 贴图,车头朝左):贴图 + 曳光拖尾,从发射起匀速飞行
+      const img=imgs['shell_125mm'];
+      if(img && img.width){
+        const sc=TANK_SHELL_LEN/Math.max(1,img.width);   // 横向贴图:长度=宽
+        const dw=img.width*sc, dh=img.height*sc;
+        const ang=Math.atan2(dy,dx);
+        ctx.save();
+        ctx.translate(p.x,p.y);
+        ctx.rotate(ang+Math.PI);   // 车头朝左 -> 旋转到飞行方向
+        // 曳光拖尾:弹尾向后渐隐(泛光 + 亮芯),体现高速运动
+        ctx.lineCap='round';
+        ctx.strokeStyle='rgba(255,180,90,.28)'; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(dw*0.5,0); ctx.lineTo(dw*0.5+20,0); ctx.stroke();
+        ctx.strokeStyle='rgba(255,240,200,.85)'; ctx.lineWidth=1.2;
+        ctx.beginPath(); ctx.moveTo(dw*0.5,0); ctx.lineTo(dw*0.5+12,0); ctx.stroke();
+        // 弹体
+        ctx.drawImage(bakedTone(img), -dw/2, -dh/2, dw, dh);
+        ctx.restore();
+      }
+      continue;
+    }
+    if(p.ifvBullet){
+      // 25mm 机炮弹(步兵战车) + 士兵子弹(0.5×):贴图弹丸 + 曳光拖尾。贴图车头朝上,旋转对齐飞行方向
+      const img=imgs['bullet_25mm'];
+      if(img && img.width){
+        const len=p.bulletLen||BULLET_25MM_LEN;
+        const sc=len/Math.max(1,img.height);
+        const dw=img.width*sc, dh=img.height*sc;
+        const ang=Math.atan2(dy,dx);
+        ctx.save();
+        ctx.translate(p.x,p.y);
+        ctx.rotate(ang+Math.PI/2);
+        // 曳光拖尾:弹尾向后渐隐(亮芯 + 泛光)
+        ctx.lineCap='round';
+        ctx.strokeStyle='rgba(255,220,120,.30)'; ctx.lineWidth=2.4;
+        ctx.beginPath(); ctx.moveTo(0,dh*0.5); ctx.lineTo(0,dh*0.5+16); ctx.stroke();
+        ctx.strokeStyle='rgba(255,255,220,.85)'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(0,dh*0.5); ctx.lineTo(0,dh*0.5+9); ctx.stroke();
+        // 弹体
+        ctx.drawImage(bakedTone(img), -dw/2, -dh/2, dw, dh);
+        ctx.restore();
+      }
+      continue;
+    }
     // 拖尾
     ctx.strokeStyle=teamGroup(p.team)===0?'rgba(255,224,138,.45)':'rgba(255,128,128,.45)';
     ctx.lineWidth=2;
@@ -1481,8 +1668,32 @@ function drawProjectiles(){
     ctx.beginPath(); ctx.arc(p.x-1,p.y-1,1,0,Math.PI*2); ctx.fill();
   }
 }
+/* ============ 反坦克导弹渲染(贴图 + 曳光尾焰;贴图横向车头朝右) ============ */
+function drawMissiles(){
+  for(const m of missiles){
+    if(!onView(m.x,m.y,80)) continue;
+    const img = m.spriteType==='spike' ? imgs['spike_missile'] : imgs['tow_missile'];
+    if(!img || !img.width) continue;
+    const len = m.spriteType==='spike' ? SPIKE_MISSILE_LEN : TOW_MISSILE_LEN;
+    const sc = len/Math.max(1,img.width);   // 长度=宽(横向贴图),等比缩小
+    const dw = img.width*sc, dh = img.height*sc;
+    ctx.save();
+    ctx.translate(m.x,m.y);
+    ctx.rotate(m.ang);                       // 车头朝右 -> 旋转到飞行方向
+    // 尾焰曳光(弹尾向后渐隐)
+    ctx.lineCap='round';
+    ctx.strokeStyle='rgba(255,200,110,.30)'; ctx.lineWidth=2.4;
+    ctx.beginPath(); ctx.moveTo(-dw/2,0); ctx.lineTo(-dw/2-16,0); ctx.stroke();
+    ctx.strokeStyle='rgba(255,245,220,.85)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(-dw/2,0); ctx.lineTo(-dw/2-9,0); ctx.stroke();
+    // 弹体
+    ctx.drawImage(bakedTone(img), -dw/2, -dh/2, dw, dh);
+    ctx.restore();
+  }
+}
 function drawEffects(){
   for(const e of effects){
+    if(!onView(e.x,e.y,220)) continue;
     const k=clamp(e.life/e.maxLife,0,1);
     if(e.type==='explode'){
       // 白闪
@@ -1577,6 +1788,7 @@ function drawTexts(){
   ctx.textAlign='center';
   ctx.lineJoin='round';
   for(const t of texts){
+    if(!onView(t.x,t.y,32)) continue;
     const a=clamp(t.life/0.4,0,1);
     ctx.globalAlpha=a;
     ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,.65)'; ctx.strokeText(t.str, t.x, t.y);
@@ -1594,6 +1806,26 @@ function drawSel(){
       ctx.setLineDash([]);
       drawMoveMarker(o.x, o.y);
     }
+  }
+  // 攻击指示红线(不依赖选中):本方刚下达攻击指令的单位显示到目标的红线,
+  // 由 _lineT 计时短暂显示后自动消失(不影响单位继续攻击)
+  for(const u of units){
+    if(u.team!==TEAM_A) continue;
+    if(!(u.order && u.order.kind==='attack')) continue;
+    if(!u.target || u.target.hp<=0) continue;
+    if(!(u._lineT>0)) continue;
+    const k = Math.min(1, u._lineT / (RED_LINE_TIME*0.6));   // 最后0.6秒淡出
+    const alpha = 0.25 + 0.7*k;
+    ctx.strokeStyle='rgba(255,60,60,'+alpha+')'; ctx.lineWidth=3; ctx.setLineDash([7,4]);
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(u.target.x,u.target.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle='rgba(255,200,120,'+(0.5*k)+')'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(u.target.x,u.target.y); ctx.stroke();
+    const tx=u.target.x, ty=u.target.y;
+    ctx.strokeStyle='rgba(255,60,60,'+alpha+')'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(tx,ty,6,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx-10,ty); ctx.lineTo(tx+10,ty); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx,ty-10); ctx.lineTo(tx,ty+10); ctx.stroke();
   }
   if(selBuilding && selBuilding.alive){
     const pul=0.5+0.5*Math.sin(time*6);
@@ -1662,14 +1894,21 @@ function drawMinimap(){
   // 等比包含缩放(每世界像素),长或宽任一边贴边即停,并居中
   const s=Math.min(mmw/W, mmh/H);
   const ox=(mmw-W*s)/2, oy=(mmh-H*s)/2;
-  mmCtx.fillStyle='#1a241a';
-  mmCtx.fillRect(0,0,mmw,mmh);
-  // 地形
-  for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
-    const t=terrain[x][y];
-    mmCtx.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#273a29');
-    mmCtx.fillRect(ox+x*TILE*s, oy+y*TILE*s, TILE*s+0.4, TILE*s+0.4);
+  const cacheKey = mmw+'x'+mmh+':'+MAP_W+'x'+MAP_H+':'+mapVersion;
+  if(!mmTerrainCache || mmTerrainCache.width!==mmw || mmTerrainCache.height!==mmh || mmTerrainKey!==cacheKey){
+    if(!mmTerrainCache) mmTerrainCache=document.createElement('canvas');
+    mmTerrainCache.width=mmw; mmTerrainCache.height=mmh;
+    const g=mmTerrainCache.getContext('2d');
+    g.fillStyle='#1a241a'; g.fillRect(0,0,mmw,mmh);
+    for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
+      const t=terrain[x][y];
+      g.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#273a29');
+      g.fillRect(ox+x*TILE*s, oy+y*TILE*s, TILE*s+0.4, TILE*s+0.4);
+    }
+    mmTerrainKey=cacheKey;
   }
+  // 地形
+  mmCtx.drawImage(mmTerrainCache,0,0);
   // 矿
   mmCtx.fillStyle='#d8b840';
   for(const o of oreFields) if(o.amount>0) mmCtx.fillRect(ox+o.x*s-2, oy+o.y*s-2, 4, 4);

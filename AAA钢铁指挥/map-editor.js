@@ -14,8 +14,8 @@ const EDIT = {
   dirHandle: null,
 };
 
-const UNIT_TYPES = ['infantry','tank','harvester','mcv','airfield_car','exo','magnet','abrams','t90','destroyer','transport','bradley','b11','marder','leclerc','leopard','challenger'];
-const UNIT_LABEL = { infantry:'步兵', tank:'坦克', harvester:'矿车', mcv:'基地车', airfield_car:'机场建筑车', exo:'外骨骼', magnet:'磁暴', abrams:'艾布拉姆', t90:'T90', destroyer:'驱逐舰', transport:'运输艇', bradley:'布拉德利', b11:'俄制B11', marder:'黄鼠狼', leclerc:'勒克莱尔', leopard:'豹2A4', challenger:'挑战者' };
+const UNIT_TYPES = ['infantry','tank','harvester','mcv','airfield_car','exo','magnet','abrams','t90','destroyer','transport','bradley','b11','marder','leclerc','leopard','challenger','puma'];
+const UNIT_LABEL = { infantry:'步兵', tank:'坦克', harvester:'矿车', mcv:'基地车', airfield_car:'机场建筑车', exo:'外骨骼', magnet:'磁暴', abrams:'艾布拉姆', t90:'T90', destroyer:'驱逐舰', transport:'运输艇', bradley:'布拉德利', b11:'俄制B11', marder:'黄鼠狼', leclerc:'勒克莱尔', leopard:'豹2A4', challenger:'挑战者', puma:'美洲狮' };
 let cv, g, ctx, selOverlay;
 
 function $(id){ return document.getElementById(id); }

@@ -149,6 +149,7 @@ function setupInput(){
     else if(act==='cancelprod'){ if(selBuilding) cancelProduction(selBuilding); }
     else if(act==='deploy'){ const u=selected[0]; if(u){ if(u.type==='airfield_car') deployAirfieldCar(u); else deployMCV(u); } }
     else if(act==='challUpgrade'){ const u=selected[0]; if(u) startChallUpgrade(u); }
+    else if(act==='atgmUp'){ const u=selected[0]; if(u) startATGMAttach(u); }
     else if(act==='release'){ if(selBuilding) releaseGarrison(selBuilding); }
     else if(act==='unload'){ const t=selected.find(u=>isCarrier(u)); if(t) manualUnload(t); }
     else if(act==='selectall') selectAllCombat();
