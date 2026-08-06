@@ -17,7 +17,7 @@ function setMapSize(w, h){
 // 渲染分辨率倍率:画布按"设备像素比(1.5~4)与 RENDER_SCALE 取较大值"放大,再缩回窗口显示,让画面更清晰。
 // 4x 下艾布拉姆/T90 贴图在同一屏幕大小内获得 2 倍于之前的像素,细节更清晰。
 // 若感到卡顿可改成 3 或 2。
-const RENDER_SCALE = 4;
+const RENDER_SCALE = 2;
 
 // 阵营:盟军(蓝)/苏军(红)。地图上盟友/自己=蓝,敌人=红;模型按各自阵营
 let playerFaction = 'allies';

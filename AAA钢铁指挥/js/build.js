@@ -151,6 +151,7 @@ function markBlocked(b, on){
   for(let x=b.tx;x<b.tx+b.w;x++) for(let y=b.ty;y<b.ty+b.h;y++){
     if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H){ blocked[x][y] = on; structBlocked[x][y] = on; }
   }
+  invalidatePathCache();
   if(on) ejectUnitsFromBuilding(b);
 }
 function canPlaceAt(tx,ty,def,team){

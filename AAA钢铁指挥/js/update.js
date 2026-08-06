@@ -22,6 +22,7 @@ function gridCollect(x, y, range){
 }
 function update(dt){
   time+=dt;
+  processPathJobs();
   if(gameOver){ overTimer+=dt; return; }
   // 资金/电力每帧轻量刷新;按钮面板每 0.3s 重建一次,避免每帧 DOM 重建
   updateStats();
@@ -71,7 +72,7 @@ function update(dt){
   if(effects.length>350) effects.splice(0, effects.length-350);   // 防粒子/残影无限堆积
   // 履带压痕:随时间淡出,并限制数量(丢弃最旧的)
   for(const m of trackMarks) m.life-=dt;
-  if(trackMarks.length>600) trackMarks.splice(0, trackMarks.length-600);
+  if(trackMarks.length>300) trackMarks.splice(0, trackMarks.length-300);
   trackMarks=trackMarks.filter(m=>m.life>0);
   for(const t of texts){ t.y-=22*dt; t.life-=dt; }
   texts=texts.filter(t=>t.life>0);
@@ -623,7 +624,7 @@ function hasUnitOverlapAt(u, x, y){
 }
 function resolveRigid(){
   // 把重叠的胶囊沿最深穿透圆的圆心连线互相推开(位置修正,迭代至收敛,每轮重建网格)
-  for(let iter=0;iter<6;iter++){
+  for(let iter=0;iter<4;iter++){
     buildGrid();
     let moved=false;
     for(let i=0;i<units.length;i++){
@@ -905,7 +906,7 @@ function spawnTrackMark(u){
       a: u.facing,
       w: Math.max(3,(u.hh||8)*0.5),
       l: 5,
-      life: 8, maxLife: 8,
+      life: 5, maxLife: 5,
     });
   }
 }
@@ -925,6 +926,7 @@ function crushTreesUnder(u){
 function crushTree(tx, ty, u){
   terrain[tx][ty] = 'grass';
   blocked[tx][ty] = false;
+  invalidatePathCache();
   const cx = tx*TILE + TILE/2, cy = ty*TILE + TILE/2;
   // 倒下动画:用整张树林贴图,从竖直缓缓倒向水平(0.5s)
   const tile = imgs['tree'] || null;
@@ -985,21 +987,20 @@ function pathRetryReady(u){
   return u._lastPathFail===undefined || (time - u._lastPathFail) > 0.7;
 }
 function followPathToEntity(u, target, dt){
-  if(!u.path || u.pathIdx>=u.path.length){
+  if((!u.path || u.pathIdx>=u.path.length) && !u._pendingPath){
     u.repathT-=dt;
     if((u.repathT<=0 || !u.path) && pathRetryReady(u)){
       u.repathT=0.7;
-      const p=pathFor(u,u.x,u.y,target.x,target.y);
-      if(p){ u.path=p; u.pathIdx=0; } else { u._lastPathFail = time; }
+      queuePath(u, target.x, target.y, u.order);
     }
   }
   followPath(u,dt);
   // 路径走完但目标还没到位 -> 立即重寻,避免停在半路干瞪眼。
   // 到位距离取一个比射程更小的值,保证推进途中路径走完都会立刻重寻,不会僵停。
   const chaseD = Math.max(24, u.r + 12);
-  if((!u.path || u.pathIdx>=u.path.length) && u.target && u.target.hp>0 && dist(u,u.target)>chaseD && pathRetryReady(u)){
-    const p=pathFor(u,u.x,u.y,target.x,target.y);
-    if(p){ u.path=p; u.pathIdx=0; } else { u._lastPathFail = time; }
+  if((!u.path || u.pathIdx>=u.path.length) && !u._pendingPath && u.target && u.target.hp>0 && dist(u,u.target)>chaseD && pathRetryReady(u)){
+    queuePath(u, target.x, target.y, u.order);
+    u.repathT = 0.7;
   }
 }
 function followPath(u,dt){
@@ -1036,6 +1037,9 @@ function followPath(u,dt){
   if(u.order.kind==='move' && u.order.x!==undefined){
     if(Math.hypot(u.order.x-u.x,u.order.y-u.y)<=arriveDist(u)){ finishMove(u); return; }
     const w=seekVelocity(u,u.order.x,u.order.y);
+    u.wantVx=w.x; u.wantVy=w.y;
+  } else if(u.order.kind==='attack' && u.target && u.target.hp>0){
+    const w=seekVelocity(u,u.target.x,u.target.y);
     u.wantVx=w.x; u.wantVy=w.y;
   } else {
     u.wantVx=0; u.wantVy=0;

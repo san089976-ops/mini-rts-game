@@ -47,8 +47,8 @@ function orderMove(list, x, y){
     u._lastMoveCmd=time;              // 记录移动指令时间:刚拉走的单位 1.5 秒内不被拉回战斗
     if(u.type==='harvester'){ u.mode='mine'; u.oreTarget=null; }
     u.order={kind:'move', x:tx, y:ty};
-    const p=pathFor(u,u.x,u.y,tx,ty);
-    u.path=p; u.pathIdx=0; u.repathT=1.0;
+    u.path=null; u.pathIdx=0; u.repathT=1.0;
+    queuePath(u, tx, ty, u.order);
   }
 }
 function orderAttack(list, enemy, force){
@@ -57,6 +57,7 @@ function orderAttack(list, enemy, force){
     u.target = enemy;                                // 关键:攻击目标必须写入 u.target(全局攻击判断都读它)
     u._lineT = RED_LINE_TIME;                        // 攻击指示红线:短暂显示后消失
     u.order={kind:'attack', target:enemy, force:!!force}; u.path=null;
+    queuePath(u, enemy.x, enemy.y, u.order);
   }
 }
 // 攻击移动:朝目标点移动,途中攻击遇到的敌人(不打断移动)
@@ -68,7 +69,8 @@ function orderAttackMove(list, x, y){
     const ty = targets ? targets[i].y : y;
     u.target=null;
     u.order={kind:'move', x:tx, y:ty, x2:true};
-    u.path=pathFor(u,u.x,u.y,tx,ty); u.pathIdx=0; u.repathT=1.0;
+    u.path=null; u.pathIdx=0; u.repathT=1.0;
+    queuePath(u, tx, ty, u.order);
   }
 }
 
@@ -174,7 +176,8 @@ function giveOrder(ctrl){
     for(const t of transports){
       t.target=null;
       t.order={kind:'move', x:mw.x, y:mw.y};
-      t.path=pathFor(t,t.x,t.y,mw.x,mw.y);
+      t.path=null; t.pathIdx=0; t.repathT=1.0;
+      queuePath(t, mw.x, mw.y, t.order);
       t.unloadAt=null;   // 不自动卸载,玩家手动释放
     }
     remaining = list.filter(u=>u.type!=='transport');
