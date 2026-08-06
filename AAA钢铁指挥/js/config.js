@@ -99,11 +99,7 @@ const VEHICLE_ALIGN_GATE = 0.35;
 const FIRE_RECOIL = 8;        // 开火后坐力初始偏移(px)
 const RECOIL_DECAY = 14;      // 后坐力恢复速率(1/s,越大回弹越快,约0.1~0.2s恢复)
 // 有履带压痕的载具(除海军驱逐舰/登陆艇外的所有车辆)
-<<<<<<< Updated upstream
 const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1, puma:1 };
-=======
-const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1 };
->>>>>>> Stashed changes
 const BASE_UNITS = {
   infantry: { name:'动员兵', hp:90, speed:74, range:72, damage:9, rof:0.9, cost:100, r:9,  build:4, armor:'cloth', proj:'bullet', desc:'低造价轻步兵,前期侦察与骚扰的主力' },
   tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:1.0, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
@@ -416,20 +412,12 @@ function preloadImages(){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-<<<<<<< Updated upstream
 const GAME_VERSION = 'v32';
-=======
-const GAME_VERSION = 'v22';
->>>>>>> Stashed changes
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');
   vb.id='verBadge';
-<<<<<<< Updated upstream
   vb.textContent='版本 '+GAME_VERSION+' (新增美洲狮)';
-=======
-  vb.textContent='版本 '+GAME_VERSION+' (攻击修正)';
->>>>>>> Stashed changes
   vb.style.cssText='position:fixed;right:10px;bottom:160px;z-index:9999;font:12px "Microsoft YaHei";color:#ffe27a;background:rgba(20,10,0,.8);padding:3px 10px;border-radius:5px;border:2px solid #ffe27a;pointer-events:none;';
   document.body.appendChild(vb);
 }catch(e){}
