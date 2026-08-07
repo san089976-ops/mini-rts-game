@@ -1,0 +1,113 @@
+================================================================================
+《钢铁指挥》装甲升级包具体事项
+（反坦克导弹模块 + 自主防御系统 的经验与逻辑总结）
+================================================================================
+
+本文件记录"装甲升级包"类功能(目前有:反坦克导弹模块 TOW/长钉、自主防御系统
+APS)的完整逻辑、代码位置和踩坑经验。改代码前先通读。
+
+--------------------------------------------------------------------------------
+一、两类升级包总览
+--------------------------------------------------------------------------------
+| 升级包      | 作用单位              | 价格 | 安装时间 | 类型 |
+| 反坦克导弹  | 美洲狮puma/黄鼠狼marder/布拉德利bradley | 150 | 6秒  | 进攻武器 |
+| 自主防御系统| 仅艾布拉姆 abrams      | 500 | 12秒 | 被动防御 |
+升级包的通用套路(每个升级包都按这套来):
+  - entities.js Unit 构造里加一组字段:
+      xxx(已装) / xxxUpgrading(安装中) / xxxProg(进度) / 可选 xxxReload(装填)、xxxAmmo(弹夹)
+  - build.js 写 startXxxUpgrade(u):校验(可装类型/已装/安装中/资金)→扣钱→置 installing。
+  - update.js updateUnit 里:每帧推进 xxxProg,到时间置 xxx=true + 特效 + updatePanel();
+    再跑运行时逻辑(武器装填/探测/发射)。
+  - ui.js:unitStatsHTML 加属性行;updatePanel 里加按钮(mkAction)。
+  - input.js 按钮 action 分发(startXxx / toggleXxx)。
+  - config.js 加全部常量 + isXxxUnit(u) 判定。
+  - 版本号 +1(index.html 全部 ?v= 同步,见总经验文件)。
+
+--------------------------------------------------------------------------------
+二、反坦克导弹(TOW / 长钉)
+--------------------------------------------------------------------------------
+1. 两类导弹是"两种不同的导弹",靠 spriteType 区分(不是一套!):
+     TOW   = 布拉德利/黄鼠狼发,贴图 tow_missile(28px)
+     长钉  = 美洲狮发,贴图 spike_missile(25px)
+   发射打标:launchATGM 里 `u.type==='puma'?'spike':'tow'`。
+   渲染选图:drawMissiles 里 `m.spriteType==='spike' ? spike : tow`。
+   拦截过滤:APS 只反 spriteType==='tow' 的(见第三节)。
+   千万别把两个导弹并成一个"反坦克导弹"来处理——拦截逻辑、命名、贴图都按
+   spriteType 分叉。命名辅助函数(config.js):
+     atgmMissileName(spriteType)  → 给飞弹显示名(TOW导弹/长钉导弹)
+     atgmTypeName(u)              → 给单位显示名
+     atgmModuleName(u)            → 给安装模块按钮名(TOW导弹模块/长钉导弹模块)
+
+2. 导弹是"类单位":存在全局 missiles 数组(state.js),不在 units 里。
+   Missile 类(entities.js):x/y/target/team/attacker/spriteType,
+     先加速后匀速(speed 初速=ATGM_SPEED×起始系数,maxSpeed/accel),
+     每帧向目标当前位置"稍微转弯"(ATGM_TURN_RATE 限转角),
+     目标死亡→原地爆炸、超射程(ATGM_RANGE)→自爆、
+     路径上有敌方单位挡路(atgmBlocker)→撞上爆炸、命中目标→爆炸。
+   伤害:命中目标(或挡路者)吃单体满伤,周围 ATGM_AOE_RADIUS 内吃 50% 范围伤,
+     弹种 proj='missile' 走独立修正表 MISSILE_MOD。
+
+3. 安装/发射:
+   - 可装类型:ATGM_TYPES=['puma','bradley','marder']。
+   - 装填:单发,ATGM_RELOAD=15 秒;装好后攻击指令里目标在 ATGM_RANGE(180) 内
+     且装填就绪才 launchATGM(u, at)。
+   - AI 也会装(ai.js 检查 ATGM_TYPES),注意给 AI 留余钱判定。
+
+4. 踩坑:名称辅助函数必须全定义!ui.js 用过 atgmTypeName 而 config 漏定义,
+   一点安装按钮 updatePanel 就 ReferenceError(真实事故)。加函数/常量后 grep
+   一遍所有引用点。
+
+--------------------------------------------------------------------------------
+三、自主防御系统(APS:反 TOW 导弹)
+--------------------------------------------------------------------------------
+1. 设计:艾布拉姆专属升级包。被动探测"进入反应圈"的敌 TOW 导弹,发射反导弹拦截,
+   防止自身/友军被 TOW 打中。只反 TOW,不反长钉,不反己方。
+
+2. 常量(config.js):
+     APS_TYPES=[abrams]         APS_COST=500        APS_UPGRADE_TIME=12
+     APS_MAX_AMMO=4(弹夹)       APS_RELOAD=16(每发填充)
+     APS_RANGE=220(反应圈半径)  APS_HIT_R=14(命中判定)
+     APS_COUNTER_SPEED=ATGM_SPEED×2(420,反导弹=反坦克导弹的一倍)
+     APS_COUNTER_LEN=10(反导弹渲染长,贴图照用 25mm 子弹)
+     isAPSUnit(u)
+
+3. 运行逻辑(update.js,updateUnit 内):
+   - 安装:apsUpgrading 推进 → 装好置 aps=true,apsOn=true,apsAmmo=APS_MAX_AMMO。
+   - 填充:apsAmmo<上限 时每 APS_RELOAD 秒补 1 发(apsReload 倒计时)。
+   - 探测/发射(关键):只有"新进入圈内的敌 TOW 导弹"才各打一发——
+       a. 只算敌方:isEnemy(u.team, m.team)(m.team=发射方队伍)。
+       b. 只反 TOW:spriteType==='spike' 直接跳过。
+       c. 只打新来的:用 u.apsEngaged[] 记录已接战导弹,命中过的跳过;
+          每帧先清掉已消失(dead/不在 missiles)的记录,防数组膨胀。
+       d. 打一发即 break(本帧最多一发),扣 1 发弹夹、开始 16s 填充。
+   - 开关:apsOn 布尔,选中后按钮切换;关闭时跳过探测(填充照常)。
+   - 没有"再次接战":同一枚导弹只拦截一次;若反导弹追不上(超射程自毁)不再补射。
+
+4. 反导弹(Interceptor 类,entities.js):独立数组 interceptors(state.js)。
+   - 目标 = 来袭导弹对象(targetMissile),追踪其当前位置(限转角),先加速后匀速,
+     速度 = APS_COUNTER_SPEED(420)。
+   - updateInterceptors(update.js):目标已消失→自毁;命中(dist<=APS_HIT_R+4)→
+     interceptMissile:把来袭导弹 dead=true(不再造成伤害)+ 爆炸特效;超射程自毁。
+   - 渲染 render.js drawInterceptors:贴图 bullet_25mm(车头朝上,旋转 ang+π/2),
+     绿色曳光,与普通飞弹区分。
+   - 循环顺序:updateMissiles 先动飞弹,updateInterceptors 再追(才能追最新位置)。
+
+5. UI/表现:
+   - 选中艾布拉姆:未装→「自主防御系统 $500」;已装→「开启/关闭 + 反导弹 x/4」。
+   - 选中开启 APS 的艾布拉姆,画 220px 虚线反应圈(drawSel)。
+
+6. 踩坑:
+   - ★"一遇到飞弹就全射光":若只按"圈内有敌 TOW 就发射",导弹一直停在圈内,
+     每帧都打一发直到弹夹耗尽。必须用 apsEngaged 记录"已接战",一次只发一发。
+   - 反导弹必须 > 来袭导弹速度才有意义:取 2×ATGM_SPEED。
+   - 敌我判定用 m.team(发射方队伍),不是 m.attacker,也不是目标队伍。
+   - 拦截后要立刻把来袭导弹 m.dead=true,否则它继续飞行还会爆炸伤人。
+   - 新增升级包后:config 常量、entities 字段、build 安装函数、input 按钮、
+     ui 面板、update 运行时、版本号,六处缺一不可。
+
+--------------------------------------------------------------------------------
+四、版本号与刷新
+--------------------------------------------------------------------------------
+每次改动:config.js GAME_VERSION +1,index.html 所有 <script> 的 ?v= 同步 +1。
+否则浏览器缓存旧代码,改了看不到效果(见主经验文件 §一.4)。
+================================================================================

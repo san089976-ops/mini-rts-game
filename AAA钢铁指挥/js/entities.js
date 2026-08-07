@@ -24,6 +24,7 @@ class Unit {
     this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
     this.unloadAt = null;          // 运输艇卸载点
     this.facing = 0;
+    this.turretAng = 0;        // 独立旋转炮塔角度(美洲狮等:仅攻击时转动,车体不动时负责瞄准)
     this.target = null;        // 攻击目标
     this.order = { kind:'none' };
     this.path = null; this.pathIdx = 0; this.repathT = 0;
@@ -41,6 +42,18 @@ class Unit {
     this.sepT = 0;
     // 挑战者坦克升级状态(0/1/2 级)
     this.upgradeLvl = 0; this.upgrading = false; this.upgradeProg = 0;
+    // 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利)
+    this.atgm = false;              // 是否已装备反坦克导弹模块
+    this.atgmUpgrading = false;     // 正在安装模块
+    this.atgmProg = 0;              // 安装进度
+    this.atgmReload = 0;            // 导弹装填倒计时(0=就绪)
+    this.aps = false;               // 是否已安装自主防御系统(艾布拉姆专属)
+    this.apsUpgrading = false;      // 正在安装 APS
+    this.apsProg = 0;               // 安装进度
+    this.apsOn = true;              // 自主防御 开启/关闭
+    this.apsAmmo = 0;               // 反导弹弹夹剩余(上限 APS_MAX_AMMO)
+    this.apsReload = 0;             // 反导弹填充倒计时(0=可直接补弹)
+    this.apsEngaged = [];           // 已接战(发射过反导)的来袭导弹记录:每个新导弹只打一发
     // 上次收到玩家移动指令的时间:用于战斗脱离保护期(刚被拉动时不被拉回战斗)
     this._lastMoveCmd = -99;
     // 载具物理感渲染状态(只影响绘制偏移,不改逻辑坐标)
@@ -52,11 +65,20 @@ class Unit {
   }
   // 该单位处在 (x,y) 且朝向为 facing 时,两个碰撞圆的中心与半径(胶囊近似)。
   // 圆形单位(colOff=0)只返回一个圆;长条单位返回车头(+facing)/车尾(-facing)两圆。
+  // 结果写入单位自带缓冲 _circles 复用,避免 separateAll/resolveRigid 每帧分配对象。
+  // 注意:结果只读且即刻使用,不得跨多次调用保存;不同单位缓冲互不干扰。
   circlesAt(x, y, facing){
     const c = this.colOff || 0;
-    if(c <= 0) return [{x, y, r:this.colR}];
+    const r = this.colR;
+    let buf = this._circles;
+    if(!buf) buf = this._circles = [{x:0,y:0,r:0},{x:0,y:0,r:0}];
+    buf[0].x = x; buf[0].y = y; buf[0].r = r;
+    if(c <= 0){ buf.length = 1; return buf; }
     const fx = Math.cos(facing), fy = Math.sin(facing);
-    return [{ x:x+fx*c, y:y+fy*c, r:this.colR }, { x:x-fx*c, y:y-fy*c, r:this.colR }];
+    if(buf.length < 2) buf.push({x:0,y:0,r:0});
+    buf[1].x = x-fx*c; buf[1].y = y-fy*c; buf[1].r = r;
+    buf.length = 2;
+    return buf;
   }
   circles(){ return this.circlesAt(this.x, this.y, this.facing); }
   get alive(){ return this.hp > 0; }
@@ -110,5 +132,40 @@ class Projectile {
     this.proj=proj;
     this.dead=false;
   }
+}
+/* ============ 反坦克导弹:自动制导的"类单位"飞行物 ============ */
+class Missile {
+  constructor(x, y, target, team, attacker, spriteType){
+    this.x=x; this.y=y;
+    this.target=target;      // 制导目标(单位/建筑)
+    this.team=team; this.attacker=attacker;
+    this.spriteType=spriteType;        // 'tow' | 'spike'
+    this.speed=ATGM_SPEED*ATGM_START_FACTOR;   // 先加速
+    this.maxSpeed=ATGM_SPEED;
+    this.accel=ATGM_ACCEL;
+    this.ang=Math.atan2(target.y-y, target.x-x);   // 当前朝向(稍微转弯逼近)
+    this.travelled=0;
+    this.maxRange=ATGM_RANGE;
+    this.damage=ATGM_DAMAGE;
+    this.explodeR=ATGM_AOE_RADIUS;
+    this.dead=false;
+  }
+  get alive(){ return !this.dead; }
+}
+/* ============ 自主防御反导弹(拦截弹):朝来袭的 TOW 导弹追踪,命中即摧毁 ============ */
+class Interceptor {
+  constructor(x, y, targetMissile, team){
+    this.x=x; this.y=y;
+    this.targetMissile=targetMissile;   // 目标:来袭的 TOW 导弹(missiles 里的对象)
+    this.team=team;
+    this.speed=APS_COUNTER_SPEED*0.4;   // 初速(先加速后匀速)
+    this.maxSpeed=APS_COUNTER_SPEED;
+    this.accel=ATGM_ACCEL;
+    this.ang=Math.atan2(targetMissile.y-y, targetMissile.x-x);
+    this.travelled=0;
+    this.maxRange=APS_RANGE+60;
+    this.dead=false;
+  }
+  get alive(){ return !this.dead; }
 }
 class Effect { constructor(x,y,type,r){ this.x=x;this.y=y;this.type=type;this.r=r;this.life=0.45;this.maxLife=0.45; } }

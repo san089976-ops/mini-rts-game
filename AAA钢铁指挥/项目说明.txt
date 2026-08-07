@@ -14,12 +14,14 @@
   img/units/*.png       单位素材（含坦克照片贴图）
   tools/process-sprite.js  单位照片素材预处理脚本（去背景/裁切/居中）
   img/units/README.txt  素材替换说明
+  坦克与步兵战车修改经验.txt  坦克/步战车贴图结构与缩放经验（方向约定、几分之几法则等）
+  装甲升级包具体事项.txt  升级包类功能的经验与逻辑（反坦克导弹 TOW/长钉、自主防御系统）
 
 【JS 加载顺序（勿乱，存在函数/变量依赖）】
-  config.js   常量、护甲/弹丸克制、单位/建筑/科技定义、贴图映射、RENDER_SCALE、SPRITE_ROT
-  state.js    全局状态变量与工具函数（canvas、cam、credits、units/buildings 数组等）
+  config.js   常量、护甲/弹丸克制、单位/建筑/科技定义、贴图映射、RENDER_SCALE、SPRITE_ROT、升级包常量(ATGM/APS)
+  state.js    全局状态变量与工具函数（canvas、cam、credits、units/buildings 数组、missiles/interceptors 等）
   maps.js     地图预设 MAPS、出生点 SPAWN_POINTS、getSpawns()
-  entities.js Unit / Building / Projectile / Effect 类
+  entities.js Unit / Building / Projectile / Missile / Interceptor / Effect 类
   map.js      genTerrain() 地形生成、genNavalTerrain() 海战图、通行性(unitPassable/uCellBlocked)
   path.js     寻路(A*)：findPath(陆地) / findPathFor(单位) / pathFor() 自动分流
               + smoothPath() 路径拉直:把 A* 逐格直角阶梯塌缩成直线段(lineClear 做
@@ -32,8 +34,8 @@
   ai.js       电脑对手逻辑
   ui.js       底部 HUD 面板（选中信息、建造/生产按钮）
   input.js    键盘/鼠标输入（QWERTYUI 快捷键、编队、框选、小地图）
-  update.js   每帧更新：战斗、寻路、生产、装卸、胜负判定
-  render.js   渲染：地形、建筑、单位、弹丸、特效、小地图、坦克照片贴图
+  update.js   每帧更新：战斗、寻路、生产、装卸、胜负判定、导弹/拦截弹/自主防御
+  render.js   渲染：地形、建筑、单位、弹丸、导弹/拦截弹、特效、小地图、坦克照片贴图
   menu.js     主菜单（地图卡片/队伍/资金/分组/颜色/出生点）
   music.js    背景音乐(4 首 mp3 循环)、开关/持久化、设置弹层入口
   game.js     主循环 frame()、resize()、setupGame()、启动入口
@@ -51,7 +53,7 @@
 
 【单位/建筑/护甲系统】
   单位定义在 getUnitDefs(faction)（按阵营返回），建筑在 BLD_DEFS。
-  弹丸类型：cannon火炮 / bullet子弹 / machinegun机炮。
+  弹丸类型：cannon火炮 / bullet子弹 / machinegun机炮 / missile导弹(反坦克导弹,走 MISSILE_MOD 修正表)。
   护甲类型：cloth布甲/steel钢甲/castiron铸铁甲/titanium钛合金甲/concrete混凝土/wood木甲。
 
 【菜单流程(模式选择页 + 遭遇战设置)】
@@ -327,6 +329,39 @@
   建造中(全息投影):地基/阴影按进度淡出,不投浓影。调参集中:config.js 【建筑真实感
   渲染调参】区块(BUILDING_PAD_*/SHADOW_*/AO_*)。
 
+【装甲升级包:反坦克导弹模块 + 自主防御系统(重点,详细经验见"装甲升级包具体事项.txt")】
+  两类升级包走同一套路(六处缺一不可):
+    config.js 加常量 + isXxxUnit 判定;entities.js Unit 构造加字段(xxx/xxxUpgrading/
+    xxxProg + 可选 xxxReload/xxxAmmo/xxxOn/xxxEngaged);build.js 写 startXxxUpgrade(u);
+    update.js updateUnit 推进进度 + 跑运行时逻辑;ui.js 加属性行与按钮;input.js 分发按钮;
+    最后版本号 +1。
+  反坦克导弹(进攻武器):ATGM_TYPES=['puma','bradley','marder'],$150/6秒。
+    - 两种导弹按 spriteType 严格区分,不是一套:
+        TOW  = 布拉德利/黄鼠狼发,贴图 tow_missile(28px)
+        长钉 = 美洲狮发,贴图 spike_missile(25px)
+      launchATGM 里 `u.type==='puma'?'spike':'tow'` 打标;渲染 drawMissiles、
+      APS 拦截过滤都按 spriteType 分叉。命名辅助:atgmMissileName(spriteType)/
+      atgmTypeName(u)/atgmModuleName(u)。
+    - 导弹是"类单位"存全局 missiles 数组(Missile 类):先加速后匀速(speed→maxSpeed+
+      accel)、限转角追踪目标(ATGM_TURN_RATE)、目标死亡原地爆炸、超射程自爆、
+      路径被敌方单位挡路撞上爆炸、命中目标爆炸。伤害=命中者吃单体满伤 + 周围
+      ATGM_AOE_RADIUS 内 50% 范围伤;弹种 proj='missile' 走 MISSILE_MOD(铸铁/钢甲
+      120%,钛合金90%,布/木/混凝土80%)。
+    - 单发装填 ATGM_RELOAD=15s;攻击指令内目标在 ATGM_RANGE(180) 且装填就绪才发射。
+      AI 也会装(ai.js 检查 ATGM_TYPES)。
+    - 踩坑:名称辅助函数漏定义(ui 用 atgmTypeName 而 config 没写)会一点安装按钮就
+      ReferenceError,加函数后 grep 一遍引用点。
+  自主防御系统(被动防御,艾布拉姆专属):APS_TYPES=['abrams'],$500/12秒。
+    - 反导弹弹夹 4 发(APS_MAX_AMMO),每发填充 16s(APS_RELOAD);可开关(apsOn)。
+    - 只反敌方 TOW:条件 m.spriteType!=='spike' && isEnemy(u.team, m.team)。
+    - 反应圈 APS_RANGE=220px:只对"新进入圈内的敌 TOW"各打一发——用 u.apsEngaged[]
+      记录已接战导弹,否则同一枚停在圈内会每帧发射把弹夹打光(真实 bug)。
+    - 反导弹(Interceptor 类)存独立 interceptors 数组:贴图照用 25mm 子弹,速度=
+      ATGM_SPEED×2(420),追踪来袭导弹,命中(APS_HIT_R+4)即拦截——把来袭导弹
+      dead=true(不再造成伤害)+爆炸特效,超射程自毁。渲染 drawInterceptors(绿色曳光)。
+    - 循环顺序:updateMissiles 先动飞弹,updateInterceptors 再追(追最新位置)。
+    - 选中开启 APS 的艾布拉姆画 220px 虚线反应圈(drawSel)。
+
 【已知注意事项 / 坑】
   1. 地图尺寸是动态的：改地图前先 setMapSize，别把 MAP_W/H 当常量硬编码。
   2. canvas.getImageData 在 file:// 下会被浏览器安全策略拦截(SecurityError)，
@@ -336,6 +371,12 @@
   4. Unit.cargo 被矿车占用；运输艇的装载是 cargoUnits，不要混。
   5. orderMove 里不要对自己递归（历史：选中运输艇再点运输艇会死循环栈溢出）。
   6. 单位移动、寻路、出生格都要考虑 naval/amphib，用 pathFor/unitPassable/spawnUnitNear 的分支。
+  7. 新增升级包:config 常量 + entities 字段 + build 安装函数 + update 运行时 + ui 按钮
+     + input 分发 + 版本号,七处缺一不可;加函数后 grep 一遍引用防漏定义。
+  8. 探测型武器(如 APS)对持续在范围内的目标只打一发:用 xxxEngaged 记录已接战目标,
+     否则每帧重复发射把弹夹打光。
+  9. ★改 UTF-8 中文文件别用 PowerShell 的 Get-Content/Set-Content(按 ANSI 编解码会
+     把中文写坏,本项目真实事故),用 Node 或编辑工具。
 
 【如何验证】
   无测试框架，靠 Node 语法检查 + 自制 DOM/canvas stub 冒烟测试：

@@ -1,6 +1,17 @@
 "use strict";
 /* ============ update.js: 更新逻辑 ============ */
 const spCand = [];   // 空间网格查询用共享候选数组(避免每帧分配)
+/* ============ 美洲狮步战车:独立旋转炮塔 ============ */
+const PUMA_TURRET_RATE = 3;      // 炮塔旋转速度(rad/s,360°自由旋转,转速较慢)
+const PUMA_TURRET_ALIGN = 0.15;  // 炮口对准误差(rad),炮口对准目标且射程内才开火
+const PUMA_TURN_MAX_SPEED = 1.6; // 美洲狮车体匀速转向(rad/s):比普通坦克慢
+const PUMA_TURN_ACCEL = 10;      // 美洲狮车体转向角加速度(rad/s²)
+function angDiff(a,b){
+  let d=(b-a)%(Math.PI*2);
+  if(d>Math.PI) d-=Math.PI*2;
+  if(d<-Math.PI) d+=Math.PI*2;
+  return d;
+}
 function buildGrid(){
   grid = new Map();
   for(let i=0;i<units.length;i++){
@@ -56,11 +67,16 @@ function update(dt){
   // 弹体
   for(const p of projectiles){
     const d=Math.hypot(p.tx-p.x,p.ty-p.y);
+    if(p.accel) p.speed = Math.min(p.maxSpeed||p.speed, p.speed + p.accel*dt);   // 先加速后匀速
     const step=p.speed*dt;
     if(d<=step){ p.dead=true; if(p.target && p.target.hp!==undefined && p.target.hp>0 && (p.target.team!==p.team || p.force)){ applyDamage(p.target,p.damage,p.attacker,p.proj); } }
     else { p.x+=(p.tx-p.x)/d*step; p.y+=(p.ty-p.y)/d*step; }
   }
   projectiles=projectiles.filter(p=>!p.dead);
+  // 反坦克导弹(自动制导跟踪 / 被挡爆炸 / 目标死亡自爆 / 范围伤害)
+  updateMissiles(dt);
+  // 自主防御反导弹(拦截弹:追踪来袭 TOW 导弹,命中即摧毁)
+  updateInterceptors(dt);
   // 特效
   for(const e of effects){ e.life-=dt; }
   for(const e of effects){
@@ -299,6 +315,8 @@ function updateUnit(u, dt){
   u.fireT-=dt;
   if(u._lineT>0) u._lineT-=dt;   // 攻击指示红线倒计时
   u.wantVx=0; u.wantVy=0;   // 每帧重置期望速度,由下方指令逻辑重新计算
+  if(isTurretUnit(u)) u._turretAiming = false;   // 独立炮塔载具每帧重置:本轮是否在索敌开火(独立转炮塔)
+  u._standFire = false;                          // 每帧重置:是否"战斗中钉住不动"(射程内原地射击)
   // 反应装甲:T90 护盾每秒恢复 15(被打破后也能从 0 重新生成)
   if(u.type==='t90' && u.shield<REACTIVE_SHIELD && hasResearch(u.team,'reactiveArmor')){
     u.shield = Math.min(REACTIVE_SHIELD, u.shield + REACTIVE_REGEN*dt);
@@ -319,6 +337,48 @@ function updateUnit(u, dt){
       textPopup(u.x,u.y-20, CHALL_NAMES[u.upgradeLvl]+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
       updatePanel();
+    }
+  }
+  // 反坦克导弹模块:安装进度 + 装填倒计时
+  if(u.atgmUpgrading){
+    u.atgmProg += dt;
+    if(u.atgmProg >= ATGM_UPGRADE_TIME){
+      u.atgmUpgrading=false; u.atgmProg=0; u.atgm=true;
+      textPopup(u.x,u.y-20,atgmModuleName(u)+' 安装完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',20));
+      updatePanel();
+    }
+  }
+  if(u.atgm) u.atgmReload = Math.max(0, u.atgmReload - dt);
+  // 自主防御系统:安装进度 + 反导弹弹夹填充(每发 APS_RELOAD 秒补 1 发,上限 APS_MAX_AMMO)
+  if(u.apsUpgrading){
+    u.apsProg += dt;
+    if(u.apsProg >= APS_UPGRADE_TIME){
+      u.apsUpgrading=false; u.apsProg=0; u.aps=true; u.apsOn=true; u.apsAmmo=APS_MAX_AMMO;
+      textPopup(u.x,u.y-22,'自主防御系统 安装完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',20));
+      updatePanel();
+    }
+  }
+  if(u.aps && u.apsAmmo<APS_MAX_AMMO){
+    u.apsReload = Math.max(0, u.apsReload - dt);
+    if(u.apsReload<=0){ u.apsReload = APS_RELOAD; u.apsAmmo++; }
+  }
+  // 自主防御(被动):开启且弹夹有货时,探测反应圈(APS_RANGE)内的敌 TOW 导弹并反击。
+  // 只反 TOW(布拉德利/黄鼠狼),不反长钉(美洲狮),也不反己方导弹。
+  // 只对"新进入圈内的导弹"各打一发(apsEngaged 记录已接战目标),不会对同一枚连续倾泻。
+  if(u.aps && u.apsOn && u.apsAmmo>0){
+    if(u.apsEngaged) u.apsEngaged = u.apsEngaged.filter(x=>x && !x.dead && missiles.includes(x));
+    else u.apsEngaged = [];
+    for(const m of missiles){
+      if(m.dead || m.spriteType==='spike' || !isEnemy(u.team, m.team)) continue;
+      if(u.apsEngaged.includes(m)) continue;
+      if(dist(u, m) <= APS_RANGE){
+        launchInterceptor(u, m);
+        u.apsEngaged.push(m);
+        u.apsAmmo--; u.apsReload = APS_RELOAD;
+        break;
+      }
     }
   }
   if(u.type==='harvester'){
@@ -357,11 +417,16 @@ function updateUnit(u, dt){
       }
     }
   } else if(u.order.kind==='move'){
+    // 移动指令始终尊重玩家(撤离/转移照走,不会因遇敌停车);途中若敌人进入射程则边走边打
     followPath(u,dt);
     // 移动射击:行进途中朝射程内敌人开火,不打断移动
     if(u.def.range>0){
       const en=findEnemyNear(u, u.def.range);
       if(en){
+        if(isTurretUnit(u)){
+          u._turretAiming = true;   // 独立炮塔载具:移动中索敌开火时炮塔独立转向目标
+          u.turretAng = lerpAngle(u.turretAng, Math.atan2(en.y-u.y, en.x-u.x), Math.min(1, PUMA_TURRET_RATE*dt));
+        }
         u.turnTarget=Math.atan2(en.y-u.y,en.x-u.x);
         if(u.fireT<=0){ u.fireT=u.def.rof; fireAt(u,en); }
       }
@@ -378,19 +443,43 @@ function updateUnit(u, dt){
          Math.hypot(at.x-u._homeX, at.y-u._homeY) > u.def.range*2.2){
         u.target=null; u.order={kind:'none'}; u.path=null;
       } else {
-        const d=dist(u,at);
-        // 到位距离:停在自己射程边缘即可打到目标(刚好能开火的距离)
-        const stopD = u.def.range;
-        if(d > stopD){
-          followPathToEntity(u, at, dt);   // 没到位:寻路向目标推进
+        if(isTurretUnit(u)){
+          // 独立炮塔载具(美洲狮/艾布拉姆/T90):炮塔独立 360° 瞄准,炮口对准目标且射程内才开火;
+          // 射程外则炮塔边转、车体边寻路推进,进入射程后车体停住只转炮塔打。
+          u._turretAiming = true;   // 索敌开火:本轮炮塔独立旋转(不随车体)
+          const d=dist(u,at);
+          const ang=Math.atan2(at.y-u.y, at.x-u.x);
+          u.turretAng = lerpAngle(u.turretAng, ang, Math.min(1, PUMA_TURRET_RATE*dt));
+          if(d > u.def.range){
+            followPathToEntity(u, at, dt);   // 射程外:车体寻路逼近
+          } else {
+            u.path=null;                     // 射程内:车体停住,只转炮塔
+            u._standFire = true;
+            if(Math.abs(angDiff(u.turretAng, ang)) <= PUMA_TURRET_ALIGN && u.fireT<=0){
+              u.fireT=u.def.rof; fireAt(u,at);
+            }
+          }
         } else {
-          u.path=null;                     // 到位:停止移动
-        }
-        if(d <= u.def.range){              // 进入射程就持续向目标开火
-          u.turnTarget=Math.atan2(at.y-u.y, at.x-u.x);
-          if(u.fireT<=0){ u.fireT=u.def.rof; fireAt(u,at); }
+          const d=dist(u,at);
+          // 到位距离:停在自己射程边缘即可打到目标(刚好能开火的距离)
+          const stopD = u.def.range;
+          if(d > stopD){
+            followPathToEntity(u, at, dt);   // 没到位:寻路向目标推进
+          } else {
+            u.path=null;                     // 到位:停止移动
+            u._standFire = true;             // 射程内:钉住原地射击,不乱走位
+          }
+          if(d <= u.def.range){              // 进入射程就持续向目标开火
+            u.turnTarget=Math.atan2(at.y-u.y, at.x-u.x);
+            if(u.fireT<=0){ u.fireT=u.def.rof; fireAt(u,at); }
+          }
         }
       }
+    }
+    // 反坦克导弹模块:目标在导弹射程内且已装填则发射(自动制导跟踪)
+    if(u.atgm && u.atgmReload<=0 && at && at.hp>0 && dist(u,at)<=ATGM_RANGE){
+      launchATGM(u, at);
+      u.atgmReload = ATGM_RELOAD;
     }
     if(!at || at.hp<=0){
       u.target=null;
@@ -511,7 +600,7 @@ function flowPriority(u){
 function arbitrateFlow(){
   const moveKind = k => k==='move' || k==='attack';
   for(const u of units){
-    if(!moveKind(u.order.kind)) continue;
+    if(!moveKind(u.order.kind) || u._standFire) continue;   // 战斗中钉住的单位不参与倒车让行
     const du=flowDir(u); if(!du) continue;
     const cand=gridCollect(u.x, u.y, 110);
     for(let c=0;c<cand.length;c++){
@@ -539,7 +628,7 @@ function arbitrateFlow(){
   while(changed && guard++<units.length){
     changed=false;
     for(const u of units){
-      if(u._backing || !moveKind(u.order.kind)) continue;
+      if(u._backing || u._standFire || !moveKind(u.order.kind)) continue;
       const du=flowDir(u); if(!du) continue;
       const cand=gridCollect(u.x, u.y, 70);
       for(let c=0;c<cand.length;c++){
@@ -665,14 +754,15 @@ function dampedTurn(u, target, dt){
   delta = ((delta + Math.PI) % (Math.PI*2) + Math.PI*2) % (Math.PI*2) - Math.PI;   // 最短转角 [-π, π]
   const abs = Math.abs(delta);
   if(abs < 0.008){ u.facing = target; u.angVel = 0; return target; }
-  const maxV = TURN_MAX_SPEED;
+  const maxV = (u.type==='puma') ? PUMA_TURN_MAX_SPEED : TURN_MAX_SPEED;
+  const accel = (u.type==='puma') ? PUMA_TURN_ACCEL : TURN_ACCEL;
   const dir = delta > 0 ? 1 : -1;
   // 期望角速度:匀速;最后 0.4rad 线性减速,避免到位硬停
   let want = dir * maxV;
   if(abs < 0.4) want = dir * maxV * (abs/0.4);
   // 以固定角加速度逼近(起步加速 / 换向减速)
   const dv = want - u.angVel;
-  u.angVel += Math.sign(dv) * Math.min(TURN_ACCEL*dt, Math.abs(dv));
+  u.angVel += Math.sign(dv) * Math.min(accel*dt, Math.abs(dv));
   if(Math.abs(u.angVel) > maxV) u.angVel = Math.sign(u.angVel)*maxV;
   // 环形到位判定:检查下一帧角度与目标的最短角差,而非线性比较
   const next = u.facing + u.angVel*dt;
@@ -707,6 +797,19 @@ function applyMovement(u, dt){
   // 前进方向分量只做有限减速——否则队列中前后车互相抵消会整群死锁
   const sp = u.speedEff;
   const isVehicle = u.hw > u.hh && !u.naval;   // 履带/长条形载具(海军除外)
+  // 兜底:单位中心格被建筑/障碍压住(卡在建筑里出不来)-> 拉到最近可通行格。
+  // 每 0.8s 检查一次(不是每帧寻路,不影响寻路系统;只在"真被埋住"时触发)
+  u._obsT = (u._obsT||0) + dt;
+  if(u._obsT > 0.8){
+    u._obsT = 0;
+    if(!unitPassable(u, Math.floor(u.x/TILE), Math.floor(u.y/TILE))) pullOutOfObstacle(u);
+  }
+  // 战斗中且目标在射程内(_standFire):钉住不动,只负责转向瞄准与开火。
+  // 不做任何自动走位/倒车/滑出/被挤开,避免"战斗时乱跑乱动找位置"
+  if(u._standFire){
+    u._backing = null; u._escapeT = 0; u._yieldT = 0;
+    u.wantVx = 0; u.wantVy = 0;
+  }
   // 让行:卡住滑开后暂停片刻,打破双向车流对称死锁(随机时差分先后)
   if(u._yieldT>0){
     u._yieldT -= dt;
@@ -757,12 +860,16 @@ function applyMovement(u, dt){
     vx = wx + px*sPerpC + ux*parSlow;
     vy = wy + py*sPerpC + uy*parSlow;
   } else {
-    // 无前进目标(已到位/待命):被挤压时轻微推开,让先到位的单位散开腾出空间
-    const s=Math.hypot(u.sepVx,u.sepVy);
-    if(s>SEPARATE_STRENGTH*0.2){
-      const k=Math.min(1, 15/s);      // 空闲单位被推幅度封顶 15px/s(更沉,几乎不漂)
-      vx=u.sepVx*k; vy=u.sepVy*k;
-    } else { vx=0; vy=0; }
+    // 无前进目标(已到位/待命):被挤压时轻微推开,让先到位的单位散开腾出空间。
+    // 战斗钉住(_standFire)的单位不被推挤,保持原地射击。
+    if(u._standFire){ vx=0; vy=0; }
+    else {
+      const s=Math.hypot(u.sepVx,u.sepVy);
+      if(s>SEPARATE_STRENGTH*0.2){
+        const k=Math.min(1, 15/s);      // 空闲单位被推幅度封顶 15px/s(更沉,几乎不漂)
+        vx=u.sepVx*k; vy=u.sepVy*k;
+      } else { vx=0; vy=0; }
+    }
   }
   // 履带载具几乎不能横移:把速度分解为"沿车头/垂直车头",削减横移分量,
   // 让坦克"先转向(匀速)再沿车头前进/倒退",而不是被指令拉着横着飘
@@ -833,6 +940,10 @@ function applyMovement(u, dt){
         break;
       }
     }
+    if(!escaped){
+      // 兜底:左右后都滑不动、旋转也出不来(被建筑/障碍"埋住")-> 直接拉到最近可通行格
+      if(pullOutOfObstacle(u)) escaped = true;
+    }
   }
   // 积分 + 静态障碍碰撞(滑动):检查胶囊两圆所在格,防止长车身斜插进障碍/水面
   const nx=u.x+u.vx*dt, ny=u.y+u.vy*dt;
@@ -845,8 +956,9 @@ function applyMovement(u, dt){
     else u.vy=0;
   }
   u.x=clamp(u.x,u.hw,W-u.hw); u.y=clamp(u.y,u.hh,H-u.hh);
-  // 朝向:向目标方向角做 lerpAngle 平滑插值,产生真实的履带战车转向效果,而非瞬间硬转
-  const aiming = u.order.kind==='attack' && u.target && u.target.hp>0 && dist(u,u.target)<=u.def.range;
+  // 朝向:向目标方向角做 lerpAngle 平滑插值,产生真实的履带战车转向效果,而非瞬间硬转。
+  // 独立炮塔载具(美洲狮/艾布拉姆/T90)车体不参与瞄准:瞄准由炮塔负责,车体只跟移动方向。
+  const aiming = !isTurretUnit(u) && u.order.kind==='attack' && u.target && u.target.hp>0 && dist(u,u.target)<=u.def.range;
   let tgt = u.facing;
   if(aiming){
     // 攻击瞄准:朝当前目标方向平滑转过去
@@ -855,7 +967,7 @@ function applyMovement(u, dt){
     const wm = Math.hypot(u.wantVx, u.wantVy);
     if(wm > 2){
       tgt = Math.atan2(u.wantVy, u.wantVx);          // 有寻路意图:朝前进方向转
-    } else if(u.order.kind==='attack' && u.target){
+    } else if(u.order.kind==='attack' && u.target && !isTurretUnit(u)){
       tgt = (u.turnTarget !== undefined) ? u.turnTarget : Math.atan2(u.target.y-u.y, u.target.x-u.x);  // 追击途中朝目标
     }
     // 空闲/移动到位:保持当前朝向,不再回弹到上次战斗残留的 turnTarget 角度
@@ -872,6 +984,10 @@ function applyMovement(u, dt){
   }
   // 载具渲染物理:起步/刹车俯仰 + 开火后坐力
   if(isVehicle) updateRenderPhysics(u, dt);
+  // 独立炮塔载具:无索敌开火时炮塔以炮塔转速慢慢转回车头方向(不瞬移);锁定目标时由 updateUnit 独立瞄准
+  if(isTurretUnit(u) && !u._turretAiming){
+    u.turretAng = lerpAngle(u.turretAng, u.facing, Math.min(1, PUMA_TURRET_RATE*dt));
+  }
 }
 /* ============ 履带/轮子接地细节:压痕 + 扬尘 ============ */
 // 移动中的履带车辆按"走过的距离"生成压痕,并在较快时扬起尘土
@@ -927,6 +1043,7 @@ function crushTree(tx, ty, u){
   terrain[tx][ty] = 'grass';
   blocked[tx][ty] = false;
   invalidatePathCache();
+  patchTerrainTile(tx, ty);   // 地形渲染缓存只重绘该格,不整图重建
   const cx = tx*TILE + TILE/2, cy = ty*TILE + TILE/2;
   // 倒下动画:用整张树林贴图,从竖直缓缓倒向水平(0.5s)
   const tile = imgs['tree'] || null;
@@ -970,11 +1087,48 @@ function findEnemyNear(u, range){
 function fireAt(u,target){
   const bolt = u.type==='magnet';
   const speed = bolt ? 1400 : (u.type==='tank'||u.type==='destroyer'?400 : (u.type==='infantry'?430: (u.type==='transport'?520:420)));
-  const px=u.x+Math.cos(u.facing)*(u.r+4), py=u.y+Math.sin(u.facing)*(u.r+4);
+  let px, py;
+  if(isTurretUnit(u)){
+    // 独立炮塔载具:炮口 = 旋转中心(座圈,沿车头偏移 turretRotCenter)+ 沿炮塔朝向伸出。
+    // 除美洲狮外按 2/3 法则:炮口到旋转中心 = 2/3 炮塔长轴(水平炮塔用宽,垂直炮塔用高)。
+    const fx=Math.cos(u.turretAng), fy=Math.sin(u.turretAng);
+    let rc=0, muzzleDist = u.r+6;
+    const keys=turretKeys(u);
+    const tur = imgs[keys[1]], bdy = imgs[keys[0]];
+    if(tur && tur.width){
+      const sBase = Math.max(1, (bdy && bdy.width) ? Math.max(bdy.width, bdy.height) : 1);
+      const sc2 = (u.r*2.9*1.8*unitSpriteScale(u))/sBase;
+      const ts = turretScale(u);
+      const tw=tur.width*sc2*ts, th=tur.height*sc2*ts;
+      rc = turretRotCenter(u, tw);
+      const ro = unitRotOff(u);
+      // 炮口到旋转中心 = 旋转法则系数 × 炮塔长轴(美洲狮/布拉德利 1/2,T54 3/5,其余 2/3)
+      const axisDim = (ro===Math.PI||ro===0) ? tw : th;
+      muzzleDist = axisDim*turretPivotK(u) + 2;
+    }
+    px = u.x + Math.cos(u.facing)*rc + fx*muzzleDist;
+    py = u.y + Math.sin(u.facing)*rc + fy*muzzleDist;
+  } else {
+    px=u.x+Math.cos(u.facing)*(u.r+4), py=u.y+Math.sin(u.facing)*(u.r+4);
+  }
   const pr=new Projectile(px,py,target.x,target.y,target,u.def.damage,u.team,speed,u,u.def.proj);
   pr.force = !!(u.order && u.order.force);   // 强制攻击:可命中任意目标(含己方)
+  // 所有坦克/载具开火不再产生后坐力位移(避免车身开火抽动)
+  // 步兵战车 25mm 机炮弹(美洲狮/布拉德利/黄鼠狼/B11) + 士兵子弹(北约士兵/动员兵 = 25mm 的 0.5× 贴图):
+  // 贴图弹丸 + 先加速后匀速
+  if(isIFV25(u) || u.type==='infantry'){
+    pr.ifvBullet = true;
+    if(u.type==='infantry') pr.bulletLen = BULLET_25MM_LEN*0.5;   // 士兵子弹:25mm 的 0.5 倍
+    pr.maxSpeed = pr.speed;
+    pr.speed = pr.speed*IFV_START_FACTOR;
+    pr.accel = IFV_ACCEL;
+  }
+  // 坦克炮弹(所有主战坦克):125mm 贴图,从发射起匀速飞行命中目标
+  if(isTankShellUnit(u)){
+    pr.tankShell = true;
+  }
   projectiles.push(pr);
-  if(u.hw > u.hh && !u.naval) u.fireRecoil = FIRE_RECOIL;   // 载具开火后坐力(车身反向震动)
+  // 所有坦克/载具开火不再产生后坐力位移(避免车身开火抽动)
   if(bolt){
     // 磁暴步兵:释放一段闪电特效(纯视觉,命中伤害走弹体)
     const e=new Effect(target.x,target.y,'bolt',0);
@@ -1267,11 +1421,15 @@ function updateGarrisonAttack(b, dt){
     for(const uu of b.garrison){
       if(!uu || !uu.def) continue;
       if(dist(b,tt) <= uu.def.range+20){
-        projectiles.push(new Projectile(b.x,b.y-b.h*TILE/2, tt.x,tt.y, tt, uu.def.damage, b.team, projSpeedFor(uu.type), uu, uu.def.proj));
+        const pr=new Projectile(b.x,b.y-b.h*TILE/2, tt.x,tt.y, tt, uu.def.damage, b.team, projSpeedFor(uu.type), uu, uu.def.proj);
+        if(isTankShellUnit(uu)) pr.tankShell=true;
+        projectiles.push(pr);
       }
     }
     if(b.garrisonTank && b.garrisonTank.def && dist(b,tt)<=b.garrisonTank.def.range+20){
-      projectiles.push(new Projectile(b.x,b.y-b.h*TILE/2, tt.x,tt.y, tt, b.garrisonTank.def.damage, b.team, projSpeedFor(b.garrisonTank.type), b.garrisonTank, b.garrisonTank.def.proj));
+      const pr=new Projectile(b.x,b.y-b.h*TILE/2, tt.x,tt.y, tt, b.garrisonTank.def.damage, b.team, projSpeedFor(b.garrisonTank.type), b.garrisonTank, b.garrisonTank.def.proj);
+      if(isTankShellUnit(b.garrisonTank)) pr.tankShell=true;
+      projectiles.push(pr);
     }
   }
 }
@@ -1332,4 +1490,158 @@ function unloadTransport(t, at){
 function manualUnload(t){
   if(!t || !isCarrier(t) || !t.cargoUnits || !t.cargoUnits.length) return;
   unloadTransport(t, {x:t.x, y:t.y});
+}
+/* ============ 反坦克导弹(自动制导 / 被挡爆炸 / 目标死亡自爆 / 单体+范围伤害) ============ */
+function updateMissiles(dt){
+  for(const m of missiles){
+    if(m.dead) continue;
+    const t=m.target;
+    // 目标已死:导弹在当前位置立即自动爆炸
+    if(!t || t.hp===undefined || t.hp<=0){
+      explodeATGM(m, m.x, m.y, null);
+      continue;
+    }
+    // 稍微转弯:朝向目标当前方向(限转角速度)
+    const want=Math.atan2(t.y-m.y, t.x-m.x);
+    let d=want-m.ang;
+    d=((d+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
+    m.ang += Math.max(-ATGM_TURN_RATE*dt, Math.min(ATGM_TURN_RATE*dt, d));
+    // 先加速后匀速
+    m.speed=Math.min(m.maxSpeed, m.speed+m.accel*dt);
+    const step=m.speed*dt;
+    m.x+=Math.cos(m.ang)*step; m.y+=Math.sin(m.ang)*step;
+    m.travelled+=step;
+    // 尾烟(运动过程渲染)
+    if(Math.random()<dt*20){
+      const sm=new Effect(m.x-Math.cos(m.ang)*7, m.y-Math.sin(m.ang)*7, 'smoke', rnd(2.5,4.5));
+      sm.life=0.7; sm.maxLife=0.7; effects.push(sm);
+    }
+    // 超射程自爆
+    if(m.travelled>=m.maxRange){ explodeATGM(m, m.x, m.y, null); continue; }
+    // 被其它敌方单位挡着 -> 立即爆炸(挡路者吃单体伤害)
+    const blocker=atgmBlocker(m);
+    if(blocker){ explodeATGM(m, m.x, m.y, blocker); continue; }
+    // 命中目标
+    if(atgmHitTarget(m)){ explodeATGM(m, m.x, m.y, t); }
+  }
+  missiles=missiles.filter(m=>!m.dead);
+}
+// 导弹命中目标判定:单位用距离,建筑用占地(外扩几像素)
+function atgmHitTarget(m){
+  const t=m.target;
+  if(!t || t.hp===undefined || t.hp<=0) return false;
+  if(t instanceof Unit) return dist(m,t) <= t.r + 6;
+  return m.x>=t.tx*TILE-6 && m.x<(t.tx+t.w)*TILE+6 && m.y>=t.ty*TILE-6 && m.y<(t.ty+t.h)*TILE+6;
+}
+// 路径被其它(敌方)单位挡着:导弹撞上即爆炸
+function atgmBlocker(m){
+  const cand=gridCollect(m.x, m.y, ATGM_HIT_R*2+16);
+  for(let c=0;c<cand.length;c++){
+    const u=units[cand[c]];
+    if(u===m.target || u.hp<=0 || !isEnemy(m.team,u.team)) continue;
+    if(dist(m,u) <= ATGM_HIT_R + (u.r||8)) return u;
+  }
+  return null;
+}
+// 发射:从单位前方稍出膛,自动制导跟踪目标
+function launchATGM(u, target){
+  const ang=Math.atan2(target.y-u.y, target.x-u.x);
+  const x=u.x+Math.cos(ang)*(u.r+12), y=u.y+Math.sin(ang)*(u.r+12);
+  const m=new Missile(x, y, target, u.team, u, u.type==='puma'?'spike':'tow');
+  missiles.push(m);
+  effects.push(new Effect(x,y,'ring',14));
+  for(let i=0;i<3;i++){ const sm=new Effect(x+rnd(-3,3), y+rnd(-3,3), 'smoke', rnd(3,6)); sm.life=0.5; sm.maxLife=0.5; effects.push(sm); }
+  textPopup(u.x, u.y-22, atgmMissileName(u.type==='puma'?'spike':'tow')+' 发射','#ffd24a');
+}
+// 爆炸:目标(或挡路者)吃单体满伤,范围内其它单位/建筑吃范围伤害(范围不大)
+function explodeATGM(m, ex, ey, primary){
+  m.dead=true;
+  shake=Math.max(shake,3);
+  effects.push(new Effect(ex,ey,'explode',32));
+  for(let i=0;i<7;i++){ const sm=new Effect(ex+rnd(-11,11), ey+rnd(-11,11), 'smoke', rnd(5,10)); sm.life=1.3; sm.maxLife=1.3; effects.push(sm); }
+  if(primary && primary.hp!==undefined && primary.hp>0){
+    applyDamage(primary, m.damage, m.attacker, 'missile');
+  }
+  const aoe=Math.floor(m.damage*ATGM_AOE_FACTOR);
+  for(const u of units){
+    if(u.hp<=0 || u===primary) continue;
+    if(dist(u,{x:ex,y:ey}) <= m.explodeR) applyDamage(u, aoe, m.attacker, 'missile');
+  }
+  for(const b of buildings){
+    if(!b.alive || b===primary) continue;
+    if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
+  }
+}
+/* ============ 自主防御反导弹(拦截弹):追踪来袭 TOW 导弹,命中即摧毁 ============ */
+// 发射:从艾布拉姆前方出膛,锁定反应圈内某发敌 TOW 导弹
+function launchInterceptor(u, tm){
+  const ang=Math.atan2(tm.y-u.y, tm.x-u.x);
+  const x=u.x+Math.cos(ang)*(u.r+12), y=u.y+Math.sin(ang)*(u.r+12);
+  const it=new Interceptor(x, y, tm, u.team);
+  interceptors.push(it);
+  effects.push(new Effect(x,y,'ring',12));
+  for(let i=0;i<2;i++){ const sm=new Effect(x+rnd(-3,3), y+rnd(-3,3), 'smoke', rnd(3,5)); sm.life=0.5; sm.maxLife=0.5; effects.push(sm); }
+  textPopup(u.x, u.y-20, '自主防御 反击','#8aff8a');
+}
+function updateInterceptors(dt){
+  for(const it of interceptors){
+    if(it.dead) continue;
+    const tm=it.targetMissile;
+    // 目标导弹已消失(被拦/命中/自爆)-> 拦截弹就地消失
+    if(!tm || tm.dead || !missiles.includes(tm)){ it.dead=true; continue; }
+    // 稍微转弯朝目标导弹当前位置
+    const want=Math.atan2(tm.y-it.y, tm.x-it.x);
+    let d=want-it.ang;
+    d=((d+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
+    it.ang += Math.max(-ATGM_TURN_RATE*dt, Math.min(ATGM_TURN_RATE*dt, d));
+    // 先加速后匀速(速度 = 反坦克导弹的一倍)
+    it.speed=Math.min(it.maxSpeed, it.speed+it.accel*dt);
+    const step=it.speed*dt;
+    it.x+=Math.cos(it.ang)*step; it.y+=Math.sin(it.ang)*step;
+    it.travelled+=step;
+    // 命中来袭导弹 -> 摧毁它(爆炸特效,来袭导弹不再造成伤害)
+    if(dist(it, tm) <= APS_HIT_R + 4){ interceptMissile(it, tm); continue; }
+    // 超射程自毁
+    if(it.travelled >= it.maxRange){ explodeIntercept(it.x, it.y); it.dead=true; }
+  }
+  interceptors=interceptors.filter(it=>!it.dead);
+}
+function interceptMissile(it, tm){
+  it.dead=true;
+  tm.dead=true;                 // 来袭 TOW 导弹被击毁
+  explodeIntercept(it.x, it.y);
+}
+function explodeIntercept(x, y){
+  shake=Math.max(shake,2);
+  effects.push(new Effect(x,y,'explode',20));
+  for(let i=0;i<5;i++){ const sm=new Effect(x+rnd(-8,8), y+rnd(-8,8), 'smoke', rnd(4,8)); sm.life=1.1; sm.maxLife=1.1; effects.push(sm); }
+}
+/* ============ 建筑/障碍卡死兜底:把被"埋住"的单位拉到最近可通行格 ============ */
+// 注意:这只是脱困机制(与既有 stuck-escape 同理),不修改 astar/path 寻路本身。
+function pullOutOfObstacle(u){
+  const cxc=Math.floor(u.x/TILE), cyc=Math.floor(u.y/TILE);
+  if(unitPassable(u,cxc,cyc)) return false;   // 中心格可通行就不动
+  const ex=findExitCellFor(u);
+  if(!ex) return false;
+  u.x=ex.x; u.y=ex.y;
+  u.vx=0; u.vy=0; u._escapeT=0; u._escapeAng=0;
+  u.facing=u.turnTarget=Math.atan2(ex.y-u.y, ex.x-u.x);   // 朝外
+  u.path=null; u.pathIdx=0; u.repathT=0.2;
+  textPopup(u.x,u.y-20,'已脱离建筑','#9fc0ac');
+  return true;
+}
+// 以单位中心格为起点,逐圈向外找第一个可通行格(含当前格 r=0)
+function findExitCellFor(u){
+  const cxc=Math.floor(u.x/TILE), cyc=Math.floor(u.y/TILE);
+  for(let r=0;r<=8;r++){
+    for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
+      const nx=cxc+dx, ny=cyc+dy;
+      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H) continue;
+      if(unitPassable(u,nx,ny)){
+        return { x:nx*TILE+TILE/2, y:ny*TILE+TILE/2 };
+      }
+    }
+  }
+  return null;
 }

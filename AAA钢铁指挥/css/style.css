@@ -1,6 +1,21 @@
 * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
 html, body { width:100%; height:100%; overflow:hidden; background:#0a0f0a; font-family:"Microsoft YaHei", sans-serif; }
 #wrap { position:relative; width:100%; height:100%; }
+/* ===== 贴图预缓存加载屏 ===== */
+#loadingOv {
+  position:absolute; inset:0; z-index:20000; display:none;
+  align-items:center; justify-content:center;
+  background:radial-gradient(circle at 50% 30%, #274a35 0%, #14221a 70%, #0c1410 100%);
+}
+#loadingOv .loadBox { width:360px; text-align:center; color:#dfe8e0; }
+#loadingOv h1 { font-size:44px; color:#ffe27a; letter-spacing:10px; text-shadow:0 0 24px rgba(255,226,122,.4); margin-bottom:6px; }
+#loadingOv .msub { font-size:14px; letter-spacing:3px; color:#9fc0ac; margin-top:10px; }
+.loadBar {
+  height:16px; border:2px solid #3a4a42; border-radius:8px;
+  background:#0d1612; overflow:hidden; margin:18px auto 4px;
+}
+#loadBarFill { height:100%; width:0%; background:linear-gradient(90deg,#4fdc7a,#8aff8a); transition:width .12s linear; }
+#loadPct { font-size:15px; color:#ffe27a; letter-spacing:2px; }
 canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair; }
 #hud {
   position:absolute; left:0; right:0; bottom:0; height:150px;

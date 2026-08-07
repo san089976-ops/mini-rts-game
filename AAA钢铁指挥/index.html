@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -8,6 +8,14 @@
 </head>
 <body>
 <div id="wrap">
+  <div id="loadingOv">
+    <div class="loadBox">
+      <h1>钢铁指挥</h1>
+      <p class="msub">正在预缓存贴图素材...</p>
+      <div class="loadBar"><div id="loadBarFill"></div></div>
+      <p class="msub" id="loadPct">0%</p>
+    </div>
+  </div>
   <canvas id="main"></canvas>
   <canvas id="minimap" width="200" height="150"></canvas>
   <button id="sellBtn">出售</button>
@@ -108,6 +116,8 @@
         <div class="hrow"><b>船坞</b> 只能整块建在距己方建筑8格内的水面上,生产驱逐舰(海军)/运输艇(两栖);按 I 或点建造按钮后左键水面放置</div>
         <div class="hrow"><b>装载</b> 选中地面单位右键点运输艇上船(步兵1点/高级步兵2点/矿车·M60 3点/T54 4点/基地车·重坦6点,共12点);选中运输艇右键地面=移动到该处(不会自动卸载),到位后选中运输艇点「释放部队」手动卸载</div>
         <div class="hrow"><b>步兵战车</b> 升级战车工厂后可生产:布拉德利(盟)/黄鼠狼(盟)/俄制B11(苏,两栖)可装载步兵(布拉德利3人/黄鼠狼6人/B11 7人);勒克莱尔/豹2A4/挑战者(盟)为重型主战坦克,其中挑战者可升级两级:挑战者2号/挑战者3号,每次 $300 耗时8秒,各 +15 伤害 +120 血</div>
+        <div class="hrow"><b>美洲狮步战车</b> 盟军升级战车工厂可生产:高速轮式步战车,炮塔独立360°旋转(炮口对准射程内目标才开火,车体不参与瞄准),占运输艇 6 点</div>
+        <div class="hrow"><b>反坦克导弹模块</b> 美洲狮/黄鼠狼/布拉德利选中后可安装($150/6秒):解锁自动制导导弹(射程180·单发300·装填15秒)。导弹会轻微转弯追踪目标、会被路径上的敌方单位挡下爆炸、目标阵亡时自动自爆;直击目标为单体满伤,周围单位吃范围伤害</div>
         <div class="hrow"><b>进驻</b> 中立别墅/商业体可进驻:选中步兵右键中立建筑即可进入;进驻后建筑归该方所有并自动向外射击(用进驻单位武器,射程+20);选中该建筑点「释放部队」放出部队后建筑变回中立。日式/美式别墅各3名步兵,综合商业体12名步兵+1个专属坦克位(选中坦克右键进入)</div>
       </div>
       <button id="helpBackBtn" onclick="closeHelp()">返 回</button>
@@ -150,23 +160,23 @@
     </div>
   </div>
 </div>
-<script src="map/index.js?v=22"></script>
-<script src="js/config.js?v=22"></script>
-<script src="js/state.js?v=22"></script>
-<script src="js/maps.js?v=22"></script>
-<script src="js/entities.js?v=22"></script>
-  <script src="js/map.js?v=22"></script>
-  <script src="js/astar.js?v=22"></script>
-  <script src="js/path.js?v=23"></script>
-  <script src="js/build.js?v=23"></script>
-  <script src="js/orders.js?v=23"></script>
-  <script src="js/ai.js?v=22"></script>
-  <script src="js/ui.js?v=22"></script>
-  <script src="js/input.js?v=22"></script>
-  <script src="js/update.js?v=23"></script>
-  <script src="js/render.js?v=22"></script>
-  <script src="js/menu.js?v=22"></script>
-  <script src="js/music.js?v=22"></script>
-  <script src="js/game.js?v=23"></script>
+<script src="map/index.js?v=62"></script>
+<script src="js/config.js?v=62"></script>
+<script src="js/state.js?v=62"></script>
+<script src="js/maps.js?v=62"></script>
+<script src="js/entities.js?v=62"></script>
+  <script src="js/map.js?v=62"></script>
+  <script src="js/astar.js?v=62"></script>
+  <script src="js/path.js?v=62"></script>
+  <script src="js/build.js?v=62"></script>
+  <script src="js/orders.js?v=62"></script>
+  <script src="js/ai.js?v=62"></script>
+  <script src="js/ui.js?v=62"></script>
+  <script src="js/input.js?v=62"></script>
+  <script src="js/update.js?v=62"></script>
+  <script src="js/render.js?v=62"></script>
+  <script src="js/menu.js?v=62"></script>
+  <script src="js/music.js?v=62"></script>
+  <script src="js/game.js?v=62"></script>
 </body>
 </html>

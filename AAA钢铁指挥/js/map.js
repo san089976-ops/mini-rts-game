@@ -50,6 +50,7 @@ function genTerrain(){
   }
   // 中立建筑(城市装饰):随机铺几座,不可建造、可查看详情(自制地图由设计师自己摆)
   if(m.custom!=='edited') placeNeutralBuildings();
+  terrainVersion++;   // 地形渲染缓存版本 +1:全量重建地形缓存(碾树走瓦片局部修补,不动此版本)
 }
 /* ============ 开局兜底:有出生点但该队没有建造厂时,在出生点自动补一个(出生点即建造厂中心) ============ */
 function ensureTeamCommands(){
@@ -93,7 +94,7 @@ function placeMapEntities(m){
   }
   for(const uu of (m.units||[])){
     if(!uu) continue;
-    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1};
+    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1};
     if(!KNOWN[uu.type]) continue;
     const team = (uu.team===undefined || uu.team===null) ? -1 : uu.team;
     if(team>=0 && team>=gameTeams.length) continue;

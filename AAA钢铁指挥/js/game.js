@@ -2,6 +2,7 @@
 /* ============ game.js: 游戏流程与主循环 ============ */
 function setupGame(){
   units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; placing=null;
+  missiles=[]; interceptors=[];
   trackMarks=[];
   paused=false;
   if(selling) setSelling(false);
@@ -118,13 +119,27 @@ window.addEventListener('error', e=>{
   document.getElementById('ovSub').textContent=String((e.message||'')+' @'+(e.lineno||'?')+':'+(e.colno||'?')+' '+String(e.filename||''));
 });
 /* ================= 启动 ================= */
-window.addEventListener('load',()=>{
+window.addEventListener('load', async ()=>{
   canvas=document.getElementById('main');
   ctx=canvas.getContext('2d');
   mmCv=document.getElementById('minimap');
   mmCtx=mmCv.getContext('2d');
   fpsEl=document.getElementById('fps');
-  preloadImages();
+  // 预缓存全部贴图(带进度条):等所有素材加载完(或失败容错)再进菜单,
+  // 避免开局贴图边玩边冒、照片坦克先显示程序化占位。
+  const loadOv=document.getElementById('loadingOv');
+  const bar=document.getElementById('loadBarFill');
+  const pct=document.getElementById('loadPct');
+  if(loadOv) loadOv.style.display='flex';
+  // 最多等 15 秒,防止个别图片加载异常卡死加载屏
+  await Promise.race([
+    preloadImages((done,total)=>{
+      if(bar && total>0) bar.style.width=(done/total*100)+'%';
+      if(pct) pct.textContent=Math.round(done/total*100)+'%';
+    }),
+    new Promise(r=>setTimeout(r,15000)),
+  ]);
+  if(loadOv) loadOv.style.display='none';
   initMusic();               // 背景音乐(4 首循环,可在设置里关)
   resize();
   window.addEventListener('resize',resize);

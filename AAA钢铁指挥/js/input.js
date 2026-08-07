@@ -149,6 +149,9 @@ function setupInput(){
     else if(act==='cancelprod'){ if(selBuilding) cancelProduction(selBuilding); }
     else if(act==='deploy'){ const u=selected[0]; if(u){ if(u.type==='airfield_car') deployAirfieldCar(u); else deployMCV(u); } }
     else if(act==='challUpgrade'){ const u=selected[0]; if(u) startChallUpgrade(u); }
+    else if(act==='atgmUp'){ const u=selected[0]; if(u) startATGMAttach(u); }
+    else if(act==='apsUp'){ const u=selected[0]; if(u) startAPSUpgrade(u); }
+    else if(act==='apsToggle'){ const u=selected[0]; if(u && u.aps){ u.apsOn=!u.apsOn; textPopup(u.x,u.y-20, u.apsOn?'自主防御 开启':'自主防御 关闭', u.apsOn?'#8aff8a':'#ffd0d0'); updatePanel(); } }
     else if(act==='release'){ if(selBuilding) releaseGarrison(selBuilding); }
     else if(act==='unload'){ const t=selected.find(u=>isCarrier(u)); if(t) manualUnload(t); }
     else if(act==='selectall') selectAllCombat();

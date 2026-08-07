@@ -14,6 +14,8 @@ let placing = null;         // {def} 正在放置的建筑
 let selling = false;        // 出售模式
 let paused = false;         // 暂停
 let units = [], buildings = [], projectiles = [], effects = [], texts = [];
+let missiles = [];          // 反坦克导弹(自动制导的类单位飞行物)
+let interceptors = [];      // 自主防御反导弹(拦截弹:朝来袭 TOW 导弹追踪)
 let trackMarks = [];        // 履带/轮子压痕(地面残影:坦克移动时生成,随时间淡出)
 let oreFields = [], blocked = [], terrain = [];   // blocked[x][y], terrain[x][y]='grass'|'tree'|'water'
 let oreGrid = [];                                  // oreGrid[x][y]=true 表示该格有金矿(禁建建筑,单位可通行)

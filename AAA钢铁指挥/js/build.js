@@ -10,7 +10,7 @@ function canTrain(team, type){
   const d = getUnitDefs(unitFactionOf(team))[type];
   if(!d || d.cost > credits[team]) return false;
   // 高级单位:必须由已升级的战车工厂生产
-  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger'){
+  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='factory' && b.upgraded && !b.upgrading);
   }
   // 机场建筑车:必须由已升级的建造厂生产
@@ -342,7 +342,7 @@ function tryTrain(defName){
 // 该建筑能否生产该单位
 function canProduceIn(b, defName){
   if(!b || !b.alive || b.constructing) return false;
-  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger'){
+  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma'){
     return b.defName==='factory' && b.upgraded && !b.upgrading;
   }
   if(defName==='airfield_car'){
@@ -398,5 +398,29 @@ function startChallUpgrade(u){
   credits[u.team]-=CHALL_UPGRADE_COST;
   u.upgrading=true; u.upgradeProg=0;
   textPopup(u.x,u.y-20,CHALL_NAMES[u.upgradeLvl+1]+' 升级中','#ffe27a');
+  updatePanel();
+}
+/* ============ 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利):安装后解锁自动制导导弹 ============ */
+function startATGMAttach(u){
+  if(!u || ATGM_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.atgmUpgrading || u.atgm) return;
+  if(credits[u.team] < ATGM_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=ATGM_COST;
+  u.atgmUpgrading=true; u.atgmProg=0;
+  textPopup(u.x,u.y-20,atgmModuleName(u)+' 安装中','#ffe27a');
+  updatePanel();
+}
+/* ============ 自主防御系统(艾布拉姆专属升级包):反 TOW 导弹,自动拦截 ============ */
+function startAPSUpgrade(u){
+  if(!u || APS_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.apsUpgrading || u.aps) return;
+  if(credits[u.team] < APS_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=APS_COST;
+  u.apsUpgrading=true; u.apsProg=0;
+  textPopup(u.x,u.y-20,'自主防御系统 安装中','#ffe27a');
   updatePanel();
 }
