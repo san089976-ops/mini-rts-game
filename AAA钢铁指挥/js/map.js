@@ -28,6 +28,9 @@ function genTerrain(){
   const cw = (m.custom==='edited') ? 2 : (m.clearW || 0);
   const ch = (m.custom==='edited') ? 2 : (m.clearH || 0);
   for(const [sx,sy] of spawns){ clearZone(sx, sy, cw, ch); }
+  // 自然生成地图(标准/海战图):出生点清空之后平滑海岸线——把"向水内突出"的陆地格改为水,
+  // 保证每处海岸都有单张过渡图覆盖(不会出现纯草地补丁)。手工地图不处理,保留现状。
+  if(m.custom!=='edited') smoothCoastline();
   // 金矿:非海战图/非自制地图时随机生成;自制地图的矿来自数据
   if(m.custom!=='naval' && m.custom!=='edited'){
     const spawns = getSpawns(nTeams);
@@ -94,7 +97,7 @@ function placeMapEntities(m){
   }
   for(const uu of (m.units||[])){
     if(!uu) continue;
-    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1,f16:1,su35:1,t84bm:1};
+    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1,f16:1,su35:1,t84bm:1,t72:1,t62:1};
     if(!KNOWN[uu.type]) continue;
     const team = (uu.team===undefined || uu.team===null) ? -1 : uu.team;
     if(team>=0 && team>=gameTeams.length) continue;
@@ -194,6 +197,23 @@ function genNavalTerrain(m){
       if(px>=1&&py>=1&&px<MAP_W-1&&py<MAP_H-1 && terrain[px][py]==='grass'){ ox=px; oy=py; }
     }
     if(ox>=0) addGoldCluster(ox, oy, 3);
+  }
+}
+/* ============ 自然地图海岸平滑:迭代淹没"向水内突出"的陆地格(收敛到无突出) ============ */
+function smoothCoastline(){
+  let guard=0;
+  while(guard++ < 8000){
+    let changed=false;
+    const flood=[];
+    for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
+      if(terrain[x][y]!=='grass') continue;
+      if(isCoastProtruding(x,y)) flood.push([x,y]);
+    }
+    for(const [x,y] of flood){
+      terrain[x][y]='water'; blocked[x][y]=true; structBlocked[x][y]=false;
+      changed=true;
+    }
+    if(!changed) break;
   }
 }
 function clearZone(cx,cy,w,h){

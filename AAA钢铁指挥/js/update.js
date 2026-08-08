@@ -348,6 +348,16 @@ function updateUnit(u, dt){
   if(u.rarm && u.shield<T84BM_SHIELD){
     u.shield = Math.min(T84BM_SHIELD, u.shield + T84BM_SHIELD_REGEN*dt);
   }
+  // T72 反应装甲护盾(T72B 100 回5 / T72BVM 250 回10)
+  if(u.type==='t72' && u.upgradeLvl>0){
+    const t72l = t72Level(u);
+    if(t72l.shield>0 && u.shield<t72l.shield) u.shield = Math.min(t72l.shield, u.shield + t72l.shieldRegen*dt);
+  }
+  // T54 分支反应装甲护盾(T54B 100 回5 / T55AM 150 回5)
+  if(u.type==='tank' && unitFactionOf(u.team)==='soviet' && u.t54Branch){
+    const t54l = t54Branch(u);
+    if(t54l.shield>0 && u.shield<t54l.shield) u.shield = Math.min(t54l.shield, u.shield + t54l.shieldRegen*dt);
+  }
   // T84BM 反应装甲模块安装进度:装好后给满盾
   if(u.rarmUpgrading){
     u.rarmProg += dt;
@@ -382,6 +392,48 @@ function updateUnit(u, dt){
         name: CHALL_NAMES[u.upgradeLvl],
       });
       textPopup(u.x,u.y-20, CHALL_NAMES[u.upgradeLvl]+' 升级完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // T72 坦克三阶升级进度(T72→T72B→T72BVM:血量/伤害/射程/移速/护甲/护盾/贴图档全部更新)
+  if(u.type==='t72' && u.upgrading){
+    u.upgradeProg += dt;
+    if(u.upgradeProg >= T72_UPGRADE_TIME){
+      u.upgrading=false; u.upgradeProg=0;
+      u.upgradeLvl++;
+      const lv = t72Level(u);
+      const oldHP = u.maxHp;
+      u.maxHp = lv.hp;
+      u.hp = Math.min(u.maxHp, u.hp + (lv.hp - oldHP));   // 按差量回血
+      u.speed = lv.speed;
+      u.armor = lv.armor;
+      u.shield = lv.shield;                                // T72B 获得 100 盾 / T72BVM 变 250 盾
+      // 克隆 def,避免污染共享缓存:血量/伤害/射速/射程/移速/护甲/弹种/名字按档更新
+      u._def = Object.assign({}, u._def, {
+        hp: lv.hp, damage: lv.damage, rof: lv.rof, range: lv.range, speed: lv.speed, armor: lv.armor, proj: lv.proj, name: lv.name,
+      });
+      textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // T54 双分支升级进度(T54 → T54B / T55AM:升级时间跑完后才改变属性/贴图/护盾)
+  if(u.type==='tank' && unitFactionOf(u.team)==='soviet' && u.upgrading && u.t54Target){
+    u.upgradeProg += dt;
+    if(u.upgradeProg >= T54_UPGRADE_TIME){
+      u.upgrading=false; u.upgradeProg=0;
+      u.t54Branch = u.t54Target; u.t54Target = 0;
+      const br = t54Branch(u);
+      const oldHP = u.maxHp;
+      u.maxHp = br.hp;
+      u.hp = Math.min(u.maxHp, u.hp + (br.hp - oldHP));   // 按差量回血
+      u.speed = br.speed;
+      u.shield = br.shield;
+      u._def = Object.assign({}, u._def, {
+        hp: br.hp, damage: br.damage, range: br.range, speed: br.speed, name: br.name,
+      });
+      textPopup(u.x,u.y-20, br.name+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
       updatePanel();
     }

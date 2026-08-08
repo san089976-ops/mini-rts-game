@@ -30,6 +30,30 @@ function render(){
   drawMinimap();
 }
 function tileVariation(x,y){ return ((x*374761393 + y*668265263) >>> 0) % 1000; }
+/* ============ 水域过渡(海岸线):陆地格邻水时选"陆地+水缘"过渡图 ============ */
+// 邻水方向/足迹表/突出判定共用 config.js 的 COAST_NEIGH/COAST_FOOT/coastWaterDirs/isCoastProtruding
+// 返回该陆地格的过渡图(无水邻接/无素材→null,走原草地)。确定性:只用 terrain 邻域 + v。
+function coastTileFor(x, y, v){
+  const water=coastWaterDirs(x,y);
+  if(!water.length) return null;
+  // 足迹匹配:覆盖的水方向越多越好、图里"含水但实际是陆地"的方向越少越好。
+  // 关键门槛:必须"盖全"所有邻水方向(缺任何一处=陆地格向水内突出/复杂海岸,
+  // 单张过渡图盖不全 → 用纯草地那 16 张,不硬贴过渡图)。
+  let best=null, bestScore=-1e9;
+  for(const dir of COAST_DIRS){
+    const foot=COAST_FOOT[dir];
+    let covered=0, extra=0, missing=0;
+    for(const d of foot){ if(water.includes(d)) covered++; else extra++; }
+    for(const d of water){ if(!foot.includes(d)) missing++; }
+    if(missing>0) continue;
+    const score=covered*10 - extra;
+    if(score>bestScore){ bestScore=score; best=dir; }
+  }
+  if(bestScore<0 || !best) return null;   // 没有能盖全的过渡图 → 走纯草地
+  const group=coastTiles[best];
+  if(!group || !group.length) return null;
+  return group[group[1] ? (v%2) : 0] || group[0] || null;   // 角有变体,按 v 定选(不闪烁)
+}
 // 单个地形格绘制(被 buildTerrainCache 全量调用,也被 patchTerrainTile 局部调用)
 function drawTerrainTileTo(g, x, y){
   const px=x*TILE, py=y*TILE;
@@ -52,25 +76,30 @@ function drawTerrainTileTo(g, x, y){
       g.fillStyle='rgba(255,255,255,.12)'; g.beginPath(); g.arc(cx-3,cy-8,3,0,Math.PI*2); g.fill();
     }
   } else {
-    const tile=terrainTiles[(x*7+y*13+v)%TERRAIN_TILE_COUNT];
-    if(tile){ g.drawImage(tile, px, py, TILE, TILE); }
+    // 水域过渡:邻水的陆地格优先画"陆地+水缘"过渡图(无水邻接走原草地)
+    const coast=coastTileFor(x,y,v);
+    if(coast){ g.drawImage(coast, px, py, TILE, TILE); }
     else {
-      const base=(x+y)%2===0?'#4a9a5a':'#3f8a4e';
-      g.fillStyle=base; g.fillRect(px,py,TILE,TILE);
-      if(v%5===0){ g.fillStyle='rgba(0,0,0,.05)'; g.fillRect(px,py,TILE,TILE); }
-      else if(v%7===0){ g.fillStyle='rgba(255,255,255,.05)'; g.fillRect(px,py,TILE,TILE); }
-      const d=v%100;
-      if(d<14){
-        g.strokeStyle='#2f7a3a'; g.lineWidth=1.2;
-        const gx=px+(v%28)+3, gy=py+10+((v>>2)%14);
-        g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx-3,gy-6); g.moveTo(gx,gy); g.lineTo(gx+1,gy-7); g.moveTo(gx,gy); g.lineTo(gx+4,gy-5); g.stroke();
-      } else if(d<18){
-        const fx=px+(v%28)+6, fy=py+14+((v>>3)%12);
-        g.fillStyle='#e8e8e8'; g.beginPath(); g.arc(fx,fy,1.8,0,Math.PI*2); g.fill();
-        g.fillStyle='#ffe27a'; g.beginPath(); g.arc(fx,fy,0.9,0,Math.PI*2); g.fill();
-      } else if(d>=97){
-        g.fillStyle='#6a7468'; g.beginPath(); g.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); g.fill();
-        g.fillStyle='#7d8778'; g.beginPath(); g.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); g.fill();
+      const tile=terrainTiles[(x*7+y*13+v)%TERRAIN_TILE_COUNT];
+      if(tile){ g.drawImage(tile, px, py, TILE, TILE); }
+      else {
+        const base=(x+y)%2===0?'#4a9a5a':'#3f8a4e';
+        g.fillStyle=base; g.fillRect(px,py,TILE,TILE);
+        if(v%5===0){ g.fillStyle='rgba(0,0,0,.05)'; g.fillRect(px,py,TILE,TILE); }
+        else if(v%7===0){ g.fillStyle='rgba(255,255,255,.05)'; g.fillRect(px,py,TILE,TILE); }
+        const d=v%100;
+        if(d<14){
+          g.strokeStyle='#2f7a3a'; g.lineWidth=1.2;
+          const gx=px+(v%28)+3, gy=py+10+((v>>2)%14);
+          g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx-3,gy-6); g.moveTo(gx,gy); g.lineTo(gx+1,gy-7); g.moveTo(gx,gy); g.lineTo(gx+4,gy-5); g.stroke();
+        } else if(d<18){
+          const fx=px+(v%28)+6, fy=py+14+((v>>3)%12);
+          g.fillStyle='#e8e8e8'; g.beginPath(); g.arc(fx,fy,1.8,0,Math.PI*2); g.fill();
+          g.fillStyle='#ffe27a'; g.beginPath(); g.arc(fx,fy,0.9,0,Math.PI*2); g.fill();
+        } else if(d>=97){
+          g.fillStyle='#6a7468'; g.beginPath(); g.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); g.fill();
+          g.fillStyle='#7d8778'; g.beginPath(); g.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); g.fill();
+        }
       }
     }
   }
@@ -130,6 +159,11 @@ function drawTerrain(){
         ctx.fillStyle='rgba(255,255,255,.12)'; ctx.beginPath(); ctx.arc(cx-3,cy-8,3,0,Math.PI*2); ctx.fill();
       }
     } else {
+      // 水域过渡:邻水的陆地格优先画"陆地+水缘"过渡图
+      const coast=coastTileFor(x,y,v);
+      if(coast){
+        ctx.drawImage(coast, px, py, TILE, TILE);
+      } else {
       // 草地:照片草块随机平铺(每格固定一块,不闪烁);加载失败回退程序化草地
       const tile=terrainTiles[(x*7+y*13+v)%TERRAIN_TILE_COUNT];
       if(tile){
@@ -156,6 +190,7 @@ function drawTerrain(){
           ctx.fillStyle='#6a7468'; ctx.beginPath(); ctx.ellipse(px+16,py+18,5,3.5,0.3,0,Math.PI*2); ctx.fill();
           ctx.fillStyle='#7d8778'; ctx.beginPath(); ctx.ellipse(px+14,py+17,2.5,1.6,0.3,0,Math.PI*2); ctx.fill();
         }
+      }
       }
     }
   }
@@ -817,7 +852,7 @@ function drawShadowSprite(u, img){
   const vs = (u.type==='puma') ? 0.968 : 1;
   // 车体贴图同尺寸的"剪影阴影":大小≈贴图,只偏移一点点露出右下 L 形黑边,
   // 边缘高斯模糊、黑色淡化(非纯黑),让坦克"压在地面上"而不是贴一张方片。
-  const sc = unitSpriteScale(u) * (SPRITE_BODY_SCALE[u.type] || 1);   // 车身阴影跟车身实际大小
+  const sc = unitSpriteScale(u) * unitBodyScale(u);   // 车身阴影跟车身实际大小
   const s = (u.r*2.9*1.8*sc)/Math.max(1, Math.max(img.width, img.height));
   const dw = img.width*s*vs, dh = img.height*s*vs;
   const rot = unitRotOff(u);
@@ -932,7 +967,7 @@ function drawHarvesterWheels(u, img){
 function drawHullTurretUnit(u, body, tur, rotOff, sc, tip){
   const sBase = Math.max(1, (body&&body.width) ? Math.max(body.width, body.height) : 1);
   const s = (u.r*2.9*1.8*sc)/sBase;
-  const bodyScale = SPRITE_BODY_SCALE[u.type] || 1;   // 仅车身缩放(炮塔保持原大)
+  const bodyScale = unitBodyScale(u);   // 仅车身缩放(炮塔保持原大);t72 按档位
   ctx.rotate(u.facing);
   // 车身
   if(body && body.width){
@@ -1718,9 +1753,10 @@ function drawUnit(u){
   if(u.hp<u.maxHp){ drawHPBar(u.x-u.r, gy-u.r*0.5-8, u.r*2, u.hp/u.maxHp,false); }
   // 反应装甲护盾条(血条上方)
   if(u.shield>0){
+    const smax = unitShieldMax(u) || REACTIVE_SHIELD;
     ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillRect(u.x-u.r, u.y-u.r-12, u.r*2, 3);
     ctx.fillStyle='#4fb8ff';
-    ctx.fillRect(u.x-u.r, u.y-u.r-12, u.r*2*Math.min(1, u.shield/REACTIVE_SHIELD), 3);
+    ctx.fillRect(u.x-u.r, u.y-u.r-12, u.r*2*Math.min(1, u.shield/smax), 3);
   }
   // 队伍颜色角标(右下角小方块,区分同阵营的不同队伍)
   ctx.fillStyle=teamColor(u.team);
@@ -1993,7 +2029,7 @@ function drawSel(){
   }
   // 自主防御反应圈:选中装有 APS 且开启的艾布拉姆时,显示 270px 反导圈
   for(const u of selected){
-    if(u.type==='abrams' && u.aps && u.apsOn){
+    if((u.type==='abrams' || u.type==='t72') && u.aps && u.apsOn){
       ctx.strokeStyle='rgba(140,220,255,.22)'; ctx.lineWidth=1.5; ctx.setLineDash([6,5]);
       ctx.beginPath(); ctx.arc(u.x,u.y,APS_RANGE,0,Math.PI*2); ctx.stroke();
       ctx.setLineDash([]);

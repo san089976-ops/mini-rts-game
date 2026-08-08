@@ -67,6 +67,9 @@ class Unit {
     this.sepT = 0;
     // 挑战者坦克升级状态(0/1/2 级)
     this.upgradeLvl = 0; this.upgrading = false; this.upgradeProg = 0;
+    // T54 双分支升级状态(苏军 tank):0=未升 / 1=T54B / 2=T55AM(互斥一次)
+    this.t54Branch = 0;
+    this.t54Target = 0;              // 升级进行中的目标分支(完成后才写入 t54Branch)
     // 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利)
     this.atgm = false;              // 是否已装备反坦克导弹模块
     this.atgmUpgrading = false;     // 正在安装模块

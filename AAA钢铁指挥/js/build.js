@@ -10,7 +10,7 @@ function canTrain(team, type){
   const d = getUnitDefs(unitFactionOf(team))[type];
   if(!d || d.cost > credits[team]) return false;
   // 高级单位:必须由已升级的战车工厂生产
-  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm'){
+  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm' || type==='t72'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='factory' && b.upgraded && !b.upgrading);
   }
   // 机场建筑车:必须由已升级的建造厂生产
@@ -376,7 +376,7 @@ function tryTrain(defName){
 // 该建筑能否生产该单位
 function canProduceIn(b, defName){
   if(!b || !b.alive || b.constructing) return false;
-  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm'){
+  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm' || defName==='t72'){
     return b.defName==='factory' && b.upgraded && !b.upgrading;
   }
   if(defName==='airfield_car'){
@@ -437,6 +437,35 @@ function startChallUpgrade(u){
   textPopup(u.x,u.y-20,CHALL_NAMES[u.upgradeLvl+1]+' 升级中','#ffe27a');
   updatePanel();
 }
+/* ============ T54 双分支升级(苏军 tank:T54 → T54B $150 或 T55AM $300,互斥一次) ============ */
+function startT54Upgrade(u, branch){
+  if(!u || u.type!=='tank' || unitFactionOf(u.team)!=='soviet' || u.hp<=0 || u.upgrading || u.t54Branch) return;
+  const br = T54_BRANCHES[branch];
+  if(!br) return;
+  if(credits[u.team] < br.cost){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=br.cost;
+  u.upgrading=true; u.upgradeProg=0; u.t54Target=branch;   // 先记目标分支,升级时间跑完才落 t54Branch
+  textPopup(u.x,u.y-20, br.name+' 升级中','#ffe27a');
+  updatePanel();
+}
+function startT54BUpgrade(u){ startT54Upgrade(u, 1); }
+function startT55AMUpgrade(u){ startT54Upgrade(u, 2); }
+/* ============ T72 坦克三阶升级(T72 → T72B → T72BVM,价格按档) ============ */
+function startT72Upgrade(u){
+  if(!u || u.type!=='t72' || u.hp<=0 || u.upgrading || u.upgradeLvl>=2) return;
+  const cost = T72_UPGRADE_COST[u.upgradeLvl+1];
+  if(credits[u.team] < cost){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=cost;
+  u.upgrading=true; u.upgradeProg=0;
+  textPopup(u.x,u.y-20, T72_LEVELS[u.upgradeLvl+1].name+' 升级中','#ffe27a');
+  updatePanel();
+}
 /* ============ 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利):安装后解锁自动制导导弹 ============ */
 function startATGMAttach(u){
   if(!u || ATGM_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.atgmUpgrading || u.atgm) return;
@@ -449,9 +478,10 @@ function startATGMAttach(u){
   textPopup(u.x,u.y-20,atgmModuleName(u)+' 安装中','#ffe27a');
   updatePanel();
 }
-/* ============ 自主防御系统(艾布拉姆专属升级包):反 TOW 导弹,自动拦截 ============ */
+/* ============ 自主防御系统(艾布拉姆 / T72BVM 专属升级包):反 TOW 导弹,自动拦截 ============ */
 function startAPSUpgrade(u){
   if(!u || APS_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.apsUpgrading || u.aps) return;
+  if(u.type==='t72' && u.upgradeLvl<2) return;   // T72 仅 T72BVM 档可装自主防御
   if(credits[u.team] < APS_COST){
     textPopup(u.x,u.y-20,'资金不足','#ff8080');
     return;

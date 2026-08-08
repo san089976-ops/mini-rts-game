@@ -150,6 +150,9 @@ function setupInput(){
     else if(act==='cancelprod'){ if(selBuilding) cancelProduction(selBuilding); }
     else if(act==='deploy'){ const u=selected[0]; if(u){ if(u.type==='airfield_car') deployAirfieldCar(u); else deployMCV(u); } }
     else if(act==='challUpgrade'){ const u=selected[0]; if(u) startChallUpgrade(u); }
+    else if(act==='t72Upgrade'){ const u=selected[0]; if(u) startT72Upgrade(u); }
+    else if(act==='t54bUp'){ const u=selected[0]; if(u) startT54BUpgrade(u); }
+    else if(act==='t55amUp'){ const u=selected[0]; if(u) startT55AMUpgrade(u); }
     else if(act==='atgmUp'){ const u=selected[0]; if(u) startATGMAttach(u); }
     else if(act==='aaUp'){ const u=selected[0]; if(u) startAAUpgrade(u); }
     else if(act==='agUp'){ const u=selected[0]; if(u) startAGUpgrade(u); }
