@@ -10,12 +10,17 @@ function canTrain(team, type){
   const d = getUnitDefs(unitFactionOf(team))[type];
   if(!d || d.cost > credits[team]) return false;
   // 高级单位:必须由已升级的战车工厂生产
-  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma'){
+  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='factory' && b.upgraded && !b.upgrading);
   }
   // 机场建筑车:必须由已升级的建造厂生产
   if(type==='airfield_car'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='command' && b.upgraded && !b.upgrading);
+  }
+  // 战斗机:必须由对应阵营的机场生产,且停机位未满
+  if(type==='f16' || type==='su35'){
+    return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='airfield' &&
+      AIR_FACTION[type]===unitFactionOf(team) && airfieldUsedSlots(b) < AIRFIELD_CAPACITY);
   }
   // 高级步兵:必须由已升级的兵营训练
   if(type==='exo' || type==='magnet'){
@@ -267,6 +272,7 @@ function spawnUnitNear(type, team, b){
     const [tx,ty]=pick;
     const u=new Unit(type,team,tx*TILE+TILE/2,ty*TILE+TILE/2);
     u.order={kind:'none'};
+    if(isAircraft(u)) u.homeBase=b;   // 记录生产机场(统计停机位占用)
     units.push(u);
     effects.push(new Effect(u.x,u.y,'ring',20));
     return u;
@@ -320,9 +326,37 @@ function tryPlaceForPlayer(defName){
   textPopup(tx*TILE+d.w*TILE/2, ty*TILE-6, d.name+' 建造中','#ffe27a');
   updatePanel();
 }
+// 该机场当前"存活中的战斗机"数量(按生产它的机场归属统计)
+function aircraftCountOf(b){
+  if(!b) return 0;
+  let n=0;
+  for(const u of units){ if(u.hp>0 && u.fly && u.homeBase===b) n++; }
+  return n;
+}
+// 机场停机位占用 = 存活战斗机(停驻+出击)按格数 + 生产队列里的战斗机格数(下单时即占位,防止超额下单)
+function airfieldUsedSlots(b){
+  if(!b) return 0;
+  let n=aircraftCountOf(b);
+  for(const it of b.queue) if(isAircraftType(it.type)) n += planeSlotCost(it.type);
+  return n;
+}
 function tryTrain(defName){
   const d=getUnitDefs(playerFaction)[defName];
   if(!d) return;
+  // 战斗机:先检查停机位(所有机场都满则提示,不再进入生产建筑查找流程)
+  if(isAircraftType(defName)){
+    let anyAf=null, hasRoom=false;
+    for(const b of buildings){
+      if(b.team===TEAM_A && b.alive && !b.constructing && b.defName==='airfield'){
+        if(!anyAf) anyAf=b;
+        if(airfieldUsedSlots(b) < AIRFIELD_CAPACITY){ hasRoom=true; break; }
+      }
+    }
+    if(anyAf && !hasRoom){
+      textPopup(anyAf.x,anyAf.y-20,'机场停机位已满 ('+airfieldUsedSlots(anyAf)+'/'+AIRFIELD_CAPACITY+')','#ff8080');
+      return;
+    }
+  }
   let bld = null;
   // 在哪里下订单就在哪里生产:优先排入当前选中的生产建筑(多兵营/多工厂时各自独立)
   if(selBuilding && selBuilding.team===TEAM_A && selBuilding.alive && !selBuilding.constructing){
@@ -342,11 +376,14 @@ function tryTrain(defName){
 // 该建筑能否生产该单位
 function canProduceIn(b, defName){
   if(!b || !b.alive || b.constructing) return false;
-  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma'){
+  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm'){
     return b.defName==='factory' && b.upgraded && !b.upgrading;
   }
   if(defName==='airfield_car'){
     return b.defName==='command' && b.upgraded && !b.upgrading;
+  }
+  if(defName==='f16' || defName==='su35'){
+    return b.defName==='airfield' && AIR_FACTION[defName]===unitFactionOf(b.team) && airfieldUsedSlots(b) < AIRFIELD_CAPACITY;
   }
   if(defName==='exo' || defName==='magnet'){
     return b.defName==='barracks' && b.upgraded && !b.upgrading;
@@ -422,5 +459,62 @@ function startAPSUpgrade(u){
   credits[u.team]-=APS_COST;
   u.apsUpgrading=true; u.apsProg=0;
   textPopup(u.x,u.y-20,'自主防御系统 安装中','#ffe27a');
+  updatePanel();
+}
+/* ============ 空军武器/模块安装(F16/苏35):A-120c 空对空 / A-174b 空对地 / 雷达火控 / 涂层更新 ============ */
+function startAAUpgrade(u){
+  if(!u || !u.fly || u.hp<=0 || u.aaUpgrading || u.aa) return;
+  if(credits[u.team] < AA_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
+  credits[u.team]-=AA_COST;
+  u.aaUpgrading=true; u.aaProg=0;
+  textPopup(u.x,u.y-20,airAAName(u)+' 空对空导弹包 安装中','#ffe27a');
+  updatePanel();
+}
+function startAGUpgrade(u){
+  if(!u || !u.fly || u.hp<=0 || u.agUpgrading || u.ag) return;
+  if(credits[u.team] < AG_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
+  credits[u.team]-=AG_COST;
+  u.agUpgrading=true; u.agProg=0;
+  textPopup(u.x,u.y-20,airAGName(u)+' 空对地导弹包 安装中','#ffe27a');
+  updatePanel();
+}
+function startRadarUpgrade(u){
+  if(!u || !u.fly || u.hp<=0 || u.radarUpgrading || u.radar) return;
+  if(credits[u.team] < RADAR_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
+  credits[u.team]-=RADAR_COST;
+  u.radarUpgrading=true; u.radarProg=0;
+  textPopup(u.x,u.y-20,'雷达火控 安装中','#ffe27a');
+  updatePanel();
+}
+function startCoatUpgrade(u){
+  if(!u || !u.fly || u.hp<=0 || u.coatUpgrading || u.coat) return;
+  if(credits[u.team] < COAT_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
+  credits[u.team]-=COAT_COST;
+  u.coatUpgrading=true; u.coatProg=0;
+  textPopup(u.x,u.y-20,'涂层更新 安装中','#ffe27a');
+  updatePanel();
+}
+/* ============ T84BM 反应装甲模块:300 盾,每秒恢复 10 ============ */
+function startRarmUpgrade(u){
+  if(!u || RARM_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.rarmUpgrading || u.rarm) return;
+  if(credits[u.team] < RARM_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=RARM_COST;
+  u.rarmUpgrading=true; u.rarmProg=0;
+  textPopup(u.x,u.y-20,'反应装甲 安装中','#ffe27a');
+  updatePanel();
+}
+/* ============ T84BM 红外干扰装置:干扰前方120°扇形内的敌 TOW 导弹 ============ */
+function startIRUpgrade(u){
+  if(!u || IR_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.irUpgrading || u.ir) return;
+  if(credits[u.team] < IR_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=IR_COST;
+  u.irUpgrading=true; u.irProg=0;
+  textPopup(u.x,u.y-20,'红外干扰装置 安装中','#ffe27a');
   updatePanel();
 }

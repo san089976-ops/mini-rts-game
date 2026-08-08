@@ -27,6 +27,27 @@ function formationTargets(x, y, list){
   return pts;
 }
 function orderMove(list, x, y){
+  // 战斗机:右键移动 = 到目标点周围盘旋(不落地),同时取消正在执行的返场
+  const planes = list.filter(u=>u.fly);
+  const rest = list.filter(u=>!u.fly);
+  for(const u of planes){
+    u.target=null;
+    u._mission = null;                 // 玩家新指令打断规划任务
+    u.prevOrder=null;
+    u._returning=false;
+    u.order={kind:'none'};
+    u.path=null; u.pathIdx=0;
+    u.patrol={x:x, y:y};          // 盘旋中心 = 点击点
+    u._lastMoveCmd=time;
+    // 弹舱已空:先执行本次移动指令,到达新盘旋点盘旋片刻后自动返场补充弹药
+    if(u._needRefuel){
+      u._refuelAfterMove = true;
+      u._refuelArriveT = 0;
+    }
+  }
+  if(planes.length) textPopup(planes[0].x,planes[0].y-20, '战斗机 盘旋 ('+planes.length+' 架)','#8aff8a');
+  if(!rest.length) return;
+  list = rest;
   // 目标是一艘(友方/同盟)运兵车(运输艇/步兵战车):可装载的单位改为"登车"指令
   const tgt=entityAt(x,y);
   const isLoadTarget = tgt && tgt instanceof Unit && isCarrier(tgt) && !isEnemy((list[0]||{team:tgt.team}).team, tgt.team);
@@ -53,6 +74,25 @@ function orderMove(list, x, y){
 }
 function orderAttack(list, enemy, force){
   for(const u of list){
+    if(u.fly){
+      // 战斗机:目标为飞机→A-120c空对空;目标为地面/建筑→A-174b空对地。
+      // 要求对应导弹包已装且有弹;右键指令触发(雷达自动模式不依赖此函数)。
+      if(enemy && enemy.fly){
+        if(u.aa && u.aaAmmo>0 && (force || isEnemy(u.team, enemy.team))){
+          u.target = enemy;
+          u._lineT = RED_LINE_TIME;
+          u.order = {kind:'attack', target:enemy, force:!!force};
+        }
+      } else {
+        if(u.ag && u.agAmmo>0 && (force || isEnemy(u.team, enemy.team))){
+          u.target = enemy;
+          u._lineT = RED_LINE_TIME;
+          u.order = {kind:'attack', target:enemy, force:!!force};
+        }
+      }
+      continue;
+    }
+    if(enemy && enemy.fly) continue;   // 所有地面单位都打不到飞机
     if(u.def.range<=0) continue;
     u.target = enemy;                                // 关键:攻击目标必须写入 u.target(全局攻击判断都读它)
     u._lineT = RED_LINE_TIME;                        // 攻击指示红线:短暂显示后消失
@@ -62,6 +102,10 @@ function orderAttack(list, enemy, force){
 }
 // 攻击移动:朝目标点移动,途中攻击遇到的敌人(不打断移动)
 function orderAttackMove(list, x, y){
+  const planes = list.filter(u=>u.fly);
+  const rest = list.filter(u=>!u.fly);
+  if(planes.length) orderMove(planes, x, y);   // 飞机:攻击移动 = 到该点盘旋
+  list = rest;
   const targets = list.length>1 ? formationTargets(x,y,list) : null;
   for(let i=0;i<list.length;i++){
     const u=list[i];
@@ -96,7 +140,7 @@ function mouseWorld(){
   return { x: mouse.x + cam.x, y: mouse.y + cam.y };
 }
 function entityAt(wx,wy){
-  for(let i=units.length-1;i>=0;i--){ const u=units[i]; if(Math.hypot(u.x-wx,u.y-wy)<=Math.max(u.r+8, (u.hw||u.r)+4)) return u; }
+  for(let i=units.length-1;i>=0;i--){ const u=units[i]; if(u.hp>0 && !u.parked && Math.hypot(u.x-wx,u.y-wy)<=Math.max(u.r+8, (u.hw||u.r)+4)) return u; }
   for(let i=buildings.length-1;i>=0;i--){ const b=buildings[i]; if(b.alive&&wx>=b.tx*TILE&&wy>=b.ty*TILE&&wx<(b.tx+b.w)*TILE&&wy<(b.ty+b.h)*TILE) return b; }
   return null;
 }
@@ -124,12 +168,40 @@ function centerOn(x,y){
 function giveOrder(ctrl){
   if(placing) return;
   const mw=mouseWorld();
+  // 出击规划激活时:右键不再是普通指令——精确打击=指定唯一目标;分布式=给目标分配 1 发导弹
+  if(planeMission && planeMission.mode){
+    const tgt = entityAt(mw.x, mw.y);
+    const validTgt = tgt && tgt.alive!==false && isEnemy(TEAM_A, tgt.team);
+    if(planeMission.mode==='precision'){
+      if(validTgt){
+        launchPrecisionStrike(planeMission.uids, tgt);
+        planeMission = null; airSortieSel.clear();
+      } else {
+        textPopup(mw.x, mw.y-12, '右键敌方目标发起精确打击 (Esc 取消)','#ffb0b0');
+      }
+      return;
+    }
+    if(validTgt){
+      const type = tgt.fly ? 'aa' : 'ag';
+      if(planeMission.remaining[type] > 0){
+        planeMission.remaining[type]--;
+        planeMission.assignments.push({target:tgt, type:type});
+        textPopup(tgt.x, tgt.y-20, '分配 '+(type==='aa'?'空对空':'空对地')+' 1 发 → 剩余 对空 '+planeMission.remaining.aa+' / 对地 '+planeMission.remaining.ag, '#ffe27a');
+      } else {
+        textPopup(tgt.x, tgt.y-20, (type==='aa'?'空对空':'空对地')+'导弹已全部分配完','#ff8080');
+      }
+    } else {
+      textPopup(mw.x, mw.y-12, '右键敌方目标以分配导弹','#ffb0b0');
+    }
+    updatePanel();
+    return;
+  }
   const list = selected.length? selected : [];
-  // 强制攻击(Ctrl+右键):对任意目标强制攻击;点空地=攻击移动
+  // 强制攻击(Ctrl+右键):对任意目标强制开火;点空地=攻击移动。飞机不可被攻击,落到攻击移动
   if(ctrl){
     if(!list.length) return;
     const forceTarget = entityAt(mw.x, mw.y);
-    if(forceTarget){
+    if(forceTarget && !forceTarget.fly){
       orderAttack(list, forceTarget, true);
       if(list.length) textPopup(list[0].x,list[0].y-20,'强制攻击 '+(forceTarget.defName||forceTarget.def.name||forceTarget.type),'#ffb0b0');
     } else {
@@ -149,6 +221,25 @@ function giveOrder(ctrl){
   }
   if(!list.length && !selBuilding) return;
   const enemy = entityAt(mw.x, mw.y);
+  // 战斗机:右键己方机场 -> 返回入住(回到生产它的机场占停机位)
+  const planeList = list.filter(u=>u.fly);
+  if(planeList.length && enemy && enemy instanceof Building && enemy.alive && enemy.defName==='airfield' && enemy.team===TEAM_A){
+    let returned=0;
+    for(const u of planeList){
+      if(u.homeBase && u.homeBase.alive){
+        u._returning = true;
+        u._mission = null;             // 打断进行中的规划任务
+        u.target = null; u.order = {kind:'none'}; u.path = null;
+        returned++;
+      }
+    }
+    if(returned){
+      const rest = list.filter(u=>!u.fly);
+      if(rest.length) orderMove(rest, mw.x, mw.y);
+      textPopup(enemy.x, enemy.y-20, '战斗机 返场 '+returned+' 架','#8aff8a');
+      return;
+    }
+  }
   // 进驻:右键中立/己方的可进驻建筑 -> 步兵/坦克进入;无可进驻单位则交给下方攻击/移动
   if(enemy && enemy instanceof Building && enemy.alive && enemy.def.garrisonCap){
     const boarders = list.filter(u=>canGarrisonBuild(enemy,u.team,u.type));
@@ -210,12 +301,15 @@ function giveOrder(ctrl){
   }
   // 攻击判定:右键点中敌人 -> 攻击并显示红线;若点击没精确命中敌人,
   // 则在点击处附近(约1.5格)找最近敌人判定为攻击,让右键攻击更可靠
+  // 飞机可被战斗机(空对空)指定攻击;地面部队仍打不到飞机,故排除 fly 需按选择区分
   const selTeam = (remaining[0]||selBuilding||{team:0}).team;
+  const selHasFly = remaining.some(u=>u.fly);
   let atkTarget = enemy;
+  if(atkTarget && atkTarget.fly && !selHasFly) atkTarget = null;   // 纯地面部队不可指定飞机
   if(!(atkTarget && atkTarget.alive!==false && isEnemy(selTeam, atkTarget.team))){
     let best=null, bd=48;
     for(const u of units){
-      if(u.hp<=0) continue;
+      if(u.hp<=0 || (u.fly && !selHasFly)) continue;
       const d=Math.hypot(u.x-mw.x, u.y-mw.y);
       if(d<bd && isEnemy(selTeam, u.team)){ bd=d; best=u; }
     }
@@ -285,7 +379,7 @@ function boxSelect(x0,y0,x1,y1){
   const add=keys['ShiftLeft']||keys['ShiftRight'];
   if(!add){ selected=[]; selBuilding=null; }
   for(const u of units){
-    if(u.team!==TEAM_A) continue;
+    if(u.team!==TEAM_A || u.parked) continue;   // 停驻在机场内的飞机不参与框选
     if(u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY && !selected.includes(u)) selected.push(u);
   }
   updatePanel();

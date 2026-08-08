@@ -94,7 +94,7 @@ function placeMapEntities(m){
   }
   for(const uu of (m.units||[])){
     if(!uu) continue;
-    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1};
+    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1,f16:1,su35:1,t84bm:1};
     if(!KNOWN[uu.type]) continue;
     const team = (uu.team===undefined || uu.team===null) ? -1 : uu.team;
     if(team>=0 && team>=gameTeams.length) continue;
@@ -207,6 +207,7 @@ function cellIsWater(cx,cy){ return cx>=0&&cy>=0&&cx<MAP_W&&cy<MAP_H && terrain[
 // 树林对重型单位(坦克/两栖登陆艇等)可通行(会被碾倒),其余单位仍被树挡住。
 function unitPassable(u, cx, cy){
   if(cx<0||cy<0||cx>=MAP_W||cy>=MAP_H) return false;
+  if(u && u.fly) return true;   // 空军:飞越水面/树林/建筑(不碾树、不受阻挡)
   if(structBlocked[cx][cy]) return false;
   const t=terrain[cx][cy];
   if(t==='tree') return !!(u && u.crushTrees);

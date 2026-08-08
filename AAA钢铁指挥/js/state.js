@@ -25,6 +25,8 @@ let time = 0;
 let aiState = {};
 let researches = {};          // 每队已研发科技: team -> {techId:true}
 let controlGroups = {};       // 数字编队: digit(1-9) -> [units]
+let airSortieSel = new Set(); // 机场出击规划:已勾选的号位飞机 uid 集合(选中机场面板操作)
+let planeMission = null;      // 进行中的出击规划: {mode:'precision'|'distributed', uids:[...], remaining:{aa,ag}, assignments:[{target,type}]}
 // 队伍配置(游戏开始前由主菜单生成)
 let teamFactions = ['allies','soviet'];   // team -> 'allies'|'soviet'
 let teamGroups = [0,1];                   // team -> 组号 0(A)/1(B)/2(C)/3(D)

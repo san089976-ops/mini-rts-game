@@ -84,6 +84,8 @@ const UNIT_BOX = {
   bradley:{hw:30, hh:12}, b11:{hw:28, hh:12}, marder:{hw:30, hh:12},
   leclerc:{hw:36, hh:14}, leopard:{hw:36, hh:14}, challenger:{hw:37, hh:15},
   puma:{hw:33, hh:13},
+  f16:{hw:26, hh:15}, su35:{hw:28, hh:16},   // 战斗机(机场生产,机身长条形胶囊)
+  t84bm:{hw:36, hh:15},                      // T84BM(苏军重坦,车身+炮塔照片)
 };
 // 战车转向角速度(弧度/秒):朝向用 lerpAngle 平滑插值,产生履带战车转向效果,而非瞬间硬转
 const TURN_RATE = 6;
@@ -99,7 +101,7 @@ const VEHICLE_ALIGN_GATE = 0.35;
 const FIRE_RECOIL = 8;        // 开火后坐力初始偏移(px)
 const RECOIL_DECAY = 14;      // 后坐力恢复速率(1/s,越大回弹越快,约0.1~0.2s恢复)
 // 有履带压痕的载具(除海军驱逐舰/登陆艇外的所有车辆)
-const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1, puma:1 };
+const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1, puma:1, t84bm:1 };
 const BASE_UNITS = {
   infantry: { name:'动员兵', hp:90, speed:74, range:72, damage:9, rof:0.9, cost:100, r:9,  build:4, armor:'cloth', proj:'bullet', desc:'低造价轻步兵,前期侦察与骚扰的主力' },
   tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:1.0, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
@@ -116,13 +118,13 @@ const NAVAL_UNITS = {
 };
 // 运输艇装载占点数: 步兵1 / 高级步兵2 / 矿车·灰熊3 / 犀牛4 / 基地车·艾布拉姆·T90 6;海军不上船
 function transportCost(u){  if(!u) return 0;
-  if(u.naval || u.type==='transport') return 0;
+  if(u.naval || u.type==='transport' || u.fly) return 0;   // 海军/运输艇/飞机不上船
   if(u.type==='infantry') return 1;
   if(u.type==='exo' || u.type==='magnet') return 2;
   if(u.type==='harvester') return 3;
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? 4 : 3;
   if(u.type==='airfield_car') return 4;
-  if(u.type==='mcv' || u.type==='abrams' || u.type==='t90') return 6;
+  if(u.type==='mcv' || u.type==='abrams' || u.type==='t90' || u.type==='t84bm') return 6;
   if(u.type==='bradley' || u.type==='b11' || u.type==='marder' || u.type==='leclerc' || u.type==='leopard' || u.type==='challenger' || u.type==='puma') return 6;
   return 1;
 }
@@ -140,7 +142,7 @@ const IFV_TYPES = ['puma','bradley','marder','b11'];
 function isIFV25(u){ return !!u && IFV_TYPES.indexOf(u.type)!==-1; }
 // 独立旋转炮塔的载具(车身+炮塔结构,仿美洲狮):
 // 美洲狮/艾布拉姆/T90 + 豹2A4/布拉德利/勒克莱尔/挑战者/M60/T54/B11(全部照片车身+炮塔)
-function isTurretUnit(u){ return !!u && (u.type==='puma'||u.type==='abrams'||u.type==='t90'||u.type==='tank'||u.type==='bradley'||u.type==='b11'||u.type==='marder'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'); }
+function isTurretUnit(u){ return !!u && (u.type==='puma'||u.type==='abrams'||u.type==='t90'||u.type==='tank'||u.type==='bradley'||u.type==='b11'||u.type==='marder'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'||u.type==='t84bm'); }
 // 车身/炮塔贴图键名:tank 阵营专属(M60盟军车头朝下 / T54苏军车头朝上),其余按 type
 function turretKeys(u){
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? ['t54_body','t54_turret'] : ['m60_body','m60_turret'];
@@ -151,7 +153,7 @@ function turretKeys(u){
 function unitRotOff(u){
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? Math.PI/2 : -Math.PI/2;   // T54 朝上 / M60 朝下
   switch(u.type){
-    case 'puma': case 'leclerc': return Math.PI/2;            // 车头朝上
+    case 'puma': case 'leclerc': case 't84bm': return Math.PI/2;   // 车头朝上
     case 'b11': return -Math.PI/2;                            // 车头朝下
     case 'abrams': case 't90': case 'bradley': case 'marder': case 'leopard': case 'challenger': return Math.PI;  // 水平向左
     default: return SPRITE_ROT[u.type] || 0;
@@ -235,9 +237,83 @@ const APS_COUNTER_SPEED = ATGM_SPEED*2;      // 反导弹速度 = 反坦克导�
 const APS_COUNTER_LEN = 10;                  // 反导弹渲染长度(px,贴图用 25mm 子弹)
 const APS_HIT_R = 14;                        // 反导弹命中来袭导弹的判定半径(px)
 function isAPSUnit(u){ return !!u && APS_TYPES.indexOf(u.type)!==-1; }
+/* ============ T84BM 专属升级模块(苏军重坦):反应装甲 + 红外干扰装置 ============ */
+// 反应装甲模块:300 盾,每秒恢复 10(类似 T90 科技的护盾,但为模块、恢复更慢、无免死)
+const T84BM_SHIELD = 300;
+const T84BM_SHIELD_REGEN = 10;
+const RARM_COST = 300;
+const RARM_UPGRADE_TIME = 15;
+const RARM_TYPES = ['t84bm'];
+function isRarmUnit(u){ return !!u && RARM_TYPES.indexOf(u.type)!==-1; }
+// 红外干扰装置:以自身为圆心、炮塔朝向为前方的 120° 扇形(半径 180),
+// 敌 TOW 导弹一进入即被干扰乱飞 3 步(每步约16px)后爆炸,爆炸不分敌我;对长钉无效,我方无效
+const IR_COST = 200;
+const IR_UPGRADE_TIME = 15;
+const IR_TYPES = ['t84bm'];
+const IR_RANGE = 180;            // 干扰扇形半径(px)
+const IR_ANGLE = Math.PI*2/3;    // 干扰扇形张角(120°)
+const IR_STEP = 16;              // 乱飞每步距离(px)
+const IR_STEPS = 3;              // 乱飞步数(满 3 步后爆炸)
+function isIRUnit(u){ return !!u && IR_TYPES.indexOf(u.type)!==-1; }
+/* ============ 空军单位(机场生产:战斗机) ============ */
+const AIR_TYPES = ['f16','su35'];                     // 战斗机类型
+const AIR_FACTION = { f16:'allies', su35:'soviet' };  // 阵营专属:F16=盟军 / 苏35=苏军
+const AIRFIELD_CAPACITY = 4;                          // 机场停机位(格,每架战斗机占1格)
+const AIR_ALTITUDE = 16;                              // 飞机悬停高度(渲染向上偏移 px,逻辑坐标不变)
+const AIR_SHADOW_ALPHA = 0.34;                        // 飞机地面投影不透明度(模糊椭圆)
+const PLANE_PATROL_R = 48;                            // 飞机盘旋半径(px):在机场/指定点上空盘旋
+/* ============ 空军武器包(替换原测试炸弹包;F16/苏35 通用) ============ */
+const AIR_WPN_TYPES = ['f16','su35'];                 // 可装这两种导弹包的飞机
+// A-120c 空对空导弹包:只能打飞机,不能被红外干扰/APS 反导/目标挡弹
+const AA_COST = 1000; const AA_UPGRADE_TIME = 15;
+const AA_AMMO = 2;                                    // 弹舱容量
+const AA_RANGE = 300;                                 // 空对空射程(雷达火控 +30)
+const AA_DAMAGE = 200;
+const AA_SPEED = 180;                                 // 飞行速度
+const AA_SPRITE = 'aim120c_field'; const AA_SPRITE_LEN = 24;   // 贴图(机头朝上,长24px)
+// A-174b 空对地导弹包:只能打地面/建筑
+const AG_COST = 1000; const AG_UPGRADE_TIME = 15;
+const AG_AMMO = 2;
+const AG_RANGE = 310;
+const AG_DAMAGE = 650;
+const AG_SPEED = 150;
+const AG_SPRITE = 'aim174b_field'; const AG_SPRITE_LEN = 28;
+// 苏-35 专属导弹(与 F-16 的 A-120c/A-174b 是"不同导弹",数值完全相同):R-37m 空对空 / Kh-29 空对地
+const R37M_SPRITE = 'r37m_field'; const R37M_SPRITE_LEN = 24;   // R-37m 空对空(苏35,机头朝上,长24px)
+const KH29_SPRITE = 'kh29_field'; const KH29_SPRITE_LEN = 30;   // Kh-29 空对地(苏35,机头朝上,长30px)
+const AIR_MISSILE_CD = 1.2;                           // 手动发射两发之间冷却(秒)
+const AIR_MODE_AUTO_COOLDOWN = 2.8;                   // 雷达"自动分配"对同一单位再次发射的冷却(秒)
+// 雷达火控:射程 +30;获得 1号(A-120c)/2号(A-174b) 攻击模式按键
+const RADAR_COST = 2500; const RADAR_UPGRADE_TIME = 15;
+const RADAR_RANGE_BONUS = 30;
+const AIR_MODE_MANUAL = 0, AIR_MODE_AUTO = 1, AIR_MODE_DUMP = 2;
+const AIR_MODE_NAME = ['手动','自动分配','倾泻'];
+// 涂层更新:敌方对本机任何雷达式探测范围 -50(尤其空对空导弹;后续对地/对空系统也适用)
+const COAT_COST = 1200; const COAT_UPGRADE_TIME = 15;
+const COAT_RANGE_PENALTY = 50;
+// 某武器对某目标的有效射程 = 基础射程 + 己方雷达 +30 - 目标涂层 -50(涂层只作用于飞机目标)
+function airMissileEffRange(u, base, target){
+  let r = base + (u.radar ? RADAR_RANGE_BONUS : 0);
+  if(target && target.coat) r -= COAT_RANGE_PENALTY;
+  return Math.max(40, r);
+}
+function isAirWpnUnit(u){ return !!u && AIR_WPN_TYPES.indexOf(u.type)!==-1; }
+// 出击规划: F-16 / 苏-35 均已开放(新机型如需开放,在此加 type 或改为按 AIR_WPN_TYPES)
+function isPlannablePlane(u){ return !!u && u.fly && (u.type==='f16' || u.type==='su35'); }
+// 号位短名(F22 等未来机型直接显示类型名)
+function airTypeShort(u){ return u.type==='f16' ? 'F16' : u.type==='su35' ? '苏35' : (u.def && u.def.name || u.type); }
+// 苏35 与 F16 的导弹是"不同导弹"(贴图/名字不同,数值相同):按机种选 spriteType 与显示名
+function airAASpriteType(u){ return u.type==='su35' ? 'r37m' : 'a120c'; }
+function airAGSpriteType(u){ return u.type==='su35' ? 'kh29' : 'a174b'; }
+function airAAName(u){ return u.type==='su35' ? 'R37m' : 'A-120c'; }
+function airAGName(u){ return u.type==='su35' ? 'Kh29' : 'A-174b'; }
+// 每架飞机占用的停机位格数(目前 F16/苏35 各占 1 格;未来占多格的飞机在 def.slotCost 里写)
+function planeSlotCost(type){ const d=getUnitDefs('allies')[type] || getUnitDefs('soviet')[type]; return (d && d.slotCost) || 1; }
+function isAircraft(u){ return !!u && AIR_TYPES.indexOf(u.type)!==-1; }
+function isAircraftType(type){ return AIR_TYPES.indexOf(type)!==-1; }
 /* ============ 坦克炮弹(125mm 贴图,车头朝左,长18px,匀速) ============ */
 const TANK_SHELL_LEN = 18;                               // 坦克炮弹渲染长度(px)
-function isTankShellUnit(u){ return !!u && (u.type==='tank'||u.type==='abrams'||u.type==='t90'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'); }
+function isTankShellUnit(u){ return !!u && (u.type==='tank'||u.type==='abrams'||u.type==='t90'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'||u.type==='t84bm'); }
 function getUnitDefs(faction){
   if(UNIT_DEF_CACHE[faction]) return UNIT_DEF_CACHE[faction];
   let defs;
@@ -258,6 +334,7 @@ function getUnitDefs(faction){
       leopard: { name:'豹2A4', hp:950, speed:66, range:140, damage:110, rof:0.95, cost:1200, r:14, build:14, armor:'titanium', proj:'cannon', desc:'盟军主战坦克:火力凶猛的德系战车,机动良好,需升级战车工厂' },
       challenger:{ name:'挑战者号', hp:1050, speed:56, range:140, damage:110, rof:0.95, cost:1500, r:14, build:14, armor:'titanium', proj:'cannon', upgradeable:true, desc:'盟军重型主战坦克:装甲厚重,可两次升级为挑战者2号/3号(每次+15伤害+120血),需升级战车工厂' },
       puma:     { name:'美洲狮步战车', hp:450, speed:70, range:135, damage:25, rof:0.35, cost:750, r:12, build:10, armor:'titanium', proj:'machinegun', desc:'高速轮式步战车:炮塔独立360°旋转,炮口对准射程内目标才开火,需升级战车工厂' },
+      f16:      { name:'F-16战斗机', hp:150, speed:150, range:0, damage:0, rof:0, cost:12000, r:20, build:20, armor:'castiron', proj:null, fly:true, slotCost:1, desc:'盟军空军单位:高速喷气式战斗机,悬停飞行可飞越一切地形;生产后停驻在机场,右键机场释放/返场,可安装测试炸弹包(100金,2发TOW导弹,打空自动返场)' },
     };
   } else {
     defs = {
@@ -271,6 +348,8 @@ function getUnitDefs(faction){
       destroyer:{ ...NAVAL_UNITS.destroyer },
       transport:{ ...NAVAL_UNITS.transport },
       b11:     { name:'俄制B11', hp:370, speed:66, range:135, damage:25, rof:0.4, cost:580, r:12, build:10, armor:'castiron', proj:'machinegun', amphib:true, carrier:true, capacity:7, desc:'苏军两栖步兵战车:机炮压制,水陆两栖,可装载7名步兵,需升级战车工厂' },
+      t84bm:   { name:'T84BM', hp:1100, speed:65, range:140, damage:120, rof:1.1, cost:1500, r:14, build:12, armor:'titanium', proj:'cannon', upgradeable:true, desc:'苏军新一代主战坦克:装甲厚重火力凶猛,炮塔可独立旋转(2/3法则,座圈居中);可安装反应装甲(300盾,回10/秒)与红外干扰装置(干扰前方120°扇形内的敌TOW),需升级战车工厂' },
+      su35:    { name:'苏-35战斗机', hp:150, speed:150, range:0, damage:0, rof:0, cost:12000, r:20, build:20, armor:'castiron', proj:null, fly:true, slotCost:1, desc:'苏军空军单位:高速喷气式战斗机,悬停飞行可飞越一切地形;生产后停驻在机场,右键机场释放/返场,可安装测试炸弹包(100金,2发TOW导弹,打空自动返场)' },
     };
   }
   UNIT_DEF_CACHE[faction] = defs;
@@ -288,7 +367,7 @@ const UNIT_DESC = {
   b_turret:'固定防御碉堡,自动攻击射程内敌人',
   b_repair:'维修厂:周围两格内的己方单位每秒恢复 10 点生命(治疗光环)',
   b_dock:'水上船坞:只能建在水上,生产驱逐舰与运输艇',
-  b_airfield:'展开后形成的机场建筑,占地2x3,木制护甲,可被摧毁并影响胜负',
+  b_airfield:'展开后形成的机场建筑,占地2x3,木制护甲,可被摧毁并影响胜负;生产战斗机(盟军F-16/苏军苏-35,共4个停机位)',
 };
 const BLD_DEFS = {
   command:  { name:'建造厂',  w:3,h:3, hp:1800, cost:0, power:50, buildTime:1,  build:['power','barracks','factory','refinery','turret','repair','lab','dock'], train:['airfield_car'], color:'#5b6b7a', armor:'wood', weapon:null },
@@ -300,7 +379,7 @@ const BLD_DEFS = {
   repair:   { name:'维修厂',  w:2,h:2, hp:560,  cost:500, power:0, buildTime:8,  train:[],  color:'#7a6a4a', armor:'wood', weapon:null },
   lab:      { name:'实验室',  w:2,h:2, hp:600,  cost:1000, power:0, buildTime:20, build:[],  color:'#5a5a8a', armor:'wood', weapon:null },
   dock:     { name:'船坞',    w:2,h:2, hp:720,  cost:600, power:0, buildTime:10, train:['destroyer','transport'], color:'#4a7a8a', armor:'wood', weapon:null, water:true },
-  airfield: { name:'机场',    w:2,h:3, hp:750,  cost:1200, power:0, buildTime:14, build:[],  color:'#6a7a8a', armor:'wood', weapon:null },
+  airfield: { name:'机场',    w:2,h:3, hp:750,  cost:1200, power:0, buildTime:14, build:[], train:['f16','su35'], color:'#6a7a8a', armor:'wood', weapon:null },
   /* ============ 中立建筑(不可建造:不出现在任何可建列表,仅地图装饰) ============ */
   school:   { name:'学校',     w:2,h:2, hp:1000, cost:0, power:0, buildTime:0, build:[], color:'#c9b58a', armor:'concrete', weapon:null, neutral:true, garrisonCap:5, garrisonTypes:['infantry','exo','magnet'], desc:'中立建筑:城市学校,占地2x2,混凝土护甲。可进驻5名步兵,进驻后归该方所有并向外射击(射程+20)' },
   hospital: { name:'医院',     w:2,h:2, hp:1200, cost:0, power:0, buildTime:0, build:[], color:'#d8a0a0', armor:'concrete', weapon:null, neutral:true, desc:'中立建筑:城市医院,占地2x2,混凝土护甲。可被摧毁,但不影响胜负' },
@@ -413,12 +492,22 @@ const IMAGES = {
   tow_missile:'img/units/tow_missile.png',   // TOW 反坦克导弹(黄鼠狼/布拉德利,横向车头朝右)
   spike_missile:'img/units/spike_missile.png', // 长钉反坦克导弹(美洲狮,横向车头朝右)
   shell_125mm:'img/units/shell_125mm.png',   // 125mm 坦克炮弹(横向车头朝左)
+  aim120c_field:'img/units/aim120c_field.png', // A-120c 空对空导弹(F16,机头朝上,渲染长24px)
+  aim174b_field:'img/units/aim174b_field.png', // A-174b 空对地导弹(F16,机头朝上,渲染长28px)
+  r37m_field:'img/units/r37m_field.png',       // R-37m 空对空导弹(苏35,机头朝上,渲染长24px)
+  kh29_field:'img/units/kh29_field.png',       // Kh-29 空对地导弹(苏35,机头朝上,渲染长30px)
   // 基地车/机场建筑车战场贴图(照片白底已处理,基地车车头朝下/机场建筑车车头朝上,SPRITE_ROT 对齐)
   mcv:'img/units/mcv_field.png',                  // 基地车面板图标(战场用同一张)
   mcv_field:'img/units/mcv_field.png',            // 基地车战场本体贴图
   airfield_car:'img/units/airfield_car_field.png',// 机场建筑车面板图标(战场用同一张)
   airfield_car_field:'img/units/airfield_car_field.png',// 机场建筑车战场本体贴图
   airfield:'img/airfield.png',                    // 机场建筑战场贴图
+  // T84BM 车身+炮塔(照片挖白底,车头朝上,炮塔座圈居中 2/3 法则)
+  t84bm:'img/units/t84bm_body.png', t84bm_body:'img/units/t84bm_body.png',
+  t84bm_turret:'img/units/t84bm_turret.png',
+  // 战斗机(照片挖白底,机头朝上):面板图标与战场贴图共用同一张
+  f16:'img/units/f16_field.png', f16_field:'img/units/f16_field.png',      // F-16(盟军)
+  su35:'img/units/su35_field.png', su35_field:'img/units/su35_field.png',  // 苏-35(苏军)
   goldmine:'img/goldmine.png',
   tree:'img/tree.png',                          // 树林战场背景贴图(整张压缩,未切块)
   // 中立建筑战场贴图(仅战场贴图,不出现在介绍栏/建造栏)
@@ -468,21 +557,21 @@ let preloadTotal = 0, preloadDone = 0;
 // 坦克照片已用脚本预处理:背景(纯黑/纯白)透明化 + 内容居中
 // 各贴图"炮管/车头"自然朝向(图像坐标系,顺时针,+X=右),绘制时旋转对齐到单位朝向前方。
 // 艾布拉姆/ T90 的炮管都在贴图左侧(向左),因此转角均为 180°(π),开火闪光画在贴图左侧即炮口。
-const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2, puma: Math.PI/2 };
+const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2, puma: Math.PI/2, f16: Math.PI/2, su35: Math.PI/2, t84bm: Math.PI/2 };
 // 照片贴图额外缩放(步兵照片用 0.42,让小人贴合碰撞箱大小;步兵战车整体缩小到 0.7)
 // 注意:布拉德利/B11/勒克莱尔/豹2A4/挑战者/M60/T54 已改为"车身+独立炮塔"结构,
 // 此缩放作用于"车身+炮塔"整体;若只想缩车身不动炮塔,用下面的 SPRITE_BODY_SCALE。
 // 实际整体缩放请用 unitSpriteScale(u)(tank 按阵营区分:M60 0.85 / T54 0.765)。
-const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.68, marder: 0.72, b11: 0.648, puma: 0.6776, abrams: 0.8, t90: 0.8, tank: 0.85, leclerc: 0.765, leopard: 0.765, challenger: 0.765 };
-// 仅车身照片缩放(炮塔保持原大,二者相乘=实际车身大小):M60/T54 车身额外 0.85
-const SPRITE_BODY_SCALE = { tank: 0.85 };
+const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.68, marder: 0.72, b11: 0.648, puma: 0.6776, abrams: 0.8, t90: 0.8, tank: 0.85, leclerc: 0.765, leopard: 0.765, challenger: 0.765, f16: 0.5859375, su35: 0.5859375, t84bm: 0.8 };
+// 仅车身照片缩放(炮塔保持原大,二者相乘=实际车身大小):M60/T54 车身额外 0.85;T84BM 车身 0.9
+const SPRITE_BODY_SCALE = { tank: 0.85, t84bm: 0.9 };
 // 整体缩放(车身+炮塔):tank 按阵营区分,M60(盟军)=0.85,T54(苏军)=0.85×0.9=0.765;
 // 其余直接用 SPRITE_SCALE。
 function unitSpriteScale(u){
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? 0.765 : 0.85;
   return SPRITE_SCALE[u.type] || 1;
 }
-const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1], mcv:[0,1], airfield_car:[0,-1], bradley:[0,-1], marder:[0,-1], leclerc:[0,-1], leopard:[0,-1], challenger:[0,-1], b11:[0,1] };
+const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1], mcv:[0,1], airfield_car:[0,-1], bradley:[0,-1], marder:[0,-1], leclerc:[0,-1], leopard:[0,-1], challenger:[0,-1], b11:[0,1], f16:[0,-1], su35:[0,-1], t84bm:[0,-1] };
 // 草地贴图块:由 tools/split-terrain.js 从"草地.png"切成 4x4=16 块,
 // 每个草地格随机取一块平铺,提升陆地细致度
 const TERRAIN_TILE_COUNT = 16;
@@ -494,7 +583,7 @@ const waterTiles = [];
 // 可碾树的重型单位:坦克/艾布拉姆/T90/基地车/采矿车/两栖运输艇/机场建筑车/新步兵战车主战坦克
 function crushesTrees(type){
   return type==='tank' || type==='abrams' || type==='t90' || type==='mcv' || type==='harvester' || type==='transport' || type==='airfield_car' ||
-         type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger';
+         type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='t84bm';
 }
 function preloadImages(onProgress){
   // 预缓存全部贴图:返回 Promise,全部加载完成(或失败容错)后 resolve。
@@ -517,7 +606,7 @@ function preloadImages(onProgress){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-const GAME_VERSION = 'v62';
+const GAME_VERSION = 'v78';
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');

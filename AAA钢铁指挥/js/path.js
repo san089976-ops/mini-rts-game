@@ -58,7 +58,7 @@ function processPathJobs(){
   const moveCount = new Map();
   for(const u of pathJobs){
     const req = u && u._pendingPath;
-    if(!u || u.hp<=0 || !req || u.order!==req.order || u.order.kind!=='move') continue;
+    if(!u || u.hp<=0 || !req || u.order!==req.order || u.order.kind!=='move' || u.fly) continue;
     const k = flowKey(u, req.tx, req.ty);
     const n = (moveCount.get(k)||0) + 1;
     moveCount.set(k, n);
@@ -86,6 +86,14 @@ function processPathJobs(){
       continue;
     }
     let tx = req.tx, ty = req.ty;
+    if(u.fly){
+      // 空军:不跑 A*,直接直线飞向目标
+      u._pendingPath = null;
+      u._inPathQueue = false;
+      u.path = [{x:tx, y:ty}]; u.pathIdx = 0; u.repathT = 0.7;
+      i++;
+      continue;
+    }
     if(u.order.kind==='attack'){
       if(!u.target || u.target.hp<=0){
         u._pendingPath = null;
@@ -137,6 +145,8 @@ function findPath(sx,sy,tx,ty){ return findPathAStar(sx,sy,tx,ty,null); }
 function findPathFor(u,sx,sy,tx,ty){ return findPathAStar(sx,sy,tx,ty,u); }
 
 function pathFor(u, sx, sy, tx, ty){
+  // 空军:飞越一切,无需寻路,直接指向目标点(直线飞行)
+  if(u && u.fly) return [{ x:tx, y:ty }];
   const k = pathKey(u, sx, sy, tx, ty);
   const hit = pathCache.get(k);
   if(hit){

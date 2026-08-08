@@ -71,7 +71,8 @@ function setupInput(){
   window.addEventListener('keydown', e=>{
   keys[e.code]=true;
   if(e.code==='Escape'){
-    if(paused){ resumeGame(); }
+    if(planeMission){ airCancelMission(); }          // 先取消进行中的出击规划
+    else if(paused){ resumeGame(); }
     else if(placing){ placing=null; updatePanel(); }
     else if(selling){ setSelling(false); }
     else { pauseGame(); }
@@ -150,9 +151,19 @@ function setupInput(){
     else if(act==='deploy'){ const u=selected[0]; if(u){ if(u.type==='airfield_car') deployAirfieldCar(u); else deployMCV(u); } }
     else if(act==='challUpgrade'){ const u=selected[0]; if(u) startChallUpgrade(u); }
     else if(act==='atgmUp'){ const u=selected[0]; if(u) startATGMAttach(u); }
+    else if(act==='aaUp'){ const u=selected[0]; if(u) startAAUpgrade(u); }
+    else if(act==='agUp'){ const u=selected[0]; if(u) startAGUpgrade(u); }
+    else if(act==='radarUp'){ const u=selected[0]; if(u) startRadarUpgrade(u); }
+    else if(act==='coatUp'){ const u=selected[0]; if(u) startCoatUpgrade(u); }
+    else if(act==='modeAA'){ const u=selected[0]; if(u && u.radar && u.aa){ u.modeAA=(u.modeAA+1)%3; textPopup(u.x,u.y-20,'1号位 '+airAAName(u)+': '+AIR_MODE_NAME[u.modeAA],'#8aff8a'); updatePanel(); } }
+    else if(act==='modeAG'){ const u=selected[0]; if(u && u.radar && u.ag){ u.modeAG=(u.modeAG+1)%3; textPopup(u.x,u.y-20,'2号位 '+airAGName(u)+': '+AIR_MODE_NAME[u.modeAG],'#8aff8a'); updatePanel(); } }
+    else if(act==='rarmUp'){ const u=selected[0]; if(u) startRarmUpgrade(u); }
+    else if(act==='irUp'){ const u=selected[0]; if(u) startIRUpgrade(u); }
+    else if(act==='irToggle'){ const u=selected[0]; if(u && u.ir){ u.irOn=!u.irOn; textPopup(u.x,u.y-20, u.irOn?'红外干扰 开启':'红外干扰 关闭', u.irOn?'#8aff8a':'#ffd0d0'); updatePanel(); } }
     else if(act==='apsUp'){ const u=selected[0]; if(u) startAPSUpgrade(u); }
     else if(act==='apsToggle'){ const u=selected[0]; if(u && u.aps){ u.apsOn=!u.apsOn; textPopup(u.x,u.y-20, u.apsOn?'自主防御 开启':'自主防御 关闭', u.apsOn?'#8aff8a':'#ffd0d0'); updatePanel(); } }
     else if(act==='release'){ if(selBuilding) releaseGarrison(selBuilding); }
+    else if(act==='releaseAir'){ if(selBuilding) releaseAircraft(selBuilding); }
     else if(act==='unload'){ const t=selected.find(u=>isCarrier(u)); if(t) manualUnload(t); }
     else if(act==='selectall') selectAllCombat();
   });

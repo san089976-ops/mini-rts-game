@@ -15,7 +15,10 @@
   tools/process-sprite.js  单位照片素材预处理脚本（去背景/裁切/居中）
   img/units/README.txt  素材替换说明
   坦克与步兵战车修改经验.txt  坦克/步战车贴图结构与缩放经验（方向约定、几分之几法则等）
-  装甲升级包具体事项.txt  升级包类功能的经验与逻辑（反坦克导弹 TOW/长钉、自主防御系统）
+  装甲升级包具体事项.txt  升级包类功能的经验与逻辑（反坦克导弹 TOW/长钉、自主防御系统、T84BM反应装甲/红外干扰）
+  飞机与机场修改经验.txt  飞机/机场/飞机升级模块的经验与踩坑（停驻/释放/盘旋/返场/测试炸弹包）
+  飞机升级模块.txt  飞机额外升级模块的经验与逻辑（A-120c空对空/A-174b空对地/雷达火控/涂层更新）
+  F16战斗机技术文档.txt  F-16 战斗机完整技术文档（属性/机场生产/盘旋/双导弹包/雷达火控/涂层/返场）
 
 【JS 加载顺序（勿乱，存在函数/变量依赖）】
   config.js   常量、护甲/弹丸克制、单位/建筑/科技定义、贴图映射、RENDER_SCALE、SPRITE_ROT、升级包常量(ATGM/APS)
@@ -292,6 +295,67 @@
      浅色描边)再 trimContent() 重新收紧——彻底清掉白底照片的渐变白边/抗锯齿光晕/下采样残边
      (车辆内部白色部件不受影响)。新素材按旧命令重跑即可。
 
+【空军系统：机场生产战斗机(停驻/释放/盘旋/武器模块,近期新增)】
+  机场 airfield(2x3,由机场建筑车展开)生产战斗机:
+   - F-16 盟军专属 / 苏-35 苏军专属(照片挖白底,机头朝上,img/units/f16_field.png 等,
+     SPRITE_ROT=π/2,SPRITE_FRONT=[0,-1],SPRITE_SCALE=0.5859375)。价格各 12000、生产 20 秒。
+   - 属性:血 150 / 铸铁甲 / 移速 150 / 无武器(range=0)。def 里 fly:true、slotCost:1;
+     Unit 构造设 this.fly / homeBase / parked / patrol / _returning / _needRefuel /
+     _refuelAfterMove / _refuelArriveT / aa(+aaAmmo/aaCd/modeAA/aaScan/aaLastFire) /
+     ag(+agAmmo/agCd/modeAG/agScan/agLastFire) / radar(+radarUpgrading/radarProg) /
+     coat(+coatUpgrading/coatProg)。
+   - 停机位:每机场 AIRFIELD_CAPACITY=4 格,每架占 planeSlotCost 格(目前1)。
+     airfieldUsedSlots = 存活飞机(homeBase 归属,停驻+出击都算)+ 队列格数,下单即占位。
+   - 生产即停驻:updateBuilding 产出飞机后直接 parkAircraft(进机场占停机位,不设集结点)。
+   - 释放/返场:
+     · 选中机场点「释放战斗机」→ releaseAircraft:全部停驻飞机在机场周围散开,
+       围绕机场上空盘旋(patrol=机场中心)。
+      · 右键己方机场(选中飞机)→ 返场:飞回 homeBase,距离≤60px 即 parkAircraft 入住,
+        入住重新装弹(aaAmmo=AA_AMMO / agAmmo=AG_AMMO)。
+     · 停驻飞机:不渲染/不上小地图/不可点选(entityAt/boxSelect 跳过)/不参与任何战斗逻辑。
+   - 盘旋(基础设定):orbitAround 绕 patrol 中心半径 PLANE_PATROL_R=48 绕圈(切向+半径修正;
+     太近/太远直接径向飞向轨道,圆心处先沿 facing 挪出 4px 防径向方向抖动)。
+     右键移动 = 改 patrol 为点击点(不是落地)。
+   - 武器模块(替换原"测试炸弹包",F16/苏35,详见《装甲升级包具体事项.txt》六~八节):
+      · A-120c 空对空(1000/15秒):2发/伤200/速180/射程300,只打飞机。
+      · A-174b 空对地(1000/15秒):2发/伤650/速150/射程310,只打地面/建筑。
+      · 两者都:不可被红外干扰/APS反导、不被目标挡弹、爆炸AOE(范围伤只打敌方地面)。
+      · 雷达火控(2500/15秒):射程+30;解锁 1号(A-120c)/2号(A-174b) 模式键
+        (手动→自动分配[进圈打1发,单目标冷却1.2s补刀]→倾泻[进圈打光]→手动),
+        探测圈半径=武器有效射程。
+      · 涂层更新(1200/15秒):本机进入敌方任何雷达式探测等效对方范围-50。
+      · 手动攻击:右键敌机→A-120c;右键地面/建筑→A-174b(giveOrder 允许飞机
+        指定敌机,地面部队仍不能点飞机)。
+   - 关键修坑:
+     · 导弹 AOE 只打敌方(!isEnemy 跳过),发射者也免伤——否则飞机贴脸命中时
+       自己/友机被 300×0.5×1.2=180 的范围伤秒杀(150 血)。
+     · 飞机不参与 stuck 脱困(stuckT 判定加 !u.fly)——圆心处径向方向抖动会导致
+       误判卡住,循环"脱困+让行"把飞机钉在圆心。
+    - 防空(地面打不到飞机):findEnemyNear/碉堡炮台/进驻建筑索敌排除 fly;
+      giveOrder 地面部队右键/强制攻击目标排除 fly(点飞机退化为移动);
+      orderAttack 守卫(地面攻击者跳过 fly 目标);弹道不跟踪飞机;反坦克导弹 AOE
+      跳过 fly;atgmBlocker 不把飞机当挡弹体。只有战斗机装 A-120c 才能空对空。
+    - 攻击 vs 盘旋:攻击指令优先于盘旋——有目标时 updateAircraft 直接 seekVelocity
+      直线飞向目标接战,进入对应射程发射(A-120c/A-174b);任一弹舱打空
+      (planeNeedRefuel)自动返场;无目标/无弹才回到盘旋。
+   - 停机位显示:机场格子只显示"停驻中"的飞机占格(飞出去格子即消除),出击数量
+     在面板文字显示;生产占用(airfieldUsedSlots)仍按停驻+出击+队列计算。
+   - 返场补充弹药:_needRefuel 标记弹舱已空;默认立即 _returning 返场;若玩家在
+     返场途中/打空后下达移动指令(orderMove),先飞到新盘旋点(执行指令)盘旋约2秒
+     再自动返场(parkAircraft 清 _needRefuel 并重新装弹)。
+   - 机场修复:机场对停驻其中的战斗机每秒恢复 10 生命(维修厂修不了飞机)。
+    - 右侧机场飞机面板:#airPanel(右缘 top:225,仅选中己方机场显示)。列出该机场
+      绑定的每架飞机(名称/停驻或出击/血条/各弹舱弹药),每架 4 个小按钮可在
+      不释放的情况下远程安装模块(A-120c/A-174b/雷达/涂层,airPlaneUpgrade(uid,which))。
+      updatePanel 每 0.3s 重建面板,升级进度实时可见。
+   - UI 显示:飞机不显示伤害/射程/攻速三行(伤害靠武器包,另行显示弹舱);
+     不画盘旋半径圈(取消 drawSel 里的虚线圆)。模型缩放 SPRITE_SCALE=0.5859375
+     (0.46875 再放大 1.25 倍)。
+   - 渲染:飞机最后绘制(最高显示权,盖过所有单位/建筑);地面模糊椭圆投影
+     (drawAircraftShadow);本体抬高 AIR_ALTITUDE=16px;尾焰 drawAircraftFlame
+     画在机尾(本地 -x 方向,外焰橙黄/内焰亮白,按时间抖动);血条/角标跟随高度。
+   - 替换素材:node tools/process-sprite.js "新图.png" f16_field img/units 512
+
 【高分辨率渲染 RENDER_SCALE】  画布后备缓冲按 max(devicePixelRatio, RENDER_SCALE) 放大，再 CSS 缩回窗口，
   让画面（含照片贴图）更精细。当前 RENDER_SCALE=4；卡顿可调小。
   逻辑坐标仍按窗口 CSS 尺寸，鼠标取 getBoundingClientRect，勿与 backing store 混淆。
@@ -361,6 +425,23 @@
       dead=true(不再造成伤害)+爆炸特效,超射程自毁。渲染 drawInterceptors(绿色曳光)。
     - 循环顺序:updateMissiles 先动飞弹,updateInterceptors 再追(追最新位置)。
     - 选中开启 APS 的艾布拉姆画 220px 虚线反应圈(drawSel)。
+
+【T84BM 苏军专属重坦 + 双升级模块(近期新增)】
+  苏军升级战车工厂生产:价格1500/建造12秒/血1100/钛合金甲/火炮伤害120/射程140/
+  射速1.1秒/移速65。车身+炮塔照片(T84BM_body/turret,车头朝上,SPRITE_ROT=π/2),
+  独立旋转炮塔、座圈居中(默认 turretRotCenter=0)、2/3 法则(默认 turretPivotK)。
+  已接入:UNIT_BOX/TRACK_UNITS/isTurretUnit/unitRotOff(π/2)/isTankShellUnit/
+  transportCost(6点)/crushesTrees/IMAGES/SPRITE_SCALE(0.8)/SPRITE_FRONT/
+  SPRITE_BODY_SCALE(0.9,只缩车身不动炮塔)/canTrain+canProduceIn(升级工厂)/ui.js 苏军工厂列表/map KNOWN/map-editor。
+  两个升级模块(均 T84BM 专属、15秒):
+   - 反应装甲(300金):300 护盾、每秒回10。复用 u.shield(applyDamage 盾吸收已放宽
+     为任意 shield>0 单位);装好即满盾,盾破也能再生。UI 护盾行回血按单位动态取。
+   - 红外干扰装置(200金):炮塔朝向为前方 120° 扇形、半径180;敌 TOW 一进入即
+     m.jammed=true(长钉/同队无效),导弹随机乱飞每步16px、满3步 explodeIRJam
+     爆炸——AOE 不分敌我(友军/发射者都吃,飞机免疫),中途撞到任何目标也爆炸。
+     updateMissiles 顶部处理 jammed;irOn 可开关(选中按钮切换),drawSel 扇形在
+     开启时显示。
+  详细经验见《装甲升级包具体事项.txt》第四、五节。
 
 【已知注意事项 / 坑】
   1. 地图尺寸是动态的：改地图前先 setMapSize，别把 MAP_W/H 当常量硬编码。

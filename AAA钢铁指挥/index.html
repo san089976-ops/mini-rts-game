@@ -30,6 +30,10 @@
     <div class="sep"></div>
     <div id="panel"></div>
   </div>
+  <div id="airPanel" class="hidden">
+    <h3 id="airPanelTitle">机场部队</h3>
+    <div id="airPanelList"></div>
+  </div>
   <div id="landing">
     <div class="landBox">
       <h1>钢铁指挥</h1>
@@ -109,6 +113,15 @@
         <div class="hrow"><b>出售</b> 点右上角「出售」按钮后点击己方建筑(建造厂除外),Esc 取消</div>
         <div class="hrow"><b>基地车</b> 战车工厂升级后可生产;选中基地车按 <b>E</b> 展开成新的建造厂(需 3x3 空地);未选中基地车时 E=建造战车工厂</div>
         <div class="hrow"><b>建造厂升级</b> 选中建造厂点「升级建造厂」($1000/15秒)解锁<b>机场建筑车</b>;机场建筑车($1200,装自卫机枪)可在空地按 <b>E</b> 展开成机场(占地2x3,14秒完工)</div>
+        <div class="hrow"><b>机场</b> 机场可生产战斗机(盟军<b>F-16</b> / 苏军<b>苏-35</b>,$12000/架):共 4 个停机位,每架占 1 格,停机位满后无法继续生产。生产出的飞机<b>停驻在机场内</b>,选中机场点「释放战斗机」在机场上空盘旋;右键地面=到目标点上空盘旋;右键己方机场=返场入住(占回停机位,同时重新装弹)。<b>选中机场时屏幕右侧会显示该机场所有飞机的状态面板,可不释放直接安装武器/模块</b></div>
+        <div class="hrow"><b>空军武器/模块</b>(各 $1000/15秒,可同时装两套,返回机场自动补弹):
+        F-16:<b>A-120c 空对空导弹包</b>(2发/射程300/伤200/速180,只能右键攻击<b>敌机</b>)+ <b>A-174b 空对地导弹包</b>(2发/射程310/伤650/速150,只能右键攻击<b>地面/建筑</b>);
+        苏-35 用同数值的 <b>R-37m</b>(空对空)与 <b>Kh-29</b>(空对地,渲染长30px),与 F-16 是不同导弹。
+        所有空军导弹都不可被红外干扰/APS 反导、不会被目标挡弹,爆炸为范围伤害。任一弹舱打空即强制返场补充(玩家移动指令优先执行)</div>
+        <div class="hrow"><b>雷达火控</b>($2500/15秒):所有导弹射程+30;解锁 1号(A-120c)/2号(A-174b) 两个攻击模式按键,按一次循环:手动 → <b>自动分配</b>(以自身为中心、半径=武器射程的探测圈,敌人进入打1发,单目标冷却2.8秒未死补刀)→ <b>倾泻</b>(进入一个敌人就打光全部)→ 手动</div>
+        <div class="hrow"><b>涂层更新</b>($1200/15秒):使本机进入任何敌方雷达式探测(尤其空对空导弹)时,等效对方探测范围缩小50px</div>
+        <div class="hrow"><b>防空</b> 战斗机会飞越一切地形,<b>所有地面单位都打不到飞机</b>;只有战斗机装上 A-120c 后才能空对空拦截敌机</div>
+        <div class="hrow"><b>出击规划</b>(F-16/苏-35,需已装雷达火控):选中机场后右侧面板「出击规划」按建造顺序勾选号位(1~4 任意组合,阵亡自动重排)。<b>精确打击</b>:勾选飞机→点「精确打击」→右键一个敌方目标,全部飞机切倾泻集中轰炸该目标(苏-35 用 R-37m/Kh-29),目标死亡或弹舱打空即返场;<b>分布式攻击</b>:勾选→点「分布式攻击」→右键敌方目标分配导弹(每右键1发,敌机=空对空/地面建筑=空对地,自动扣除对应剩余)→点「确定」起飞,每架自动分配任务,各自打满返场,单架被击落不影响同伴</div>
         <div class="hrow"><b>胜负</b> 摧毁敌方<b>所有建筑</b>获胜;我方所有建筑被毁则失败</div>
         <hr>
         <div class="hrow"><b>提示</b> 电厂保证电力,电力不足时建造/生产减速;采矿车自动采金换钱;维修厂可治疗周围单位</div>
@@ -118,6 +131,7 @@
         <div class="hrow"><b>步兵战车</b> 升级战车工厂后可生产:布拉德利(盟)/黄鼠狼(盟)/俄制B11(苏,两栖)可装载步兵(布拉德利3人/黄鼠狼6人/B11 7人);勒克莱尔/豹2A4/挑战者(盟)为重型主战坦克,其中挑战者可升级两级:挑战者2号/挑战者3号,每次 $300 耗时8秒,各 +15 伤害 +120 血</div>
         <div class="hrow"><b>美洲狮步战车</b> 盟军升级战车工厂可生产:高速轮式步战车,炮塔独立360°旋转(炮口对准射程内目标才开火,车体不参与瞄准),占运输艇 6 点</div>
         <div class="hrow"><b>反坦克导弹模块</b> 美洲狮/黄鼠狼/布拉德利选中后可安装($150/6秒):解锁自动制导导弹(射程180·单发300·装填15秒)。导弹会轻微转弯追踪目标、会被路径上的敌方单位挡下爆炸、目标阵亡时自动自爆;直击目标为单体满伤,周围单位吃范围伤害</div>
+        <div class="hrow"><b>T84BM</b> 苏军升级战车工厂可生产($1500/12秒):重装甲主战坦克,炮塔独立旋转(2/3法则、座圈居中)。两个升级模块(各15秒):<b>反应装甲</b>($300)获得300点护盾并每秒恢复10;<b>红外干扰装置</b>($200)以炮塔朝向为前方张开120°扇形,敌方TOW导弹一进入即被打乱(随机乱飞3步约48px后爆炸,爆炸不分敌我,中途撞到目标也爆炸;对长钉无效)</div>
         <div class="hrow"><b>进驻</b> 中立别墅/商业体可进驻:选中步兵右键中立建筑即可进入;进驻后建筑归该方所有并自动向外射击(用进驻单位武器,射程+20);选中该建筑点「释放部队」放出部队后建筑变回中立。日式/美式别墅各3名步兵,综合商业体12名步兵+1个专属坦克位(选中坦克右键进入)</div>
       </div>
       <button id="helpBackBtn" onclick="closeHelp()">返 回</button>
@@ -160,23 +174,23 @@
     </div>
   </div>
 </div>
-<script src="map/index.js?v=62"></script>
-<script src="js/config.js?v=62"></script>
-<script src="js/state.js?v=62"></script>
-<script src="js/maps.js?v=62"></script>
-<script src="js/entities.js?v=62"></script>
-  <script src="js/map.js?v=62"></script>
-  <script src="js/astar.js?v=62"></script>
-  <script src="js/path.js?v=62"></script>
-  <script src="js/build.js?v=62"></script>
-  <script src="js/orders.js?v=62"></script>
-  <script src="js/ai.js?v=62"></script>
-  <script src="js/ui.js?v=62"></script>
-  <script src="js/input.js?v=62"></script>
-  <script src="js/update.js?v=62"></script>
-  <script src="js/render.js?v=62"></script>
-  <script src="js/menu.js?v=62"></script>
-  <script src="js/music.js?v=62"></script>
-  <script src="js/game.js?v=62"></script>
+<script src="map/index.js?v=78"></script>
+<script src="js/config.js?v=78"></script>
+<script src="js/state.js?v=78"></script>
+<script src="js/maps.js?v=78"></script>
+<script src="js/entities.js?v=78"></script>
+  <script src="js/map.js?v=78"></script>
+  <script src="js/astar.js?v=78"></script>
+  <script src="js/path.js?v=78"></script>
+  <script src="js/build.js?v=78"></script>
+  <script src="js/orders.js?v=78"></script>
+  <script src="js/ai.js?v=78"></script>
+  <script src="js/ui.js?v=78"></script>
+  <script src="js/input.js?v=78"></script>
+  <script src="js/update.js?v=78"></script>
+  <script src="js/render.js?v=78"></script>
+  <script src="js/menu.js?v=78"></script>
+  <script src="js/music.js?v=78"></script>
+  <script src="js/game.js?v=78"></script>
 </body>
 </html>

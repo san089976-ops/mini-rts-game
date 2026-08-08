@@ -2,6 +2,7 @@
 /* ============ entities.js: 实体类 ============ */
 class Unit {
   constructor(type, team, x, y){
+    this.uid = (Unit._seq = (Unit._seq||0) + 1);   // 稳定唯一ID(右侧机场飞机面板按钮定位用)
     const fac = unitFactionOf(team);
     const d = getUnitDefs(fac)[type];
     this._def = d;
@@ -19,6 +20,30 @@ class Unit {
     this.armor = d.armor;
     this.naval = !!d.naval;        // 只能在水中航行
     this.amphib = !!d.amphib;      // 陆海两栖
+    this.fly = !!d.fly;            // 空军单位:飞越一切地形,移动/碰撞/渲染按飞行处理
+    this.homeBase = null;          // 所属机场(生产它的建筑):用于统计停机位占用
+    this.parked = false;           // 停驻在机场内(占停机位,不渲染/不参战)
+    this.patrol = null;            // 盘旋中心 {x,y}(释放=机场点;右键移动=目标点)
+    this._returning = false;       // 正在返回机场入住
+    // 空军武器包(F16/苏35,替换原测试炸弹包):A-120c 空对空 / A-174b 空对地
+    this.aa = false; this.aaUpgrading = false; this.aaProg = 0;   // A-120c 已装/安装中/进度
+    this.aaAmmo = 0; this.aaCd = 0;                               // A-120c 弹舱/冷却
+    this.ag = false; this.agUpgrading = false; this.agProg = 0;   // A-174b 已装/安装中/进度
+    this.agAmmo = 0; this.agCd = 0;                               // A-174b 弹舱/冷却
+    this.modeAA = 0; this.modeAG = 0;                             // 攻击模式:0手动/1自动/2倾泻
+    this.aaScan = null; this.aaLastFire = null;                   // 雷达自动:圈内集合/单目标冷却
+    this.agScan = null; this.agLastFire = null;
+    this.radar = false; this.radarUpgrading = false; this.radarProg = 0;   // 雷达火控
+    this.coat = false; this.coatUpgrading = false; this.coatProg = 0;     // 涂层更新
+    this._mission = null;          // 出战任务: {kind:'precision', target} | {kind:'distributed', jobs:[{target,type,count,fired}]}(出击规划用)
+    this._needRefuel = false;      // 任一弹舱已空,需要返场补充弹药
+    this._refuelAfterMove = false; // 玩家下了移动指令:先执行指令,到位后再自动返场
+    this._refuelArriveT = 0;       // 已到达新盘旋点后的计时(执行完指令的判定)
+    // T84BM 专属升级模块:反应装甲(300盾/回10) + 红外干扰装置(前方120°扇形干扰敌TOW)
+    this.rarm = false; this.rarmUpgrading = false; this.rarmProg = 0;   // 反应装甲模块
+    this.ir = false;   this.irUpgrading  = false; this.irProg  = 0;     // 红外干扰装置
+    this.irOn = true;                                                    // 红外干扰 开启/关闭
+    this.irOn = true;   // 红外干扰 开启/关闭(装好后可切换)
     this.crushTrees = crushesTrees(type);   // 重型单位可碾倒树林(坦克/两栖登陆艇等)
     this.capacity = d.capacity || 0;
     this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
@@ -139,7 +164,8 @@ class Missile {
     this.x=x; this.y=y;
     this.target=target;      // 制导目标(单位/建筑)
     this.team=team; this.attacker=attacker;
-    this.spriteType=spriteType;        // 'tow' | 'spike'
+    this.spriteType=spriteType;        // 'tow' | 'spike' | 'a120c'(F16空对空) | 'a174b'(F16空对地) | 'r37m'(苏35空对空) | 'kh29'(苏35空对地)
+    this.air=false;                    // 空军导弹(A-120c/A-174b):不可被红外干扰/APS反导/目标挡弹
     this.speed=ATGM_SPEED*ATGM_START_FACTOR;   // 先加速
     this.maxSpeed=ATGM_SPEED;
     this.accel=ATGM_ACCEL;

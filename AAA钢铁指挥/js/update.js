@@ -122,9 +122,9 @@ function applyDamage(ent, dmg, attacker, proj){
   if(ent instanceof Unit && ent.type==='abrams' && hasResearch(ent.team,'depletedUranium')) final = Math.max(1, final-10);
 
   const hpBefore = ent.hp;
-  // 反应装甲护盾:先扣护盾,再扣血量
+  // 反应装甲护盾:先扣护盾,再扣血量(任意带盾单位:T90科技盾 / T84BM反应装甲模块盾)
   let hpDmg = final;
-  if(ent instanceof Unit && ent.type==='t90' && ent.shield>0){
+  if(ent instanceof Unit && ent.shield>0){
     const absorbed=Math.min(ent.shield, final);
     ent.shield-=absorbed;
     hpDmg = final-absorbed;
@@ -173,6 +173,16 @@ function destroyBuilding(ent){
   if(!ent.alive) return;
   ent.alive=false;
   markBlocked(ent,false);
+  // 机场被摧毁:停驻的战斗机自动释放(失去母港,在机场残骸上空盘旋;无法再返场)
+  if(ent.defName==='airfield'){
+    for(const u of units){
+      if(u.hp>0 && u.fly && u.homeBase===ent && u.parked){
+        u.parked=false;
+        u.patrol={x:ent.x, y:ent.y};
+        u.order={kind:'none'}; u.path=null; u._returning=false;
+      }
+    }
+  }
   shake=Math.max(shake, Math.min(7, ent.w*ent.h*0.7));
   effects.push(new Effect(ent.x,ent.y,'explode',Math.max(ent.w,ent.h)*TILE*0.55));
   for(let i=0;i<8;i++){ const sm=new Effect(ent.x+rnd(-ent.w*TILE/2,ent.w*TILE/2),ent.y+rnd(-ent.h*TILE/2,ent.h*TILE/2),'smoke',rnd(6,12)); sm.life=1.4; sm.maxLife=1.4; effects.push(sm); }
@@ -228,7 +238,11 @@ function updateBuilding(b, dt, teamPower){
     const t=getUnitDefs(unitFactionOf(b.team))[item.type].build;
     if(item.progress>=t){
       const u=spawnUnitNear(item.type,b.team,b);
-      if(u){ b.queue.shift(); textPopup(u.x,u.y-6,getUnitDefs(unitFactionOf(b.team))[item.type].name,'#8aff8a'); if(b.rally) moveToRally(u,b.rally); }
+      if(u){ 
+        b.queue.shift(); textPopup(u.x,u.y-6,getUnitDefs(unitFactionOf(b.team))[item.type].name,'#8aff8a');
+        if(isAircraft(u)) parkAircraft(u, b);          // 飞机:直接停驻进机场(不设集结点)
+        else if(b.rally) moveToRally(u,b.rally);
+      }
       else { b.spawnWait+=dt; }
     }
   }
@@ -277,7 +291,16 @@ function updateBuilding(b, dt, teamPower){
   if(b.defName==='repair' && !b.constructing){
     const rad = b.w*TILE/2 + TILE*2;
     for(const u of units){
-      if(u.team===b.team && u.hp>0 && u.hp<u.maxHp && dist(b,u)<=rad){
+      if(u.team===b.team && !u.fly && u.hp>0 && u.hp<u.maxHp && dist(b,u)<=rad){
+        u.hp = Math.min(u.maxHp, u.hp + 10*dt);
+        if(Math.random()<dt*1.5){ effects.push(new Effect(u.x+rnd(-3,3),u.y+rnd(-3,3),'ring',8)); }
+      }
+    }
+  }
+  // 机场:修复停驻在其中的战斗机(每秒恢复 10 生命,维修厂修不了飞机)
+  if(b.defName==='airfield' && !b.constructing){
+    for(const u of units){
+      if(u.hp>0 && u.fly && u.parked && u.homeBase===b && u.hp<u.maxHp){
         u.hp = Math.min(u.maxHp, u.hp + 10*dt);
         if(Math.random()<dt*1.5){ effects.push(new Effect(u.x+rnd(-3,3),u.y+rnd(-3,3),'ring',8)); }
       }
@@ -294,7 +317,7 @@ function updateBuilding(b, dt, teamPower){
         const cand=gridCollect(b.x, b.y, b.def.weapon.range);
         for(let c=0;c<cand.length;c++){
           const u=units[cand[c]];
-          if(u.hp<=0 || !isEnemy(b.team,u.team)) continue;
+          if(u.hp<=0 || u.fly || !isEnemy(b.team,u.team)) continue;   // 炮台打不到飞机(飞机飞越一切)
           const d=dist(b,u);
           if(d<=b.def.weapon.range && d<bd){ bd=d; best=u; }
         }
@@ -315,11 +338,35 @@ function updateUnit(u, dt){
   u.fireT-=dt;
   if(u._lineT>0) u._lineT-=dt;   // 攻击指示红线倒计时
   u.wantVx=0; u.wantVy=0;   // 每帧重置期望速度,由下方指令逻辑重新计算
+  if(u.fly){ updateAircraft(u, dt); return; }   // 空军单位走独立逻辑(停驻/盘旋/返场)
   if(isTurretUnit(u)) u._turretAiming = false;   // 独立炮塔载具每帧重置:本轮是否在索敌开火(独立转炮塔)
   u._standFire = false;                          // 每帧重置:是否"战斗中钉住不动"(射程内原地射击)
-  // 反应装甲:T90 护盾每秒恢复 15(被打破后也能从 0 重新生成)
+  // 反应装甲:T90 护盾每秒恢复 15(科技);T84BM 反应装甲模块每秒恢复 10
   if(u.type==='t90' && u.shield<REACTIVE_SHIELD && hasResearch(u.team,'reactiveArmor')){
     u.shield = Math.min(REACTIVE_SHIELD, u.shield + REACTIVE_REGEN*dt);
+  }
+  if(u.rarm && u.shield<T84BM_SHIELD){
+    u.shield = Math.min(T84BM_SHIELD, u.shield + T84BM_SHIELD_REGEN*dt);
+  }
+  // T84BM 反应装甲模块安装进度:装好后给满盾
+  if(u.rarmUpgrading){
+    u.rarmProg += dt;
+    if(u.rarmProg >= RARM_UPGRADE_TIME){
+      u.rarmUpgrading=false; u.rarmProg=0; u.rarm=true; u.shield=T84BM_SHIELD;
+      textPopup(u.x,u.y-20,'反应装甲 安装完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // T84BM 红外干扰装置安装进度
+  if(u.irUpgrading){
+    u.irProg += dt;
+    if(u.irProg >= IR_UPGRADE_TIME){
+      u.irUpgrading=false; u.irProg=0; u.ir=true; u.irOn=true;
+      textPopup(u.x,u.y-20,'红外干扰装置 安装完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
   }
   // 挑战者坦克升级进度(不占用移动/战斗)
   if(u.type==='challenger' && u.upgrading){
@@ -371,12 +418,33 @@ function updateUnit(u, dt){
     if(u.apsEngaged) u.apsEngaged = u.apsEngaged.filter(x=>x && !x.dead && missiles.includes(x));
     else u.apsEngaged = [];
     for(const m of missiles){
-      if(m.dead || m.spriteType==='spike' || !isEnemy(u.team, m.team)) continue;
+      // 只反 TOW:长钉、A-120c/A-174b(空军导弹)都不反
+      if(m.dead || m.spriteType!=='tow' || !isEnemy(u.team, m.team)) continue;
       if(u.apsEngaged.includes(m)) continue;
       if(dist(u, m) <= APS_RANGE){
         launchInterceptor(u, m);
         u.apsEngaged.push(m);
         u.apsAmmo--; u.apsReload = APS_RELOAD;
+        break;
+      }
+    }
+  }
+  // 红外干扰装置(T84BM,被动):以自身为原点、炮塔朝向为前方的 120° 扇形(半径 IR_RANGE)。
+  // 敌方 TOW 导弹一进入该扇形即被打上 jammed 标记(见 updateMissiles:乱飞3步后爆炸);
+  // 对长钉无效、对我方导弹无效。扇形方向用炮塔(独立旋转,代表坦克接战"前方")。
+  // irOn 可开关(选中后按钮切换),关闭时不做探测。
+  if(u.ir && u.irOn){
+    for(const m of missiles){
+      if(m.dead || m.jammed || m.spriteType!=='tow' || !isEnemy(u.team, m.team)) continue;
+      const dx=m.x-u.x, dy=m.y-u.y;
+      const d=Math.hypot(dx,dy);
+      if(d>IR_RANGE) continue;
+      const a=Math.atan2(dy,dx);
+      if(Math.abs(angDiff(a, u.turretAng)) <= IR_ANGLE/2){
+        m.jammed=true; m.jamSteps=0; m._jamStepD=0;
+        m.ang = a + rnd(-IR_ANGLE/2, IR_ANGLE/2);   // 乱飞起始方向(扇形内随机)
+        effects.push(new Effect(m.x,m.y,'ring',18));
+        textPopup(u.x,u.y-22,'红外干扰 启动','#ffb0b0');
         break;
       }
     }
@@ -501,6 +569,368 @@ function updateUnit(u, dt){
     }
   }
 }
+/* ============ 空军单位:停驻 / 盘旋 / 攻击 / 返场 ============ */
+// 在盘旋中心点周围按 PLANE_PATROL_R 半径绕圈(切向速度 + 半径修正)
+function orbitAround(u, c, dt){
+  const dx = u.x - c.x, dy = u.y - c.y;
+  const d = Math.hypot(dx,dy);
+  if(d < 2){
+    // 正好压在圆心(释放落点可能正好是中心):沿当前朝向挪到半径 4px 处,再正常绕圈,
+    // 避免径向方向在圆心处来回抖动导致速度起不来
+    u.x = c.x + Math.cos(u.facing)*4;
+    u.y = c.y + Math.sin(u.facing)*4;
+    return;
+  }
+  const R = PLANE_PATROL_R;
+  const rx = dx/d, ry = dy/d;                        // 径向
+  const tx = -ry, ty = rx;                           // 逆时针切向
+  const err = (R - d) / R;                           // >0 太近(向外修) / <0 太远(向内修)
+  if(err > 0.85 || err < -0.85){
+    // 离轨道较远:直接朝轨道上的最近点飞(径向:太近向外/太远向内),到位后自动转入绕圈
+    u.wantVx = rx*Math.sign(err)*u.speedEff;
+    u.wantVy = ry*Math.sign(err)*u.speedEff;
+    return;
+  }
+  let vx = tx + rx*err, vy = ty + ry*err;
+  const m = Math.hypot(vx,vy) || 1;
+  u.wantVx = vx/m*u.speedEff;
+  u.wantVy = vy/m*u.speedEff;
+}
+// 停驻进机场:占停机位,不渲染/不参战,入住即重新装弹(弹舱补满)
+function parkAircraft(u, b){
+  if(!u || !b) return;
+  u.parked = true;
+  u.order = {kind:'none'};
+  u.path = null; u.pathIdx = 0;
+  u.target = null;
+  u._returning = false;
+  if(u._mission){
+    // 任务完成返场:复位被任务切走的"倾泻"模式,清空任务
+    u.modeAA = AIR_MODE_MANUAL; u.modeAG = AIR_MODE_MANUAL;
+    u._mission = null;
+  }
+  u._needRefuel = false;         // 返场即补充弹药完成
+  u._refuelAfterMove = false;
+  u._refuelArriveT = 0;
+  u.patrol = null;
+  u.x = b.x; u.y = b.y;
+  u.vx = 0; u.vy = 0; u.wantVx = 0; u.wantVy = 0;
+  if(u.aa) u.aaAmmo = AA_AMMO;   // 入住重新装弹(A-120c)
+  if(u.ag) u.agAmmo = AG_AMMO;   // A-174b
+  effects.push(new Effect(b.x, b.y-10, 'ring', 16));
+}
+// 释放全部停驻的战斗机:在机场周围散开,围绕机场上空盘旋
+function releaseAircraft(b){
+  if(!b || !b.alive) return;
+  const parked = units.filter(u=>u.hp>0 && u.fly && u.parked && u.homeBase===b);
+  if(!parked.length) return;
+  const pts = parked.length>1 ? formationTargets(b.x, b.y, parked) : null;
+  parked.forEach((u,i)=>{
+    const pt = (pts && pts[i]) || {x:b.x, y:b.y};
+    u.parked = false;
+    u.x = pt.x; u.y = pt.y;
+    u.patrol = {x:b.x, y:b.y};     // 在机场上空盘旋
+    u.order = {kind:'none'};
+    u.path = null; u.pathIdx = 0;
+    u._returning = false;
+    if(u.aa) u.aaAmmo = AA_AMMO;   // 出击满弹(双保险,入住时已补)
+    if(u.ag) u.agAmmo = AG_AMMO;
+  });
+  textPopup(b.x, b.y-24, '释放战斗机 '+parked.length+' 架','#8aff8a');
+  updatePanel();
+}
+// 任一弹舱打空即标记需返场补充弹药;强制返航优先级低于玩家指令(玩家移动会先执行)
+function planeNeedRefuel(u){
+  if(!u || u._needRefuel) return;
+  u._needRefuel = true;
+  if(!u._refuelAfterMove){
+    u._returning = true;
+    u.order = {kind:'none'};
+    u.path = null;
+  }
+}
+// 雷达自动/倾泻模式:以自己为中心、半径为武器有效射程的探测圈,
+// 敌人一进入:自动模式打1发(每单位冷却1.2s,未死继续补刀);倾泻模式一次打光全部。
+function updatePlaneRadarWeapon(u, dt, kind){
+  const isAA = kind==='aa';
+  const mode = isAA ? u.modeAA : u.modeAG;
+  if(!u.radar || mode<=0) return;
+  if(isAA && !u.aa) return;
+  if(!isAA && !u.ag) return;
+  const base = isAA ? AA_RANGE : AG_RANGE;
+  if(!u.aaScan) u.aaScan = new Set();
+  if(!u.agScan) u.agScan = new Set();
+  if(!u.aaLastFire) u.aaLastFire = new Map();
+  if(!u.agLastFire) u.agLastFire = new Map();
+  const scan = isAA ? u.aaScan : u.agScan;
+  const lastFire = isAA ? u.aaLastFire : u.agLastFire;
+  const radius = airMissileEffRange(u, base, null);
+  const cur = new Set();
+  if(isAA){
+    // 空对空:探测圈内敌方飞机(涂层目标按减小50px的有效半径判定)
+    for(const v of units){
+      if(v.hp>0 && v.fly && isEnemy(u.team,v.team) && dist(u,v)<=airMissileEffRange(u,base,v)) cur.add(v);
+    }
+  } else {
+    // 空对地:探测圈内敌方地面单位/建筑
+    for(const v of units){ if(v.hp>0 && !v.fly && isEnemy(u.team,v.team) && dist(u,v)<=radius) cur.add(v); }
+    for(const b of buildings){ if(b.alive && b.team>=0 && isEnemy(u.team,b.team) && dist(u,b)<=radius) cur.add(b); }
+  }
+  const fireOne = (v)=>{
+    if(isAA){
+      if(u.aaAmmo<=0) return;
+      launchAirMissile(u, v, 'aa'); u.aaAmmo--;
+      if(u.aaAmmo<=0) planeNeedRefuel(u);
+    } else {
+      if(u.agAmmo<=0) return;
+      launchAirMissile(u, v, 'ag'); u.agAmmo--;
+      if(u.agAmmo<=0) planeNeedRefuel(u);
+    }
+  };
+  // 新进入圈内的敌人:自动打1发 / 倾泻一次打光全部
+  for(const v of cur){
+    if(scan.has(v)) continue;
+    if(mode===AIR_MODE_DUMP){
+      while((isAA?u.aaAmmo:u.agAmmo)>0) fireOne(v);   // 倾泻:全部打光
+    } else {
+      fireOne(v);
+      if(lastFire) lastFire.set(v, time);
+    }
+  }
+  // 自动模式:仍在圈内且存活、距上次发射≥AIR_MODE_AUTO_COOLDOWN → 补刀
+  if(mode===AIR_MODE_AUTO){
+    for(const [v,t] of Array.from(lastFire)){
+      if(!v || v.hp===undefined || v.hp<=0 || v.alive===false || !cur.has(v)){ lastFire.delete(v); continue; }
+      if(time - t >= AIR_MODE_AUTO_COOLDOWN){
+        fireOne(v);
+        lastFire.set(v, time);
+      }
+    }
+  }
+  if(isAA) u.aaScan = cur; else u.agScan = cur;
+}
+// 战斗机每帧逻辑:模块安装 → 停驻/返场/盘旋+手动攻击+雷达自动
+function updateAircraft(u, dt){
+  // 模块安装进度(A-120c / A-174b / 雷达火控 / 涂层更新)
+  if(u.aaUpgrading){
+    u.aaProg += dt;
+    if(u.aaProg >= AA_UPGRADE_TIME){
+      u.aaUpgrading = false; u.aaProg = 0; u.aa = true; u.aaAmmo = AA_AMMO;
+      textPopup(u.x, u.y-20, airAAName(u)+' 空对空导弹包 安装完成','#8aff8a');
+      effects.push(new Effect(u.x, u.y, 'ring', 20));
+      updatePanel();
+    }
+  }
+  if(u.agUpgrading){
+    u.agProg += dt;
+    if(u.agProg >= AG_UPGRADE_TIME){
+      u.agUpgrading = false; u.agProg = 0; u.ag = true; u.agAmmo = AG_AMMO;
+      textPopup(u.x, u.y-20, airAGName(u)+' 空对地导弹包 安装完成','#8aff8a');
+      effects.push(new Effect(u.x, u.y, 'ring', 20));
+      updatePanel();
+    }
+  }
+  if(u.radarUpgrading){
+    u.radarProg += dt;
+    if(u.radarProg >= RADAR_UPGRADE_TIME){
+      u.radarUpgrading = false; u.radarProg = 0; u.radar = true;
+      textPopup(u.x, u.y-20, '雷达火控 安装完成','#8aff8a');
+      effects.push(new Effect(u.x, u.y, 'ring', 22));
+      updatePanel();
+    }
+  }
+  if(u.coatUpgrading){
+    u.coatProg += dt;
+    if(u.coatProg >= COAT_UPGRADE_TIME){
+      u.coatUpgrading = false; u.coatProg = 0; u.coat = true;
+      textPopup(u.x, u.y-20, '涂层更新 安装完成','#8aff8a');
+      effects.push(new Effect(u.x, u.y, 'ring', 22));
+      updatePanel();
+    }
+  }
+  if(u.aa) u.aaCd = Math.max(0, u.aaCd - dt);
+  if(u.ag) u.agCd = Math.max(0, u.agCd - dt);
+  if(u.parked){ u.wantVx=0; u.wantVy=0; return; }   // 停驻:不动
+  // 返回机场入住(手动右键机场 / 任一弹舱打空自动返场)
+  if(u._returning){
+    const b = u.homeBase;
+    if(!b || !b.alive || !buildings.includes(b)){
+      u._returning = false;   // 机场没了:继续盘旋
+    } else {
+      const d = Math.hypot(b.x-u.x, b.y-u.y);
+      if(d <= 60){
+        parkAircraft(u, b);
+        updatePanel();
+      } else {
+        u.turnTarget = Math.atan2(b.y-u.y, b.x-u.x);
+        const w = seekVelocity(u, b.x, b.y);
+        u.wantVx = w.x; u.wantVy = w.y;
+      }
+      return;
+    }
+  }
+  // 出击规划任务:精确打击 / 分布式攻击(接管本机行动,完成后返场)
+  if(u._mission){ updatePlaneMission(u, dt); return; }
+  // 雷达火控的自动分配/倾泻模式(不依赖右键指令,独立探测)
+  if(u.radar){ updatePlaneRadarWeapon(u, dt, 'aa'); updatePlaneRadarWeapon(u, dt, 'ag'); }
+  // 手动攻击(右键指令):A-120c 只打飞机 / A-174b 只打地面
+  const at = u.target;
+  if(at && (at.hp===undefined || at.hp<=0 || at.alive===false)) u.target = null;
+  if(u.target && u.target.hp>0 && u.target.fly && !(u.aa && u.aaAmmo>0)) u.target = null;      // 空对空目标但无弹
+  if(u.target && u.target.hp>0 && !u.target.fly && !(u.ag && u.agAmmo>0)) u.target = null;     // 空对地目标但无弹
+  if(u.target && u.target.hp>0){
+    const d = dist(u, u.target);
+    if(u.target.fly){
+      const r = airMissileEffRange(u, AA_RANGE, u.target);
+      if(u.aa && u.aaAmmo>0 && u.aaCd<=0 && d<=r){
+        launchAirMissile(u, u.target, 'aa');
+        u.aaAmmo--; u.aaCd = AIR_MISSILE_CD;
+        if(u.aaAmmo<=0) planeNeedRefuel(u);
+      }
+    } else {
+      const r = airMissileEffRange(u, AG_RANGE, u.target);
+      if(u.ag && u.agAmmo>0 && u.agCd<=0 && d<=r){
+        launchAirMissile(u, u.target, 'ag');
+        u.agAmmo--; u.agCd = AIR_MISSILE_CD;
+        if(u.agAmmo<=0) planeNeedRefuel(u);
+      }
+    }
+    if(u.target && u.target.hp>0){
+      // 仍锁定目标:直线飞向目标接战(不被盘旋束缚),进入射程即发射
+      u.turnTarget = Math.atan2(u.target.y-u.y, u.target.x-u.x);
+      const w = seekVelocity(u, u.target.x, u.target.y);
+      u.wantVx = w.x; u.wantVy = w.y;
+    }
+  } else if(u.patrol){
+    // 盘旋是基础设定:无攻击目标时就绕圈(无弹药/空闲时也是如此)
+    orbitAround(u, u.patrol, dt);
+    // 弹舱已空 + 玩家移动指令已执行(到达新盘旋点后盘旋片刻)→ 自动返场补充弹药
+    if(u._needRefuel && u._refuelAfterMove && !u._returning){
+      const d = Math.hypot(u.x-u.patrol.x, u.y-u.patrol.y);
+      if(d < PLANE_PATROL_R*1.8){
+        u._refuelArriveT = (u._refuelArriveT||0) + dt;
+        if(u._refuelArriveT > 2){
+          u._refuelAfterMove = false;
+          u._returning = true;
+          u.order = {kind:'none'};
+          u.path = null;
+        }
+      }
+    }
+  } else {
+    u.wantVx = 0; u.wantVy = 0;
+  }
+}
+/* ============ 出击规划任务(精确打击 / 分布式攻击;F16,可移植到苏35) ============ */
+function updatePlaneMission(u, dt){
+  if(u._mission.kind==='precision') updatePrecisionMission(u, dt);
+  else updateDistributedMission(u, dt);
+}
+// 精确打击:只打任务目标,对应弹舱(敌机→空对空 / 地面→空对地)打空或目标死亡即强制返场
+function updatePrecisionMission(u, dt){
+  const t = u._mission.target;
+  if(!t || t.hp<=0 || (t.alive===false)){
+    u._mission = null; u.target = null;
+    u._returning = true; u.order = {kind:'none'}; u.path = null;
+    return;
+  }
+  const isAA = !!t.fly;
+  const ammo = isAA ? u.aaAmmo : u.agAmmo;
+  if(ammo<=0){
+    // 对应弹舱打空:返场(另一弹舱余弹随机会去,不打错误目标)
+    u._mission = null; u.target = null;
+    u._returning = true; u.order = {kind:'none'}; u.path = null;
+    return;
+  }
+  u.target = t;
+  const r = airMissileEffRange(u, isAA?AA_RANGE:AG_RANGE, t);
+  const cd = isAA ? u.aaCd : u.agCd;
+  if(dist(u,t) <= r && cd<=0){
+    launchAirMissile(u, t, isAA?'aa':'ag');
+    if(isAA){ u.aaAmmo--; u.aaCd = AIR_MISSILE_CD; } else { u.agAmmo--; u.agCd = AIR_MISSILE_CD; }
+  }
+  u.turnTarget = Math.atan2(t.y-u.y, t.x-u.x);
+  const w = seekVelocity(u, t.x, t.y);
+  u.wantVx = w.x; u.wantVy = w.y;
+}
+// 分布式攻击:按分配顺序处理 jobs,每个目标打满 count 发或目标死亡即跳下一个,全部完成返场
+function updateDistributedMission(u, dt){
+  const jobs = u._mission.jobs;
+  while(jobs.length){
+    const job = jobs[0];
+    const t = job.target;
+    if(!t || t.hp<=0 || (t.alive===false)){ jobs.shift(); u.target=null; continue; }
+    const ammo = job.type==='aa' ? u.aaAmmo : u.agAmmo;
+    if(job.fired >= job.count || ammo<=0){ jobs.shift(); u.target=null; continue; }
+    u.target = t;
+    const r = airMissileEffRange(u, job.type==='aa'?AA_RANGE:AG_RANGE, t);
+    const cd = job.type==='aa' ? u.aaCd : u.agCd;
+    if(dist(u,t) <= r && cd<=0){
+      launchAirMissile(u, t, job.type);
+      job.fired++;
+      if(job.type==='aa'){ u.aaAmmo--; u.aaCd = AIR_MISSILE_CD; } else { u.agAmmo--; u.agCd = AIR_MISSILE_CD; }
+    }
+    u.turnTarget = Math.atan2(t.y-u.y, t.x-u.x);
+    const w = seekVelocity(u, t.x, t.y);
+    u.wantVx = w.x; u.wantVy = w.y;
+    return;
+  }
+  u._mission = null; u.target = null;
+  u._returning = true; u.order = {kind:'none'}; u.path = null;
+}
+// 精确打击:释放选中飞机,全部切到"倾泻",锁定唯一目标集中轰炸;无对应弹种的不出动
+function launchPrecisionStrike(uids, target){
+  const isAA = !!target.fly;
+  let launched = 0;
+  for(const u of units){
+    if(!uids.includes(u.uid)) continue;
+    if(!u.fly || !u.parked || u.hp<=0 || !u.radar) continue;
+    if(!(isAA ? u.aa : u.ag)) continue;
+    u.parked = false;
+    u.patrol = u.homeBase ? {x:u.homeBase.x, y:u.homeBase.y} : {x:u.x, y:u.y};
+    u.order = {kind:'none'}; u.path = null; u.pathIdx = 0;
+    u.target = target;
+    u._lineT = RED_LINE_TIME;
+    u.modeAA = AIR_MODE_DUMP; u.modeAG = AIR_MODE_DUMP;   // "自己切换到全部倾泻"
+    u._mission = {kind:'precision', target:target};
+    launched++;
+  }
+  if(launched) textPopup(target.x, target.y-22, '精确打击 '+launched+' 架 锁定目标','#ffb0b0');
+  updatePanel();
+}
+// 分布式攻击:把玩家右键分配结果 round-robin 分到各架(按每架武器弹量封顶),分到任务的才出动
+function launchDistributed(uids, assignments){
+  const planes = units.filter(u=>uids.includes(u.uid) && u.fly && u.parked && u.hp>0 && u.radar);
+  for(const u of planes){
+    u._mission = {kind:'distributed', jobs:[]};
+    u.parked = false;
+    u.patrol = u.homeBase ? {x:u.homeBase.x, y:u.homeBase.y} : {x:u.x, y:u.y};
+    u.order = {kind:'none'}; u.path = null; u.pathIdx = 0;
+  }
+  let pi = 0;
+  for(const a of assignments){
+    if(!a.target) continue;
+    let tried = 0;
+    while(tried < planes.length){
+      const u = planes[pi % planes.length]; pi++; tried++;
+      if(!(a.type==='aa' ? u.aa : u.ag)) continue;
+      const used = u._mission.jobs.filter(j=>j.type===a.type).reduce((s,j)=>s+j.count, 0);
+      const ammo = a.type==='aa' ? u.aaAmmo : u.agAmmo;
+      if(used >= ammo) continue;
+      let job = u._mission.jobs.find(j=>j.target===a.target && j.type===a.type);
+      if(job) job.count++;
+      else u._mission.jobs.push({target:a.target, type:a.type, count:1, fired:0});
+      break;
+    }
+  }
+  let launched = 0;
+  for(const u of planes){
+    if(!u._mission.jobs.length){ u._mission = null; u.parked = true; continue; }  // 没分到任务不出动
+    launched++;
+  }
+  if(launched && planes.length) textPopup(planes[0].x, planes[0].y-22, '分布式攻击 '+launched+' 架 起飞','#ffb0b0');
+  updatePanel();
+}
 /* ============ 单位互锁脱困(位移检测) ============ */
 // 有移动意图但 0.4s 内实际位移极小——比如两辆坦克顶在一起,速度被分离/刚性修正
 // 抵消(velocity 很高但位置原地发抖),此时 velocity 检测的 stuckT 不会触发。
@@ -600,12 +1030,12 @@ function flowPriority(u){
 function arbitrateFlow(){
   const moveKind = k => k==='move' || k==='attack';
   for(const u of units){
-    if(!moveKind(u.order.kind) || u._standFire) continue;   // 战斗中钉住的单位不参与倒车让行
+    if(u.fly || !moveKind(u.order.kind) || u._standFire) continue;   // 飞机在空中,不参与地面让行;战斗中钉住的单位不参与倒车让行
     const du=flowDir(u); if(!du) continue;
     const cand=gridCollect(u.x, u.y, 110);
     for(let c=0;c<cand.length;c++){
       const v=units[cand[c]];
-      if(v===u || v.hp<=0 || !moveKind(v.order.kind)) continue;
+      if(v===u || v.hp<=0 || v.fly || !moveKind(v.order.kind)) continue;
       const dv=flowDir(v); if(!dv) continue;
       if(du.x*dv.x + du.y*dv.y > 0.2) continue;   // 同向,不冲突
       if(dist(u,v) > 110) continue;
@@ -628,12 +1058,12 @@ function arbitrateFlow(){
   while(changed && guard++<units.length){
     changed=false;
     for(const u of units){
-      if(u._backing || u._standFire || !moveKind(u.order.kind)) continue;
+      if(u._backing || u._standFire || u.fly || !moveKind(u.order.kind)) continue;
       const du=flowDir(u); if(!du) continue;
       const cand=gridCollect(u.x, u.y, 70);
       for(let c=0;c<cand.length;c++){
         const v=units[cand[c]];
-        if(v===u || v.hp<=0 || !v._backing) continue;
+        if(v===u || v.hp<=0 || v.fly || !v._backing) continue;
         const dx=v.x-u.x, dy=v.y-u.y;
         const d=Math.hypot(dx,dy);
         if(d>60) continue;
@@ -649,13 +1079,14 @@ function separateAll(){
   for(let i=0;i<units.length;i++){
     const u=units[i];
     u.sepVx=0; u.sepVy=0;
+    if(u.fly) continue;   // 飞机在空中,不与地面单位互相推挤
     const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 16);
     const csU = u.circles();
     for(let c=0;c<cand.length;c++){
       const j=cand[c];
       if(j===i) continue;
       const v=units[j];
-      if(v.hp<=0 || isEnemy(u.team,v.team)) continue;   // 敌人在战斗中不做分离
+      if(v.hp<=0 || v.fly || isEnemy(u.team,v.team)) continue;   // 敌人在战斗中不做分离;飞机不参与地面推挤
       const csV = v.circles();
       // 双圆 × 双圆:车头/车尾圆之间两两做距离检测
       for(let a=0;a<csU.length;a++) for(let b=0;b<csV.length;b++){
@@ -699,11 +1130,12 @@ function tryMoveTo(u, x, y){
 }
 // 该位置是否与任何存活单位碰撞圆重叠(用于本地脱困找空位)
 function hasUnitOverlapAt(u, x, y){
+  if(u.fly) return false;   // 飞机悬空,不与地面单位重叠判定
   const cand=gridCollect(x, y, Math.max(u.hw,u.hh)*2 + 16);
   const csA=u.circlesAt(x,y,u.facing);
   for(let c=0;c<cand.length;c++){
     const v=units[cand[c]];
-    if(v===u || v.hp<=0) continue;
+    if(v===u || v.hp<=0 || v.fly) continue;
     const csB=v.circles();
     for(const A of csA) for(const B of csB){
       if(Math.hypot(A.x-B.x,A.y-B.y) < A.r+B.r) return true;
@@ -718,13 +1150,13 @@ function resolveRigid(){
     let moved=false;
     for(let i=0;i<units.length;i++){
       const u=units[i];
-      if(u.hp<=0) continue;
+      if(u.hp<=0 || u.fly) continue;   // 飞机悬空:不与地面单位做刚性碰撞
       const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 16);
       for(let k=0;k<cand.length;k++){
         const j=cand[k];
         if(j<=i) continue;
         const v=units[j];
-        if(v.hp<=0) continue;
+        if(v.hp<=0 || v.fly) continue;
         const ov=capsuleOverlap(u,v);
         if(!ov) continue;
         let px=ov.axis.x*ov.pen, py=ov.axis.y*ov.pen;
@@ -796,7 +1228,7 @@ function applyMovement(u, dt){
   // 关键:分离力主要作用于“前进方向垂直分量”(侧向让路),
   // 前进方向分量只做有限减速——否则队列中前后车互相抵消会整群死锁
   const sp = u.speedEff;
-  const isVehicle = u.hw > u.hh && !u.naval;   // 履带/长条形载具(海军除外)
+  const isVehicle = u.hw > u.hh && !u.naval && !u.fly;   // 履带/长条形载具(海军除外;飞机不按地面载具处理)
   // 兜底:单位中心格被建筑/障碍压住(卡在建筑里出不来)-> 拉到最近可通行格。
   // 每 0.8s 检查一次(不是每帧寻路,不影响寻路系统;只在"真被埋住"时触发)
   u._obsT = (u._obsT||0) + dt;
@@ -897,7 +1329,7 @@ function applyMovement(u, dt){
   //    在期望朝向附近搜一个能让胶囊两圆都落在可通行格上的角度,转到该朝向滑出。
   //    (解决长车身斜贴在水/陆边缘、建筑边缘、船坞边缘卡死的问题)
   const wantSpeed=wm;
-  if(wantSpeed>12 && m<wantSpeed*0.25){ u.stuckT=(u.stuckT||0)+dt; }
+  if(wantSpeed>12 && m<wantSpeed*0.25 && !u.fly){ u.stuckT=(u.stuckT||0)+dt; }   // 飞机悬空无静态障碍,不参与卡住脱困
   else u.stuckT=0;
   if(u.stuckT>0.5){
     u.stuckT=0;
@@ -1076,7 +1508,7 @@ function findEnemyNear(u, range){
   const cand=gridCollect(u.x, u.y, range);
   for(let c=0;c<cand.length;c++){
     const v=units[cand[c]];
-    if(v.hp<=0 || !isEnemy(u.team,v.team)) continue;
+    if(v.hp<=0 || v.fly || !isEnemy(u.team,v.team)) continue;   // 地面单位索敌不含飞机
     const d=dist(u,v);
     if(d<bd){ bd=d; best=v; }
   }
@@ -1409,7 +1841,7 @@ function updateGarrisonAttack(b, dt){
     const cand=gridCollect(b.x, b.y, range);
     for(let c=0;c<cand.length;c++){
       const u=units[cand[c]];
-      if(u.hp<=0 || !isEnemy(b.team,u.team)) continue;
+      if(u.hp<=0 || u.fly || !isEnemy(b.team,u.team)) continue;   // 进驻单位打不到飞机
       const d=dist(b,u);
       if(d<=range && d<bd){ bd=d; best=u; }
     }
@@ -1495,6 +1927,50 @@ function manualUnload(t){
 function updateMissiles(dt){
   for(const m of missiles){
     if(m.dead) continue;
+    // 空军导弹(A-120c/A-174b):不可被红外干扰/APS反导,不被任何目标挡弹,
+    // 直线追踪目标,命中爆炸(AOE),超射程自爆,目标死亡自爆
+    if(m.air){
+      const t=m.target;
+      if(!t || t.hp===undefined || t.hp<=0){
+        explodeATGM(m, m.x, m.y, null);
+        continue;
+      }
+      const want=Math.atan2(t.y-m.y, t.x-m.x);
+      let dd=want-m.ang;
+      dd=((dd+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
+      m.ang += Math.max(-ATGM_TURN_RATE*dt, Math.min(ATGM_TURN_RATE*dt, dd));
+      m.speed=Math.min(m.maxSpeed, m.speed+m.accel*dt);
+      const step=m.speed*dt;
+      m.x+=Math.cos(m.ang)*step; m.y+=Math.sin(m.ang)*step;
+      m.travelled+=step;
+      if(Math.random()<dt*20){
+        const sm=new Effect(m.x-Math.cos(m.ang)*7, m.y-Math.sin(m.ang)*7, 'smoke', rnd(2.5,4.5));
+        sm.life=0.7; sm.maxLife=0.7; effects.push(sm);
+      }
+      if(m.travelled>=m.maxRange){ explodeATGM(m, m.x, m.y, null); continue; }
+      if(atgmHitTarget(m)){ explodeATGM(m, m.x, m.y, t); }
+      continue;
+    }
+    // 已被红外干扰:按随机方向乱飞,每步约 IR_STEP px,满 IR_STEPS 步后爆炸(不分敌我);
+    // 一旦被干扰则永久生效(离开干扰区也继续乱飞);中途撞到任何目标也爆炸
+    if(m.jammed){
+      m._jamStepD = (m._jamStepD||0) + m.speed*dt;
+      if(m._jamStepD >= IR_STEP){
+        m._jamStepD = 0;
+        m.jamSteps = (m.jamSteps||0) + 1;
+        m.ang += rnd(-Math.PI, Math.PI);   // 每步随机换方向
+        if(m.jamSteps >= IR_STEPS){
+          explodeIRJam(m, m.x, m.y, null);
+          continue;
+        }
+      }
+      m.x += Math.cos(m.ang)*m.speed*dt;
+      m.y += Math.sin(m.ang)*m.speed*dt;
+      // 撞到周围目标(不分敌我)→ 爆炸,被撞者吃满伤
+      const hit=irJamBlocker(m);
+      if(hit){ explodeIRJam(m, m.x, m.y, hit); continue; }
+      continue;
+    }
     const t=m.target;
     // 目标已死:导弹在当前位置立即自动爆炸
     if(!t || t.hp===undefined || t.hp<=0){
@@ -1533,12 +2009,12 @@ function atgmHitTarget(m){
   if(t instanceof Unit) return dist(m,t) <= t.r + 6;
   return m.x>=t.tx*TILE-6 && m.x<(t.tx+t.w)*TILE+6 && m.y>=t.ty*TILE-6 && m.y<(t.ty+t.h)*TILE+6;
 }
-// 路径被其它(敌方)单位挡着:导弹撞上即爆炸
+// 路径被其它(敌方)单位挡着:导弹撞上即爆炸(飞机不挡弹,打不到)
 function atgmBlocker(m){
   const cand=gridCollect(m.x, m.y, ATGM_HIT_R*2+16);
   for(let c=0;c<cand.length;c++){
     const u=units[cand[c]];
-    if(u===m.target || u.hp<=0 || !isEnemy(m.team,u.team)) continue;
+    if(u===m.target || u.hp<=0 || u.fly || !isEnemy(m.team,u.team)) continue;
     if(dist(m,u) <= ATGM_HIT_R + (u.r||8)) return u;
   }
   return null;
@@ -1553,6 +2029,26 @@ function launchATGM(u, target){
   for(let i=0;i<3;i++){ const sm=new Effect(x+rnd(-3,3), y+rnd(-3,3), 'smoke', rnd(3,6)); sm.life=0.5; sm.maxLife=0.5; effects.push(sm); }
   textPopup(u.x, u.y-22, atgmMissileName(u.type==='puma'?'spike':'tow')+' 发射','#ffd24a');
 }
+// 发射空军导弹(F16:A-120c/A-174b;苏35:R-37m/Kh-29,导弹种类不同、数值相同):从机头稍出膛,直线追踪目标
+function launchAirMissile(u, target, kind){
+  const isAA = kind==='aa';
+  const range = airMissileEffRange(u, isAA?AA_RANGE:AG_RANGE, target);
+  const speed = isAA ? AA_SPEED : AG_SPEED;
+  const damage = isAA ? AA_DAMAGE : AG_DAMAGE;
+  const ang=Math.atan2(target.y-u.y, target.x-u.x);
+  const x=u.x+Math.cos(ang)*(u.r+12), y=u.y+Math.sin(ang)*(u.r+12);
+  const m=new Missile(x, y, target, u.team, u, isAA?airAASpriteType(u):airAGSpriteType(u));
+  m.air=true;                 // 空军导弹:不可干扰/拦截/挡弹
+  m.speed=speed*0.3;          // 先加速后匀速
+  m.maxSpeed=speed;
+  m.accel=ATGM_ACCEL;
+  m.maxRange=range;
+  m.damage=damage;
+  missiles.push(m);
+  effects.push(new Effect(x,y,'ring',14));
+  for(let i=0;i<3;i++){ const sm=new Effect(x+rnd(-3,3), y+rnd(-3,3), 'smoke', rnd(3,6)); sm.life=0.5; sm.maxLife=0.5; effects.push(sm); }
+  textPopup(u.x, u.y-22, (isAA?airAAName(u):airAGName(u))+' 发射','#ffd24a');
+}
 // 爆炸:目标(或挡路者)吃单体满伤,范围内其它单位/建筑吃范围伤害(范围不大)
 function explodeATGM(m, ex, ey, primary){
   m.dead=true;
@@ -1564,11 +2060,46 @@ function explodeATGM(m, ex, ey, primary){
   }
   const aoe=Math.floor(m.damage*ATGM_AOE_FACTOR);
   for(const u of units){
-    if(u.hp<=0 || u===primary) continue;
+    // 范围伤只打敌方地面目标:飞机免疫(所有单位都打不到飞机),发射者/同队也免伤
+    if(u.hp<=0 || u.fly || u===primary || u===m.attacker || !isEnemy(m.team, u.team)) continue;
     if(dist(u,{x:ex,y:ey}) <= m.explodeR) applyDamage(u, aoe, m.attacker, 'missile');
   }
   for(const b of buildings){
     if(!b.alive || b===primary) continue;
+    if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
+  }
+}
+/* ============ 红外干扰(被干扰导弹):乱飞 3 步后爆炸,不分敌我 ============ */
+// 干扰期间撞到的目标(任意队伍,飞机除外)或被炸范围内目标都会受伤
+function irJamBlocker(m){
+  const cand=gridCollect(m.x, m.y, ATGM_HIT_R*2+16);
+  for(let c=0;c<cand.length;c++){
+    const u=units[cand[c]];
+    if(u.hp<=0 || u.fly) continue;   // 不分敌我,但飞机免疫(所有单位打不到飞机)
+    if(dist(m,u) <= ATGM_HIT_R + (u.r||8)) return u;
+  }
+  for(const b of buildings){
+    if(!b.alive) continue;
+    if(m.x>=b.tx*TILE && m.x<(b.tx+b.w)*TILE && m.y>=b.ty*TILE && m.y<(b.ty+b.h)*TILE) return b;
+  }
+  return null;
+}
+// 干扰后爆炸:与普通 TOW 爆炸不同——范围伤不分敌我(友军/自己也会被炸到),飞机免疫
+function explodeIRJam(m, ex, ey, primary){
+  m.dead=true;
+  shake=Math.max(shake,3);
+  effects.push(new Effect(ex,ey,'explode',32));
+  for(let i=0;i<7;i++){ const sm=new Effect(ex+rnd(-11,11), ey+rnd(-11,11), 'smoke', rnd(5,10)); sm.life=1.3; sm.maxLife=1.3; effects.push(sm); }
+  if(primary && primary.hp!==undefined && primary.hp>0 && !primary.fly){
+    applyDamage(primary, m.damage, m.attacker, 'missile');   // 被撞者吃满伤(不分敌我)
+  }
+  const aoe=Math.floor(m.damage*ATGM_AOE_FACTOR);
+  for(const u of units){
+    if(u.hp<=0 || u.fly) continue;   // 不分敌我,飞机免疫
+    if(dist(u,{x:ex,y:ey}) <= m.explodeR) applyDamage(u, aoe, m.attacker, 'missile');
+  }
+  for(const b of buildings){
+    if(!b.alive) continue;
     if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
   }
 }

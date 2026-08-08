@@ -57,6 +57,50 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 .udesc { font-size:10px; color:#8fb0a0; margin-top:3px; }
 #powerBadge { color:#ff8080; font-size:12px; display:none; }
 #minimap { position:absolute; right:12px; top:12px; border:2px solid #3a5a4a; background:#101810; z-index:10; cursor:pointer; }
+/* ===== 右侧机场飞机面板(点击机场时显示,列出该机场的战斗机并可远程升级) ===== */
+#airPanel {
+  position:fixed; right:12px; top:225px; width:224px; max-height:calc(100vh - 460px);
+  background:linear-gradient(#22303a,#141b20);
+  border:2px solid #4a6a5a; border-radius:10px;
+  padding:10px 12px; color:#dfe8e0; font-size:12px; z-index:11;
+  overflow-y:auto; box-shadow:0 6px 22px rgba(0,0,0,.55);
+}
+#airPanel.hidden { display:none; }
+#airPanel h3 { margin:0 0 8px; color:#ffe27a; font-size:14px; letter-spacing:2px; }
+#airPanelList { display:flex; flex-direction:column; gap:6px; }
+.airRow {
+  background:rgba(255,255,255,.05); border:1px solid #3a5a4a; border-radius:6px;
+  padding:6px 8px;
+}
+.airRow .airName { font-size:12px; color:#ffe27a; font-weight:bold; }
+.airRow .airTag { font-size:10px; color:#8fb0a0; }
+.airRow .airStat { font-size:11px; color:#b8d4c4; margin-top:2px; }
+.airRow .airhp { height:4px; background:#0d1412; border-radius:2px; overflow:hidden; margin-top:4px; }
+.airRow .airhp i { display:block; height:100%; background:linear-gradient(#5ee07a,#2f9a4a); }
+.airRow .airbtn {
+  display:block; width:100%; margin-top:5px; padding:4px 0; text-align:center;
+  font-size:11px; color:#1a241a; background:#ffe27a; border:1px solid #c9a83a;
+  border-radius:5px; cursor:pointer;
+}
+.airRow .airbtn:hover { background:#ffef9a; }
+.airRow .airbtn.disabled { background:#3a423c; color:#9a9a9a; border-color:#2a3430; cursor:default; }
+/* ===== 出击规划(精确打击/分布式攻击) ===== */
+.airPlan { border-top:1px dashed #4a6a5a; margin-top:6px; padding-top:6px; }
+.airPlanTitle { font-size:12px; color:#ffe27a; font-weight:bold; margin-bottom:4px; }
+.airSlots { display:flex; gap:3px; }
+.airSlot {
+  flex:1; padding:3px 0; text-align:center; font-size:10px; color:#dfe8e0;
+  background:#1c2428; border:1px solid #3a5a4a; border-radius:4px; cursor:pointer;
+}
+.airSlot .slotTip { display:block; font-size:8px; color:#8fb0a0; }
+.airSlot:hover { background:#2a3a32; }
+.airSlot.sel { background:#2f9a4a; border-color:#5ee07a; color:#fff; }
+.airSlot.disabled { opacity:.45; cursor:default; }
+.airSlot.disabled:hover { background:#1c2428; }
+.airPlanBtns { display:flex; gap:4px; margin-top:4px; }
+.airPlanBtns .airbtn { margin-top:0; }
+.airPlanBtns .airbtn.disabled { background:#3a423c; color:#9a9a9a; border-color:#2a3430; cursor:default; }
+.airPlanState { font-size:10px; color:#b8d4c4; margin-top:4px; line-height:1.5; }
 #sellBtn {
   position:absolute; right:12px; top:172px; width:120px;
   padding:8px 0; font-size:14px; letter-spacing:2px;
