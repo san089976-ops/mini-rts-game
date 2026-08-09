@@ -92,6 +92,12 @@ function update(dt){
   trackMarks=trackMarks.filter(m=>m.life>0);
   for(const t of texts){ t.y-=22*dt; t.life-=dt; }
   texts=texts.filter(t=>t.life>0);
+  // 梅卡瓦MK4 被击毁:载员就地释放存活(先于死亡清理执行,释放出的单位 hp>0 不会被误删)
+  for(const u of units){
+    if(u.hp<=0 && u.type==='merkava' && u.cargoUnits && u.cargoUnits.length){
+      unloadTransport(u, {x:u.x, y:u.y});
+    }
+  }
   // 清理死亡单位
   units=units.filter(u=>u.hp>0);
   // 同步清理选中列表:死亡单位若还留在 selected,会继续画出它的移动线/信息
@@ -121,7 +127,6 @@ function applyDamage(ent, dmg, attacker, proj){
   // 贫铀利用:艾布拉姆斯受到的伤害 -10(在原有计算受伤害数目后)
   if(ent instanceof Unit && ent.type==='abrams' && hasResearch(ent.team,'depletedUranium')) final = Math.max(1, final-10);
 
-  const hpBefore = ent.hp;
   // 反应装甲护盾:先扣护盾,再扣血量(任意带盾单位:T90科技盾 / T84BM反应装甲模块盾)
   let hpDmg = final;
   if(ent instanceof Unit && ent.shield>0){
@@ -130,15 +135,7 @@ function applyDamage(ent, dmg, attacker, proj){
     hpDmg = final-absorbed;
   }
   if(hpDmg>0) ent.hp -= hpDmg;
-
-  // 反应装甲:免疫一次致命伤害(仅一次)
-  let negated=false;
-  if(ent instanceof Unit && ent.type==='t90' && hasResearch(ent.team,'reactiveArmor') && !ent.survivedOnce && ent.hp<=0){
-    ent.survivedOnce=true;
-    ent.hp=hpBefore;
-    negated=true;
-  }
-  textPopup(ent.x, ent.y-rnd(10,18), negated ? '反应装甲 免疫!' : '-'+final, negated ? '#8aff8a' : '#ffd0d0');
+  textPopup(ent.x, ent.y-rnd(10,18), '-'+final, '#ffd0d0');
   if(ent instanceof Building){ ent.lastAttackT = time; }
   // 受击反应(灵活、不牵制):空闲单位立刻锁定攻击者迎战;而已有
   // 移动/撤退/采集等指令的单位不被强制拉入战斗——它会一边按原指令走,
@@ -189,6 +186,7 @@ function destroyBuilding(ent){
   const burn=new Effect(ent.x,ent.y,'burn',Math.max(ent.w,ent.h)*TILE*0.5); burn.life=12; burn.maxLife=12; effects.push(burn);
   if(ent.team===TEAM_A && selected.includes(ent)) selected=selected.filter(s=>s!==ent);
   if(ent===selBuilding) selBuilding=null;
+  if(selectedBlds.includes(ent)) selectedBlds=selectedBlds.filter(s=>s!==ent);
 }
 
 function updateBuilding(b, dt, teamPower){
@@ -341,12 +339,28 @@ function updateUnit(u, dt){
   if(u.fly){ updateAircraft(u, dt); return; }   // 空军单位走独立逻辑(停驻/盘旋/返场)
   if(isTurretUnit(u)) u._turretAiming = false;   // 独立炮塔载具每帧重置:本轮是否在索敌开火(独立转炮塔)
   u._standFire = false;                          // 每帧重置:是否"战斗中钉住不动"(射程内原地射击)
-  // 反应装甲:T90 护盾每秒恢复 15(科技);T84BM 反应装甲模块每秒恢复 10
-  if(u.type==='t90' && u.shield<REACTIVE_SHIELD && hasResearch(u.team,'reactiveArmor')){
-    u.shield = Math.min(REACTIVE_SHIELD, u.shield + REACTIVE_REGEN*dt);
-  }
+  // 反应装甲护盾回血:按各单位当前等级的护盾上限/回血速度恢复(T84BM 模块 / T62线 / T80线 / T90M)
   if(u.rarm && u.shield<T84BM_SHIELD){
     u.shield = Math.min(T84BM_SHIELD, u.shield + T84BM_SHIELD_REGEN*dt);
+  }
+  // T62 升级链护盾(T64B 150 回5 / T64BM 200 回10)
+  if(u.type==='t62' && u.upgradeLvl>0){
+    const lv = t62Level(u);
+    if(lv.shield>0 && u.shield<lv.shield) u.shield = Math.min(lv.shield, u.shield + lv.shieldRegen*dt);
+  }
+  // T80 升级链护盾(T80B 150 回10 / T80U 200 回10 / T80BVM 350 回10)
+  if(u.type==='t80' && u.upgradeLvl>0){
+    const lv = t80Level(u);
+    if(lv.shield>0 && u.shield<lv.shield) u.shield = Math.min(lv.shield, u.shield + lv.shieldRegen*dt);
+  }
+  // T90M 护盾(400 回15)
+  if(u.type==='t90' && u.upgradeLvl>0){
+    const lv = t90Level(u);
+    if(lv.shield>0 && u.shield<lv.shield) u.shield = Math.min(lv.shield, u.shield + lv.shieldRegen*dt);
+  }
+  // 艾布拉姆 TUSK 护盾(300 回15)
+  if(u.tusk && u.shield<TUSK_SHIELD){
+    u.shield = Math.min(TUSK_SHIELD, u.shield + TUSK_SHIELD_REGEN*dt);
   }
   // T72 反应装甲护盾(T72B 100 回5 / T72BVM 250 回10)
   if(u.type==='t72' && u.upgradeLvl>0){
@@ -374,6 +388,30 @@ function updateUnit(u, dt){
     if(u.irProg >= IR_UPGRADE_TIME){
       u.irUpgrading=false; u.irProg=0; u.ir=true; u.irOn=true;
       textPopup(u.x,u.y-20,'红外干扰装置 安装完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // 艾布拉姆 TUSK 升级包安装进度(装好给满盾,外观自动换 M1A2TUSK)
+  if(u.tuskUpgrading){
+    u.tuskProg += dt;
+    if(u.tuskProg >= TUSK_UPGRADE_TIME){
+      u.tuskUpgrading=false; u.tuskProg=0; u.tusk=true; u.shield=TUSK_SHIELD;
+      textPopup(u.x,u.y-20,'TUSK 升级包 安装完成 (300盾)','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // 艾布拉姆 火炮升级包安装进度(装好 +15 伤害 +15 射程)
+  if(u.gunUpgrading){
+    u.gunUpProg += dt;
+    if(u.gunUpProg >= GUN_UPGRADE_TIME){
+      u.gunUpgrading=false; u.gunUpProg=0; u.gunUp=true;
+      u._def = Object.assign({}, u._def, {
+        damage: (u._def.damage||0) + GUN_DMG,
+        range: (u._def.range||0) + GUN_RANGE,
+      });
+      textPopup(u.x,u.y-20,'火炮升级 安装完成 (+15伤 +15射程)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
       updatePanel();
     }
@@ -410,6 +448,71 @@ function updateUnit(u, dt){
       u.armor = lv.armor;
       u.shield = lv.shield;                                // T72B 获得 100 盾 / T72BVM 变 250 盾
       // 克隆 def,避免污染共享缓存:血量/伤害/射速/射程/移速/护甲/弹种/名字按档更新
+      u._def = Object.assign({}, u._def, {
+        hp: lv.hp, damage: lv.damage, rof: lv.rof, range: lv.range, speed: lv.speed, armor: lv.armor, proj: lv.proj, name: lv.name,
+      });
+      textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // T62 四阶升级进度(T62→T64→T64B→T64BM:属性/护盾/贴图档全部更新)
+  if(u.type==='t62' && u.upgrading){
+    u.upgradeProg += dt;
+    if(u.upgradeProg >= T62_UPGRADE_TIME){
+      u.upgrading=false; u.upgradeProg=0;
+      u.upgradeLvl++;
+      const lv = t62Level(u);
+      const oldHP = u.maxHp;
+      u.maxHp = lv.hp;
+      u.hp = Math.min(u.maxHp, u.hp + (lv.hp - oldHP));   // 按差量回血
+      u.speed = lv.speed;
+      u.armor = lv.armor;
+      u.shield = lv.shield;
+      u._def = Object.assign({}, u._def, {
+        hp: lv.hp, damage: lv.damage, rof: lv.rof, range: lv.range, speed: lv.speed, armor: lv.armor, proj: lv.proj, name: lv.name,
+      });
+      textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // T80 四阶升级进度(T80→T80B→T80U→T80BVM:属性/护盾/贴图档全部更新;T80BVM 自带 APS)
+  if(u.type==='t80' && u.upgrading){
+    u.upgradeProg += dt;
+    if(u.upgradeProg >= T80_UPGRADE_TIME){
+      u.upgrading=false; u.upgradeProg=0;
+      u.upgradeLvl++;
+      const lv = t80Level(u);
+      const oldHP = u.maxHp;
+      u.maxHp = lv.hp;
+      u.hp = Math.min(u.maxHp, u.hp + (lv.hp - oldHP));   // 按差量回血
+      u.speed = lv.speed;
+      u.armor = lv.armor;
+      u.shield = lv.shield;
+      if(lv.aps && !u.aps){ u.aps=true; u.apsOn=true; u.apsAmmo=APS_MAX_AMMO; u.apsReload=0; }   // 升级自带自主防御系统
+      u._def = Object.assign({}, u._def, {
+        hp: lv.hp, damage: lv.damage, rof: lv.rof, range: lv.range, speed: lv.speed, armor: lv.armor, proj: lv.proj, name: lv.name,
+      });
+      textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // T90 单次升级进度(T90→T90M:属性/护盾/贴图档全部更新;T90M 自带 APS)
+  if(u.type==='t90' && u.upgrading){
+    u.upgradeProg += dt;
+    if(u.upgradeProg >= T90_UPGRADE_TIME){
+      u.upgrading=false; u.upgradeProg=0;
+      u.upgradeLvl++;
+      const lv = t90Level(u);
+      const oldHP = u.maxHp;
+      u.maxHp = lv.hp;
+      u.hp = Math.min(u.maxHp, u.hp + (lv.hp - oldHP));   // 按差量回血
+      u.speed = lv.speed;
+      u.armor = lv.armor;
+      u.shield = lv.shield;
+      if(lv.aps && !u.aps){ u.aps=true; u.apsOn=true; u.apsAmmo=APS_MAX_AMMO; u.apsReload=0; }   // 升级自带自主防御系统
       u._def = Object.assign({}, u._def, {
         hp: lv.hp, damage: lv.damage, rof: lv.rof, range: lv.range, speed: lv.speed, armor: lv.armor, proj: lv.proj, name: lv.name,
       });

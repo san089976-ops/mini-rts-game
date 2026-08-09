@@ -330,8 +330,24 @@ function giveOrder(ctrl){
   }
 }
 function selectAllCombat(){
-  selected=[]; selBuilding=null;
+  selected=[]; selBuilding=null; selectedBlds=[];
   for(const u of units) if(u.team===TEAM_A && u.def.range>0) selected.push(u);
+  updatePanel();
+}
+// 选择全体同类单位:按当前选中主单位的类型,选中所有己方存活且未停驻的同类型单位
+function selectSameType(){
+  if(!selected.length) return;
+  const type=selected[0].type;
+  selected=[]; selBuilding=null; selectedBlds=[];
+  for(const u of units) if(u.team===TEAM_A && u.type===type && u.hp>0 && !u.parked) selected.push(u);
+  updatePanel();
+}
+// 选择全体同类建筑:把同 defName 的己方存活建筑都加入 selectedBlds(selBuilding 保持为主选中)
+function selectAllSameBlds(){
+  if(!selBuilding || selBuilding.team!==TEAM_A || !selBuilding.alive) return;
+  const dn=selBuilding.defName;
+  selectedBlds=[];
+  for(const b of buildings) if(b.team===TEAM_A && b.alive && b.defName===dn) selectedBlds.push(b);
   updatePanel();
 }
 let lastGroup={idx:0, t:0};
@@ -341,8 +357,8 @@ function recallGroup(idx){
   if(!g || !g.length) return;
   const alive=g.filter(u=>u.hp>0 && units.includes(u));
   controlGroups[idx]=alive;
-  if(!alive.length){ selected=[]; updatePanel(); return; }
-  selected=alive; selBuilding=null;
+  if(!alive.length){ selected=[]; selBuilding=null; selectedBlds=[]; updatePanel(); return; }
+  selected=alive; selBuilding=null; selectedBlds=[];
   const now=performance.now();
   if(lastGroup.idx===idx && now-lastGroup.t<400){
     let cx=0,cy=0;
@@ -358,13 +374,16 @@ function clickSelect(px,py){
   const add = keys['ShiftLeft']||keys['ShiftRight'];
   if(ent && (ent.team===TEAM_A || (ent instanceof Building && ent.team<0))){
     if(ent instanceof Building){
-      if(!add){ selBuilding=ent; selected=[]; }
+      if(!add){ selBuilding=ent; selected=[]; selectedBlds=[ent]; }
+      else { if(!selectedBlds.includes(ent)) selectedBlds.push(ent); if(!selBuilding) selBuilding=ent; selected=[]; }
     } else {
       if(add){ if(!selected.includes(ent)) selected.push(ent); }
       else { selected=[ent]; selBuilding=null; }
+      selectedBlds=[];
     }
   } else {
     if(!add){ selected=[]; selBuilding=null; }
+    selectedBlds=[];
   }
   updatePanel();
 }
@@ -377,7 +396,7 @@ function boxSelect(x0,y0,x1,y1){
   const minX=Math.min(w0.x,w1.x),minY=Math.min(w0.y,w1.y),maxX=Math.max(w0.x,w1.x),maxY=Math.max(w0.y,w1.y);
   if(maxX-minX<6 && maxY-minY<6){ clickSelect(x1,y1); return; }
   const add=keys['ShiftLeft']||keys['ShiftRight'];
-  if(!add){ selected=[]; selBuilding=null; }
+  if(!add){ selected=[]; selBuilding=null; selectedBlds=[]; }
   for(const u of units){
     if(u.team!==TEAM_A || u.parked) continue;   // 停驻在机场内的飞机不参与框选
     if(u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY && !selected.includes(u)) selected.push(u);

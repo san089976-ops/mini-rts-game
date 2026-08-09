@@ -1,7 +1,7 @@
 "use strict";
 /* ============ game.js: 游戏流程与主循环 ============ */
 function setupGame(){
-  units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; placing=null;
+  units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; selectedBlds=[]; placing=null;
   missiles=[]; interceptors=[];
   trackMarks=[];
   paused=false;

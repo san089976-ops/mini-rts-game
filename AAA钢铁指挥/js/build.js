@@ -10,7 +10,7 @@ function canTrain(team, type){
   const d = getUnitDefs(unitFactionOf(team))[type];
   if(!d || d.cost > credits[team]) return false;
   // 高级单位:必须由已升级的战车工厂生产
-  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm' || type==='t72'){
+  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm' || type==='t72' || type==='t80' || type==='merkava'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='factory' && b.upgraded && !b.upgrading);
   }
   // 机场建筑车:必须由已升级的建造厂生产
@@ -31,6 +31,8 @@ function canTrain(team, type){
 function advancedTankType(team){
   return unitFactionOf(team)==='allies' ? 'abrams' : 't90';
 }
+// 累计实体升级/安装投入(用于"本体+投入"总价显示与出售全额返还)
+function addInvested(ent, cost){ ent.invested = (ent.invested||0) + cost; }
 function startUpgrade(b){
   if(!b || b.defName!=='factory' || b.constructing || b.upgrading || b.upgraded) return;
   if(credits[b.team] < FACTORY_UPGRADE_COST){
@@ -38,9 +40,11 @@ function startUpgrade(b){
     return;
   }
   credits[b.team] -= FACTORY_UPGRADE_COST;
+  addInvested(b, FACTORY_UPGRADE_COST);
   b.upgrading = true; b.upgradeProg = 0;
   textPopup(b.x,b.y-20,'战车工厂升级中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startPowerUpgrade(b){
   if(!b || b.defName!=='power' || b.constructing || b.powerLevel>=POWER_MAX_LEVEL || b.pwrUpgrading) return;
@@ -49,9 +53,11 @@ function startPowerUpgrade(b){
     return;
   }
   credits[b.team] -= POWER_UPGRADE_COST;
+  addInvested(b, POWER_UPGRADE_COST);
   b.pwrUpgrading = true; b.pwrUpgradeProg = 0;
   textPopup(b.x,b.y-20,'发电厂升级中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startBarracksUpgrade(b){
   if(!b || b.defName!=='barracks' || b.constructing || b.upgrading || b.upgraded) return;
@@ -60,9 +66,11 @@ function startBarracksUpgrade(b){
     return;
   }
   credits[b.team] -= BARRAX_UPGRADE_COST;
+  addInvested(b, BARRAX_UPGRADE_COST);
   b.upgrading = true; b.upgradeProg = 0;
   textPopup(b.x,b.y-20,'兵营升级中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startCommandUpgrade(b){
   if(!b || b.defName!=='command' || b.constructing || b.upgrading || b.upgraded) return;
@@ -71,9 +79,11 @@ function startCommandUpgrade(b){
     return;
   }
   credits[b.team] -= COMMAND_UPGRADE_COST;
+  addInvested(b, COMMAND_UPGRADE_COST);
   b.upgrading = true; b.upgradeProg = 0;
   textPopup(b.x,b.y-20,'建造厂升级中','#ffe27a');
   updatePanel();
+  return true;
 }
 /* ============ 实验室科技研究 ============ */
 function startResearch(b, id){
@@ -96,11 +106,6 @@ function onResearchComplete(team, id){
         b.hp=Math.min(b.maxHp, b.hp+(ADV_TURRET_HP-old));
         b.damage=ADV_TURRET_DMG;
       }
-    }
-  } else if(id==='reactiveArmor'){
-    // 反应装甲:现有T90获得护盾
-    for(const u of units){
-      if(u.team===team && u.alive && u.type==='t90') u.shield=REACTIVE_SHIELD;
     }
   }
 }
@@ -376,7 +381,7 @@ function tryTrain(defName){
 // 该建筑能否生产该单位
 function canProduceIn(b, defName){
   if(!b || !b.alive || b.constructing) return false;
-  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm' || defName==='t72'){
+  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm' || defName==='t72' || defName==='t80' || defName==='merkava'){
     return b.defName==='factory' && b.upgraded && !b.upgrading;
   }
   if(defName==='airfield_car'){
@@ -413,13 +418,14 @@ function cancelProduction(b){
 function sellBuilding(ent){
   if(!ent || !(ent instanceof Building) || !ent.alive || ent.team!==TEAM_A) return false;
   if(ent.defName==='command'){ textPopup(ent.x,ent.y-20,'建造厂不可出售','#ffb0b0'); return false; }
-  const refund=Math.floor(ent.def.cost * (ent.constructing ? 0.5 : 0.75));
+  const refund=Math.floor((ent.def.cost + (ent.invested||0)) * 0.75);   // 出售获利 = 本体造价 + 升级投入总价 的 75%
   credits[TEAM_A]+=refund;
   textPopup(ent.x,ent.y-20,'出售 +$'+refund,'#ffe27a');
   markBlocked(ent,false);
   ent.alive=false;
   if(selected.includes(ent)) selected=selected.filter(s=>s!==ent);
   if(selBuilding===ent) selBuilding=null;
+  if(selectedBlds.includes(ent)) selectedBlds=selectedBlds.filter(s=>s!==ent);
   buildings=buildings.filter(b=>b!==ent);
   effects.push(new Effect(ent.x,ent.y,'ring',18));
   updatePanel();
@@ -433,9 +439,11 @@ function startChallUpgrade(u){
     return;
   }
   credits[u.team]-=CHALL_UPGRADE_COST;
+  addInvested(u, CHALL_UPGRADE_COST);
   u.upgrading=true; u.upgradeProg=0;
   textPopup(u.x,u.y-20,CHALL_NAMES[u.upgradeLvl+1]+' 升级中','#ffe27a');
   updatePanel();
+  return true;
 }
 /* ============ T54 双分支升级(苏军 tank:T54 → T54B $150 或 T55AM $300,互斥一次) ============ */
 function startT54Upgrade(u, branch){
@@ -447,9 +455,11 @@ function startT54Upgrade(u, branch){
     return;
   }
   credits[u.team]-=br.cost;
+  addInvested(u, br.cost);
   u.upgrading=true; u.upgradeProg=0; u.t54Target=branch;   // 先记目标分支,升级时间跑完才落 t54Branch
   textPopup(u.x,u.y-20, br.name+' 升级中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startT54BUpgrade(u){ startT54Upgrade(u, 1); }
 function startT55AMUpgrade(u){ startT54Upgrade(u, 2); }
@@ -462,9 +472,56 @@ function startT72Upgrade(u){
     return;
   }
   credits[u.team]-=cost;
+  addInvested(u, cost);
   u.upgrading=true; u.upgradeProg=0;
   textPopup(u.x,u.y-20, T72_LEVELS[u.upgradeLvl+1].name+' 升级中','#ffe27a');
   updatePanel();
+  return true;
+}
+/* ============ T62 四阶升级(T62 → T64 → T64B → T64BM) ============ */
+function startT62Upgrade(u){
+  if(!u || u.type!=='t62' || u.hp<=0 || u.upgrading || u.upgradeLvl>=3) return;
+  const cost = T62_UPGRADE_COST[u.upgradeLvl+1];
+  if(credits[u.team] < cost){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=cost;
+  addInvested(u, cost);
+  u.upgrading=true; u.upgradeProg=0;
+  textPopup(u.x,u.y-20, T62_LEVELS[u.upgradeLvl+1].name+' 升级中','#ffe27a');
+  updatePanel();
+  return true;
+}
+/* ============ T80 四阶升级(T80 → T80B → T80U → T80BVM) ============ */
+function startT80Upgrade(u){
+  if(!u || u.type!=='t80' || u.hp<=0 || u.upgrading || u.upgradeLvl>=3) return;
+  const cost = T80_UPGRADE_COST[u.upgradeLvl+1];
+  if(credits[u.team] < cost){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=cost;
+  addInvested(u, cost);
+  u.upgrading=true; u.upgradeProg=0;
+  textPopup(u.x,u.y-20, T80_LEVELS[u.upgradeLvl+1].name+' 升级中','#ffe27a');
+  updatePanel();
+  return true;
+}
+/* ============ T90 单次升级(T90 → T90M) ============ */
+function startT90Upgrade(u){
+  if(!u || u.type!=='t90' || u.hp<=0 || u.upgrading || u.upgradeLvl>=1) return;
+  const cost = T90_UPGRADE_COST[1];
+  if(credits[u.team] < cost){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=cost;
+  addInvested(u, cost);
+  u.upgrading=true; u.upgradeProg=0;
+  textPopup(u.x,u.y-20,'T90M 升级中','#ffe27a');
+  updatePanel();
+  return true;
 }
 /* ============ 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利):安装后解锁自动制导导弹 ============ */
 function startATGMAttach(u){
@@ -474,9 +531,11 @@ function startATGMAttach(u){
     return;
   }
   credits[u.team]-=ATGM_COST;
+  addInvested(u, ATGM_COST);
   u.atgmUpgrading=true; u.atgmProg=0;
   textPopup(u.x,u.y-20,atgmModuleName(u)+' 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 /* ============ 自主防御系统(艾布拉姆 / T72BVM 专属升级包):反 TOW 导弹,自动拦截 ============ */
 function startAPSUpgrade(u){
@@ -487,42 +546,52 @@ function startAPSUpgrade(u){
     return;
   }
   credits[u.team]-=APS_COST;
+  addInvested(u, APS_COST);
   u.apsUpgrading=true; u.apsProg=0;
   textPopup(u.x,u.y-20,'自主防御系统 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 /* ============ 空军武器/模块安装(F16/苏35):A-120c 空对空 / A-174b 空对地 / 雷达火控 / 涂层更新 ============ */
 function startAAUpgrade(u){
   if(!u || !u.fly || u.hp<=0 || u.aaUpgrading || u.aa) return;
   if(credits[u.team] < AA_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
   credits[u.team]-=AA_COST;
+  addInvested(u, AA_COST);
   u.aaUpgrading=true; u.aaProg=0;
   textPopup(u.x,u.y-20,airAAName(u)+' 空对空导弹包 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startAGUpgrade(u){
   if(!u || !u.fly || u.hp<=0 || u.agUpgrading || u.ag) return;
   if(credits[u.team] < AG_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
   credits[u.team]-=AG_COST;
+  addInvested(u, AG_COST);
   u.agUpgrading=true; u.agProg=0;
   textPopup(u.x,u.y-20,airAGName(u)+' 空对地导弹包 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startRadarUpgrade(u){
   if(!u || !u.fly || u.hp<=0 || u.radarUpgrading || u.radar) return;
   if(credits[u.team] < RADAR_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
   credits[u.team]-=RADAR_COST;
+  addInvested(u, RADAR_COST);
   u.radarUpgrading=true; u.radarProg=0;
   textPopup(u.x,u.y-20,'雷达火控 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 function startCoatUpgrade(u){
   if(!u || !u.fly || u.hp<=0 || u.coatUpgrading || u.coat) return;
   if(credits[u.team] < COAT_COST){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
   credits[u.team]-=COAT_COST;
+  addInvested(u, COAT_COST);
   u.coatUpgrading=true; u.coatProg=0;
   textPopup(u.x,u.y-20,'涂层更新 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 /* ============ T84BM 反应装甲模块:300 盾,每秒恢复 10 ============ */
 function startRarmUpgrade(u){
@@ -532,9 +601,11 @@ function startRarmUpgrade(u){
     return;
   }
   credits[u.team]-=RARM_COST;
+  addInvested(u, RARM_COST);
   u.rarmUpgrading=true; u.rarmProg=0;
   textPopup(u.x,u.y-20,'反应装甲 安装中','#ffe27a');
   updatePanel();
+  return true;
 }
 /* ============ T84BM 红外干扰装置:干扰前方120°扇形内的敌 TOW 导弹 ============ */
 function startIRUpgrade(u){
@@ -544,7 +615,37 @@ function startIRUpgrade(u){
     return;
   }
   credits[u.team]-=IR_COST;
+  addInvested(u, IR_COST);
   u.irUpgrading=true; u.irProg=0;
   textPopup(u.x,u.y-20,'红外干扰装置 安装中','#ffe27a');
   updatePanel();
+  return true;
+}
+/* ============ 艾布拉姆 TUSK 升级包:300 盾回 15 + 换 M1A2TUSK 外观 ============ */
+function startTuskUpgrade(u){
+  if(!u || TUSK_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.tuskUpgrading || u.tusk) return;
+  if(credits[u.team] < TUSK_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=TUSK_COST;
+  addInvested(u, TUSK_COST);
+  u.tuskUpgrading=true; u.tuskProg=0;
+  textPopup(u.x,u.y-20,'TUSK 升级包 安装中','#ffe27a');
+  updatePanel();
+  return true;
+}
+/* ============ 艾布拉姆 火炮升级包:+15 伤害 +15 射程 ============ */
+function startGunUpgrade(u){
+  if(!u || GUN_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.gunUpgrading || u.gunUp) return;
+  if(credits[u.team] < GUN_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=GUN_COST;
+  addInvested(u, GUN_COST);
+  u.gunUpgrading=true; u.gunUpProg=0;
+  textPopup(u.x,u.y-20,'火炮升级 安装中','#ffe27a');
+  updatePanel();
+  return true;
 }

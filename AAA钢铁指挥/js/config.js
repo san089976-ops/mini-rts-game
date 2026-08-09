@@ -88,6 +88,8 @@ const UNIT_BOX = {
   t84bm:{hw:36, hh:15},                      // T84BM(苏军重坦,车身+炮塔照片)
   t72:{hw:36, hh:15},                        // T72(苏军,可三阶升级:车身+炮塔照片)
   t62:{hw:36, hh:15},                        // T62(苏军,普通工厂直产,车身+炮塔照片)
+  t80:{hw:36, hh:15},                        // T80(苏军,二级工厂产,四阶升级:车身+炮塔照片)
+  merkava:{hw:36, hh:15},                    // 梅卡瓦MK4(盟军重坦,5载员运兵坦克,车身+炮塔照片)
 };
 // 战车转向角速度(弧度/秒):朝向用 lerpAngle 平滑插值,产生履带战车转向效果,而非瞬间硬转
 const TURN_RATE = 6;
@@ -103,7 +105,7 @@ const VEHICLE_ALIGN_GATE = 0.35;
 const FIRE_RECOIL = 8;        // 开火后坐力初始偏移(px)
 const RECOIL_DECAY = 14;      // 后坐力恢复速率(1/s,越大回弹越快,约0.1~0.2s恢复)
 // 有履带压痕的载具(除海军驱逐舰/登陆艇外的所有车辆)
-const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1, puma:1, t84bm:1, t72:1, t62:1 };
+const TRACK_UNITS = { tank:1, abrams:1, t90:1, harvester:1, mcv:1, airfield_car:1, bradley:1, b11:1, marder:1, leclerc:1, leopard:1, challenger:1, puma:1, t84bm:1, t72:1, t62:1, t80:1, merkava:1 };
 const BASE_UNITS = {
   infantry: { name:'动员兵', hp:90, speed:74, range:72, damage:9, rof:0.9, cost:100, r:9,  build:4, armor:'cloth', proj:'bullet', desc:'低造价轻步兵,前期侦察与骚扰的主力' },
   tank:     { name:'M60', hp:330, speed:60, range:118, damage:38, rof:1.0, cost:500, r:13, build:9, armor:'castiron', proj:'cannon', desc:'盟军主战坦克,火力与装甲均衡,战场中坚' },
@@ -126,7 +128,7 @@ function transportCost(u){  if(!u) return 0;
   if(u.type==='harvester') return 3;
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? 4 : 3;
   if(u.type==='airfield_car') return 4;
-  if(u.type==='mcv' || u.type==='abrams' || u.type==='t90' || u.type==='t84bm' || u.type==='t72' || u.type==='t62') return 6;
+  if(u.type==='mcv' || u.type==='abrams' || u.type==='t90' || u.type==='t84bm' || u.type==='t72' || u.type==='t62' || u.type==='t80' || u.type==='merkava') return 6;
   if(u.type==='bradley' || u.type==='b11' || u.type==='marder' || u.type==='leclerc' || u.type==='leopard' || u.type==='challenger' || u.type==='puma') return 6;
   return 1;
 }
@@ -144,7 +146,7 @@ const IFV_TYPES = ['puma','bradley','marder','b11'];
 function isIFV25(u){ return !!u && IFV_TYPES.indexOf(u.type)!==-1; }
 // 独立旋转炮塔的载具(车身+炮塔结构,仿美洲狮):
 // 美洲狮/艾布拉姆/T90 + 豹2A4/布拉德利/勒克莱尔/挑战者/M60/T54/B11(全部照片车身+炮塔)
-function isTurretUnit(u){ return !!u && (u.type==='puma'||u.type==='abrams'||u.type==='t90'||u.type==='tank'||u.type==='bradley'||u.type==='b11'||u.type==='marder'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'||u.type==='t84bm'||u.type==='t72'||u.type==='t62'); }
+function isTurretUnit(u){ return !!u && (u.type==='puma'||u.type==='abrams'||u.type==='t90'||u.type==='tank'||u.type==='bradley'||u.type==='b11'||u.type==='marder'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'||u.type==='t84bm'||u.type==='t72'||u.type==='t62'||u.type==='t80'||u.type==='merkava'); }
 // 车身/炮塔贴图键名:tank 阵营专属(M60盟军车头朝下 / T54苏军车头朝上),其余按 type
 function turretKeys(u){
   if(u.type==='tank'){
@@ -152,6 +154,10 @@ function turretKeys(u){
     return ['m60_body','m60_turret'];
   }
   if(u.type==='t72'){ const lv=t72Level(u); return [lv.body, lv.turret]; }   // 升级档不同:车身/炮塔贴图随档换
+  if(u.type==='t62'){ const lv=t62Level(u); return [lv.body, lv.turret]; }
+  if(u.type==='t80'){ const lv=t80Level(u); return [lv.body, lv.turret]; }
+  if(u.type==='t90'){ const lv=t90Level(u); return [lv.body, lv.turret]; }
+  if(u.type==='abrams' && u.tusk) return ['m1a2_body','m1a2_turret'];   // 艾布拉姆装 TUSK 后换 M1A2TUSK 贴图
   return [u.type+'_body', u.type+'_turret'];
 }
 // 车身照片的"自然朝向"→渲染对齐角 rotOff(满足 imageFrontAngle+θ=facing):
@@ -159,8 +165,12 @@ function turretKeys(u){
 function unitRotOff(u){
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? Math.PI/2 : -Math.PI/2;   // T54 朝上 / M60 朝下
   if(u.type==='t72') return t72Level(u).rotOff;   // T72/T72BVM 车头朝下(-π/2);T72B 车头朝左(π)
+  if(u.type==='t62') return t62Level(u).rotOff;
+  if(u.type==='t80') return t80Level(u).rotOff;
+  if(u.type==='t90') return t90Level(u).rotOff;   // T90 水平朝左(π) / T90M 车头朝上(π/2)
+  if(u.type==='abrams' && u.tusk) return Math.PI/2;   // 艾布拉姆 TUSK 贴图车头朝上
   switch(u.type){
-    case 'puma': case 'leclerc': case 't84bm': case 't62': return Math.PI/2;   // 车头朝上
+    case 'puma': case 'leclerc': case 't84bm': case 't62': case 'merkava': return Math.PI/2;   // 车头朝上
     case 'b11': return -Math.PI/2;                            // 车头朝下
     case 'abrams': case 't90': case 'bradley': case 'marder': case 'leopard': case 'challenger': return Math.PI;  // 水平向左
     default: return SPRITE_ROT[u.type] || 0;
@@ -183,10 +193,13 @@ function unitTip(u){
 //   B11 = 正中间向车头靠近 1/3 车身长(全长 2*hw 的 1/3 ≈ 2*hw/3)
 function turretRotCenter(u, tw){
   if(u.type==='t72') return t72Level(u).turretOff || 0;   // 炮塔向车头(正方向)前移量按档位
-  if(u.type==='t62') return 4;                             // T62 炮塔向正方向 +4px
+  if(u.type==='t62') return t62Level(u).turretOff || 0;
+  if(u.type==='t80') return t80Level(u).turretOff || 0;
+  if(u.type==='t90') return u.upgradeLvl>0 ? (t90Level(u).turretOff || 0) : (-8 + (tw||0)/6);   // 基础 T90 保持原调教, T90M 炮塔居中
+  if(u.type==='abrams' && u.tusk) return 7 - 5 - 3 - 2 + 2 + 2;   // 艾布拉姆 TUSK:再向正方向(车头)移动2px → 1
   switch(u.type){
     case 'puma': return 0;
-    case 'abrams': return -10 + (tw||0)/6;
+    case 'abrams': return -7 + (tw||0)/6;   // 艾布拉姆炮塔向正方向再 +3px(原 -10)
     case 't90': return -8 + (tw||0)/6;
     case 'bradley': return -3;   // 座圈位置,向车头移动 2px(原 -5)
     case 'b11': return (u.hw||28)*(2/3) - 5;   // 正中间向车头 1/3 车身长,再向车尾移 5px(原 3px)
@@ -201,6 +214,12 @@ function turretScale(u){
   if(u.type==='b11') return 0.42;
   if(u.type==='marder') return 0.4;
   if(u.type==='t72') return u.upgradeLvl===0 ? 0.95 : 1;   // 仅基础档 T72 炮塔缩 0.95
+  if(u.type==='abrams' && u.tusk) return 0.857375 * 1.3;   // M1A2TUSK 炮塔放大到现在的 1.3 倍
+  if(u.type==='abrams') return 0.857375;                    // 艾布拉姆炮塔缩 0.9025×0.95(车身不动)
+  if(u.type==='merkava') return 0.8 * 1.1;   // 梅卡瓦炮塔增加到现在的 1.1 倍(0.8×1.1=0.88)
+  if(u.type==='t62') return t62Level(u).turretScale || 1;
+  if(u.type==='t80') return t80Level(u).turretScale || 1;
+  if(u.type==='t90') return t90Level(u).turretScale || 1;
   return 1;
 }
 // 旋转法则:炮口=贴图正方向,旋转点距炮口的距离 = 贴图长轴 × 系数 k。
@@ -212,7 +231,10 @@ function turretPivotK(u){
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? (u.t54Branch ? 2/3 : 4/5) : 2/3;   // T54 基础 4/5,分支 T54B/T55AM 2/3 / M60 2/3
   if(u.type==='bradley' || u.type==='puma') return 1/2;   // 布拉德利/美洲狮 1/2 法则
   if(u.type==='t72') return u.upgradeLvl===0 ? 4/5 : 2/3;  // 仅基础档 T72 用 4/5 法则,其余档 2/3
-  if(u.type==='t62') return 7/10;                          // T62 7/10 法则
+  if(u.type==='t62') return t62Level(u).pivotK;
+  if(u.type==='t80') return t80Level(u).pivotK;
+  if(u.type==='t90') return t90Level(u).pivotK;
+  if(u.type==='abrams' && u.tusk) return 3/5;   // 艾布拉姆 TUSK:3/5 法则
   return 2/3;
 }
 const IFV_ACCEL = 2600;        // 弹丸加速度(px/s²):先加速后匀速,起步有劲道
@@ -239,7 +261,7 @@ function atgmMissileName(spriteType){ return spriteType==='spike' ? '长钉导�
 function atgmTypeName(u){ return u.type==='puma' ? '长钉导弹' : 'TOW导弹'; }
 function atgmModuleName(u){ return u.type==='puma' ? '长钉导弹模块' : 'TOW导弹模块'; }
 /* ============ 自主防御系统(艾布拉姆专属升级包:只反 TOW 导弹) ============ */
-const APS_TYPES = ['abrams','t72'];          // 可装自主防御系统的单位(艾布拉姆;T72 仅 T72BVM 档可装,见 startAPSUpgrade)
+const APS_TYPES = ['abrams','t72','merkava'];          // 可装自主防御系统的单位(艾布拉姆;T72 仅 T72BVM 档可装;梅卡瓦MK4)
 const APS_COST = 500;                        // 升级价格
 const APS_UPGRADE_TIME = 12;                 // 安装时间(秒)
 const APS_MAX_AMMO = 4;                      // 弹夹:最多储存 4 发反导弹
@@ -267,6 +289,20 @@ const IR_ANGLE = Math.PI*2/3;    // 干扰扇形张角(120°)
 const IR_STEP = 16;              // 乱飞每步距离(px)
 const IR_STEPS = 3;              // 乱飞步数(满 3 步后爆炸)
 function isIRUnit(u){ return !!u && IR_TYPES.indexOf(u.type)!==-1; }
+/* ============ 艾布拉姆 TUSK 升级包:300盾回15 + 外观换 M1A2TUSK ============ */
+const TUSK_COST = 200;
+const TUSK_UPGRADE_TIME = 12;
+const TUSK_SHIELD = 300;
+const TUSK_SHIELD_REGEN = 15;
+const TUSK_TYPES = ['abrams'];
+function isTuskUnit(u){ return !!u && TUSK_TYPES.indexOf(u.type)!==-1; }
+/* ============ 艾布拉姆 火炮升级包:+15 伤害 +15 射程 ============ */
+const GUN_COST = 250;
+const GUN_UPGRADE_TIME = 8;
+const GUN_DMG = 15;
+const GUN_RANGE = 15;
+const GUN_TYPES = ['abrams'];
+function isGunUnit(u){ return !!u && GUN_TYPES.indexOf(u.type)!==-1; }
 /* ============ 空军单位(机场生产:战斗机) ============ */
 const AIR_TYPES = ['f16','su35'];                     // 战斗机类型
 const AIR_FACTION = { f16:'allies', su35:'soviet' };  // 阵营专属:F16=盟军 / 苏35=苏军
@@ -325,7 +361,7 @@ function isAircraft(u){ return !!u && AIR_TYPES.indexOf(u.type)!==-1; }
 function isAircraftType(type){ return AIR_TYPES.indexOf(type)!==-1; }
 /* ============ 坦克炮弹(125mm 贴图,车头朝左,长18px,匀速) ============ */
 const TANK_SHELL_LEN = 18;                               // 坦克炮弹渲染长度(px)
-function isTankShellUnit(u){ return !!u && (u.type==='tank'||u.type==='abrams'||u.type==='t90'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'||u.type==='t84bm'||u.type==='t72'||u.type==='t62'); }
+function isTankShellUnit(u){ return !!u && (u.type==='tank'||u.type==='abrams'||u.type==='t90'||u.type==='leclerc'||u.type==='leopard'||u.type==='challenger'||u.type==='t84bm'||u.type==='t72'||u.type==='t62'||u.type==='t80'||u.type==='merkava'); }
 function getUnitDefs(faction){
   if(UNIT_DEF_CACHE[faction]) return UNIT_DEF_CACHE[faction];
   let defs;
@@ -336,7 +372,8 @@ function getUnitDefs(faction){
       harvester:{ ...BASE_UNITS.harvester },
       mcv:      { ...BASE_UNITS.mcv },
       airfield_car:{ ...BASE_UNITS.airfield_car },
-      abrams:  { name:'艾布拉姆斯坦克', hp:1200, speed:62, range:122, damage:130, rof:1.1, cost:1500, r:14, build:9, armor:'titanium', proj:'cannon', desc:'盟军重型主战坦克,装甲厚重火力凶猛,需升级战车工厂' },
+      abrams:  { name:'艾布拉姆斯坦克', hp:1200, speed:62, range:122, damage:130, rof:1.1, cost:1500, r:14, build:9, armor:'titanium', proj:'cannon', desc:'盟军重型主战坦克,装甲厚重火力凶猛,需升级战车工厂;可安装TUSK升级包(200金,300盾回15/秒并换装M1A2TUSK外观)与火炮升级包(250金,+15伤害+15射程),还可安装自主防御系统' },
+      merkava:{ name:'梅卡瓦MK4', hp:900, speed:68, range:130, damage:95, rof:1.1, cost:1200, r:14, build:12, armor:'titanium', proj:'cannon', carrier:true, capacity:5, desc:'盟军重型主战坦克:可装载5名步兵,被击毁时载员全部存活;可花500安装自主防御系统,需升级战车工厂' },
       exo:     { name:'外骨骼大兵', hp:330, speed:74, range:118, damage:70, rof:1.5, cost:460, r:9, build:8, armor:'steel', proj:'cannon', desc:'盟军高科技单兵:外骨骼装甲手持炮管,射程火力逼近主战坦克,需升级兵营' },
       destroyer:{ ...NAVAL_UNITS.destroyer },
       transport:{ ...NAVAL_UNITS.transport },
@@ -355,14 +392,15 @@ function getUnitDefs(faction){
       harvester:{ ...BASE_UNITS.harvester },
       mcv:      { ...BASE_UNITS.mcv },
       airfield_car:{ ...BASE_UNITS.airfield_car },
-      t90:     { name:'T90坦克', hp:900, speed:72, range:116, damage:80, rof:0.9, cost:1000, r:13, build:9, armor:'titanium', proj:'cannon', desc:'苏军主战坦克,机动灵活射速快,需升级战车工厂' },
+      t90:     { name:'T90坦克', hp:900, speed:72, range:116, damage:80, rof:0.9, cost:1000, r:13, build:9, armor:'titanium', proj:'cannon', upgradeable:true, desc:'苏军主战坦克,机动灵活射速快,需升级战车工厂;可升级为T90M(伤害+30/射程+15/移速-10,获得400护盾回15每秒并自带自主防御系统)' },
       magnet:  { name:'磁暴步兵', hp:250, speed:58, range:72, damage:110, rof:3, cost:350, r:9, build:7, armor:'steel', proj:'cannon', desc:'苏军高科技步兵:电磁手套释放闪电,对布甲伤害提升至150%,需升级兵营' },
       destroyer:{ ...NAVAL_UNITS.destroyer },
       transport:{ ...NAVAL_UNITS.transport },
       b11:     { name:'俄制B11', hp:370, speed:66, range:135, damage:25, rof:0.4, cost:580, r:12, build:10, armor:'castiron', proj:'machinegun', amphib:true, carrier:true, capacity:7, desc:'苏军两栖步兵战车:机炮压制,水陆两栖,可装载7名步兵,需升级战车工厂' },
       t84bm:   { name:'T84BM', hp:1100, speed:65, range:140, damage:120, rof:1.1, cost:1500, r:14, build:12, armor:'titanium', proj:'cannon', upgradeable:true, desc:'苏军新一代主战坦克:装甲厚重火力凶猛,炮塔可独立旋转(2/3法则,座圈居中);可安装反应装甲(300盾,回10/秒)与红外干扰装置(干扰前方120°扇形内的敌TOW),需升级战车工厂' },
       t72:     { name:'T72', hp:600, speed:72, range:115, damage:55, rof:1.1, cost:750, r:14, build:10, armor:'castiron', proj:'cannon', upgradeable:true, desc:'苏军主战坦克:经济实用的主力战车,可两次升级为T72B(获得反应装甲护盾)与T72BVM(钛合金装甲+强盾),T72BVM还可安装自主防御系统,需升级战车工厂' },
-      t62:     { name:'T62', hp:800, speed:70, range:115, damage:65, rof:1.1, cost:850, r:14, build:10, armor:'castiron', proj:'cannon', desc:'苏军主战坦克:火力装甲均衡,由普通战车工厂直接生产' },
+      t62:     { name:'T62', hp:700, speed:70, range:115, damage:65, rof:1.1, cost:750, r:14, build:10, armor:'castiron', proj:'cannon', upgradeable:true, desc:'苏军主战坦克:火力装甲均衡,由普通战车工厂直接生产;可三次升级为T64/T64B/T64BM(逐步获得反应装甲护盾)' },
+      t80:     { name:'T80', hp:1000, speed:70, range:125, damage:80, rof:1.1, cost:1000, r:14, build:10, armor:'titanium', proj:'cannon', upgradeable:true, desc:'苏军新一代主战坦克:重装甲高机动,需升级战车工厂;可三次升级为T80B/T80U/T80BVM(逐步获得反应装甲护盾,T80BVM自带自主防御系统)' },
       su35:    { name:'苏-27战斗机', hp:150, speed:150, range:0, damage:0, rof:0, cost:12000, r:20, build:20, armor:'castiron', proj:null, fly:true, slotCost:1, desc:'苏军空军单位:高速喷气式战斗机,悬停飞行可飞越一切地形;生产后停驻在机场,右键机场释放/返场,可安装测试炸弹包(100金,2发TOW导弹,打空自动返场)' },
     };
   }
@@ -439,6 +477,44 @@ const T72_LEVELS = [
 const T72_UPGRADE_COST = [0, 250, 200];   // 升级到 1/2 级的价格(T72→T72B $250 / T72B→T72BVM $200)
 const T72_UPGRADE_TIME = 10;              // 每次升级耗时(秒)
 function t72Level(u){ return (u && T72_LEVELS[u.upgradeLvl]) || T72_LEVELS[0]; }
+/* ============ T62 四阶升级(T62 → T64 → T64B → T64BM,苏军普通工厂产) ============ */
+const T62_LEVELS = [
+  { name:'T62',    hp:700, damage:65, rof:1.1, range:115, speed:70, armor:'castiron', proj:'cannon', shield:0,   shieldRegen:0,   body:'t62_body',   turret:'t62_turret',   rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:1,   bodyScale:0.9, turretOff:4, pivotK:7/10 },   // 基础 T62 保持原调教(炮塔+4px,7/10法则,车身×0.9)
+  { name:'T64',    hp:700, damage:75, rof:1.1, range:125, speed:68, armor:'castiron', proj:'cannon', shield:0,   shieldRegen:0,   body:'t64_body',   turret:'t64_turret',   rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:1,   bodyScale:1,   turretOff:3, pivotK:2/3 },   // 炮塔向正方向+3px,2/3 法则
+  { name:'T64B',   hp:700, damage:75, rof:1.1, range:125, speed:66, armor:'castiron', proj:'cannon', shield:150, shieldRegen:5,  body:'t64b_body',  turret:'t64b_turret',  rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:1,   bodyScale:1,   turretOff:3, pivotK:2/3 },
+  { name:'T64BM',  hp:700, damage:85, rof:1.1, range:135, speed:64, armor:'castiron', proj:'cannon', shield:200, shieldRegen:10, body:'t64bm_body', turret:'t64bm_turret', rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:1,   bodyScale:1,   turretOff:0, pivotK:2/3 },
+];
+const T62_UPGRADE_COST = [0, 100, 100, 100];   // T62→T64 / T64→T64B / T64B→T64BM 每次升级均 $100
+const T62_UPGRADE_TIME = 10;
+function t62Level(u){ return (u && T62_LEVELS[u.upgradeLvl]) || T62_LEVELS[0]; }
+/* ============ T80 四阶升级(T80 → T80B → T80U → T80BVM,苏军二级工厂产) ============ */
+const T80_LEVELS = [
+  { name:'T80',    hp:1000, damage:80,  rof:1.1, range:125, speed:70, armor:'titanium', proj:'cannon', shield:0,   shieldRegen:0,   body:'t80_body',    turret:'t80_turret',    rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:0.85, bodyScale:1,   turretOff:3, pivotK:7/10 },
+  { name:'T80B',   hp:1100, damage:80,  rof:1.1, range:135, speed:68, armor:'titanium', proj:'cannon', shield:150, shieldRegen:10, body:'t80b_body',   turret:'t80b_turret',   rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:0.85, bodyScale:1,   turretOff:3, pivotK:7/10 },
+  { name:'T80U',   hp:1100, damage:100, rof:1.1, range:145, speed:68, armor:'titanium', proj:'cannon', shield:200, shieldRegen:10, body:'t80u_body',   turret:'t80u_turret',   rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:0.85, bodyScale:1,   turretOff:3, pivotK:2/3 },
+  { name:'T80BVM', hp:1100, damage:120, rof:1.1, range:145, speed:62, armor:'titanium', proj:'cannon', shield:350, shieldRegen:10, aps:true, body:'t80bvm_body', turret:'t80bvm_turret', rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:0.85, bodyScale:1,   turretOff:3, pivotK:2/3 },
+];
+const T80_UPGRADE_COST = [0, 300, 200, 700];   // T80→T80B $300 / T80B→T80U $200 / T80U→T80BVM $700
+const T80_UPGRADE_TIME = 10;
+function t80Level(u){ return (u && T80_LEVELS[u.upgradeLvl]) || T80_LEVELS[0]; }
+/* ============ T90 单次升级(T90 → T90M,苏军二级工厂产) ============ */
+const T90_LEVELS = [
+  { name:'T90',    hp:900, damage:80, rof:0.9, range:116, speed:72, armor:'titanium', proj:'cannon', shield:0,   shieldRegen:0,   body:'t90_body',   turret:'t90_turret',   rotOff:Math.PI,   tip:[-0.5,0],
+    overall:1,   bodyScale:1,   turretOff:0, pivotK:2/3 },   // 基础 T90 保持原调教(水平朝左贴图)
+  { name:'T90M',   hp:900, damage:110, rof:0.9, range:131, speed:62, armor:'titanium', proj:'cannon', shield:400, shieldRegen:15, aps:true, body:'t90m_body', turret:'t90m_turret', rotOff:Math.PI/2, tip:[0,-0.5],
+    overall:1,   bodyScale:1,   turretOff:0, pivotK:2/3 },   // T90M 车头朝上,炮塔居中 2/3 法则,升级自带 APS
+];
+const T90_UPGRADE_COST = [0, 1300];   // T90→T90M $1300
+const T90_UPGRADE_TIME = 10;
+function t90Level(u){ return (u && T90_LEVELS[u.upgradeLvl]) || T90_LEVELS[0]; }
 /* ============ T54 双分支升级(T54 → T54B 或 T55AM,互斥一次成型,苏军 tank) ============ */
 const T54_BRANCHES = {
   0: { name:'T54',   body:'t54_body',   turret:'t54_turret' },
@@ -451,8 +527,11 @@ function t54Branch(u){ return T54_BRANCHES[(u && u.t54Branch) || 0] || T54_BRANC
 function unitShieldMax(u){
   if(!u) return 0;
   if(u.type==='t72') return t72Level(u).shield || 0;
+  if(u.type==='t62') return t62Level(u).shield || 0;
+  if(u.type==='t80') return t80Level(u).shield || 0;
+  if(u.type==='t90') return t90Level(u).shield || 0;
   if(u.type==='tank' && unitFactionOf(u.team)==='soviet' && u.t54Branch) return t54Branch(u).shield || 0;
-  if(u.type==='t90') return REACTIVE_SHIELD;
+  if(u.type==='abrams' && u.tusk) return TUSK_SHIELD;
   if(u.rarm) return T84BM_SHIELD;
   return 0;
 }
@@ -464,11 +543,10 @@ const RESEARCH_DEFS = {
   oreRefine: { name:'矿石精炼', cost:1000, time:60, base:true, desc:'采矿车每车矿收益翻倍' },
   advTurret: { name:'高级炮台', cost:3500, time:100, base:true, desc:'碉堡血量提升至1200,伤害提升至60' },
   depletedUranium: { name:'贫铀利用', cost:5000, time:200, base:false, faction:'allies', desc:'艾布拉姆斯受到的伤害 -10,造成的伤害 +20' },
-  reactiveArmor:   { name:'反应装甲', cost:5000, time:200, base:false, faction:'soviet', desc:'T90获得300护盾(每秒恢复15),并免疫一次致命伤害' },
 };
 const ADV_TURRET_HP = 1200;     // 高级炮台:碉堡血量
 const ADV_TURRET_DMG = 60;      // 高级炮台:碉堡伤害
-const REACTIVE_SHIELD = 300;    // 反应装甲:T90护盾值
+const REACTIVE_SHIELD = 300;    // 反应装甲:T90护盾值(旧科技,现已移除研究,保留常量兜底)
 const REACTIVE_REGEN = 15;      // 反应装甲:护盾每秒恢复
 // 该阵营是否已研发某科技(researches 定义于 state.js)
 function hasResearch(team, id){
@@ -540,6 +618,20 @@ const IMAGES = {
   t55am_body:'img/units/t55am_body.png', t55am_turret:'img/units/t55am_turret.png',
   // T62(苏军,普通工厂直产):面板图标用车身
   t62:'img/units/t62_body.png', t62_body:'img/units/t62_body.png', t62_turret:'img/units/t62_turret.png',
+  // T62 升级链:T64 / T64B / T64BM(车身+炮塔照片,车头朝上)
+  t64_body:'img/units/t64_body.png', t64_turret:'img/units/t64_turret.png',
+  t64b_body:'img/units/t64b_body.png', t64b_turret:'img/units/t64b_turret.png',
+  t64bm_body:'img/units/t64bm_body.png', t64bm_turret:'img/units/t64bm_turret.png',
+  // T80 四阶升级(车身+炮塔照片,车头朝上):面板图标用基础 T80 车身
+  t80:'img/units/t80_body.png', t80_body:'img/units/t80_body.png', t80_turret:'img/units/t80_turret.png',
+  t80b_body:'img/units/t80b_body.png', t80b_turret:'img/units/t80b_turret.png',
+  t80u_body:'img/units/t80u_body.png', t80u_turret:'img/units/t80u_turret.png',
+  t80bvm_body:'img/units/t80bvm_body.png', t80bvm_turret:'img/units/t80bvm_turret.png',
+  // T90 升级:T90M(车身+炮塔照片,车头朝上)
+  t90m_body:'img/units/t90m_body.png', t90m_turret:'img/units/t90m_turret.png',
+  // 预留贴图(暂未加单位):M1A2TUSK / 梅卡瓦MK4(车身+炮塔照片,车头朝上)
+  m1a2_body:'img/units/m1a2_body.png', m1a2_turret:'img/units/m1a2_turret.png',
+  merkava:'img/units/merkava_body.png', merkava_body:'img/units/merkava_body.png', merkava_turret:'img/units/merkava_turret.png',
   bullet_25mm:'img/units/bullet_25mm.png',   // 25mm 机炮弹(步兵战车专属弹丸,已挖白底、车头朝上)
   tow_missile:'img/units/tow_missile.png',   // TOW 反坦克导弹(黄鼠狼/布拉德利,横向车头朝右)
   spike_missile:'img/units/spike_missile.png', // 长钉反坦克导弹(美洲狮,横向车头朝右)
@@ -609,17 +701,20 @@ let preloadTotal = 0, preloadDone = 0;
 // 坦克照片已用脚本预处理:背景(纯黑/纯白)透明化 + 内容居中
 // 各贴图"炮管/车头"自然朝向(图像坐标系,顺时针,+X=右),绘制时旋转对齐到单位朝向前方。
 // 艾布拉姆/ T90 的炮管都在贴图左侧(向左),因此转角均为 180°(π),开火闪光画在贴图左侧即炮口。
-const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2, puma: Math.PI/2, f16: Math.PI/2, su35: Math.PI/2, t84bm: Math.PI/2, t72: -Math.PI/2, t62: Math.PI/2 };
+const SPRITE_ROT = { abrams: Math.PI, t90: Math.PI, harvester: Math.PI/2, destroyer: Math.PI/2, transport: Math.PI/2, tank: Math.PI/2, infantry: -Math.PI/2, exo: -Math.PI/2, magnet: Math.PI/2, mcv: -Math.PI/2, airfield_car: Math.PI/2, bradley: Math.PI/2, marder: Math.PI/2, leclerc: Math.PI/2, leopard: Math.PI/2, challenger: Math.PI/2, b11: -Math.PI/2, puma: Math.PI/2, f16: Math.PI/2, su35: Math.PI/2, t84bm: Math.PI/2, t72: -Math.PI/2, t62: Math.PI/2, t80: Math.PI/2, merkava: Math.PI/2 };
 // 照片贴图额外缩放(步兵照片用 0.42,让小人贴合碰撞箱大小;步兵战车整体缩小到 0.7)
 // 注意:布拉德利/B11/勒克莱尔/豹2A4/挑战者/M60/T54 已改为"车身+独立炮塔"结构,
 // 此缩放作用于"车身+炮塔"整体;若只想缩车身不动炮塔,用下面的 SPRITE_BODY_SCALE。
 // 实际整体缩放请用 unitSpriteScale(u)(tank 按阵营区分:M60 0.85 / T54 0.765)。
-const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.68, marder: 0.72, b11: 0.648, puma: 0.6776, abrams: 0.8, t90: 0.8, tank: 0.85, leclerc: 0.765, leopard: 0.765, challenger: 0.765, f16: 0.5859375, su35: 0.5859375, t84bm: 0.8, t72: 0.8, t62: 0.68 };
+const SPRITE_SCALE = { harvester: 0.7, destroyer: 1.4, infantry: 0.42, exo: 0.42, magnet: 0.42, bradley: 0.68, marder: 0.72, b11: 0.648, puma: 0.6776, abrams: 0.8, t90: 0.8, tank: 0.85, leclerc: 0.765, leopard: 0.765, challenger: 0.765, f16: 0.5859375, su35: 0.5859375, t84bm: 0.8, t72: 0.8, t62: 0.68, t80: 0.8, merkava: 0.8 };
 // 仅车身照片缩放(炮塔保持原大,二者相乘=实际车身大小):M60/T54 车身额外 0.85;T84BM 车身 0.9
 const SPRITE_BODY_SCALE = { tank: 0.85, t84bm: 0.9, t62: 0.9 };   // T62 仅车身再缩 0.9(炮塔不动)
 // 仅车身额外缩放(t72 按档位:基础档车身×0.9,T72B/BVM 车身不单独缩)
 function unitBodyScale(u){
   if(u.type==='t72') return t72Level(u).bodyScale || 1;
+  if(u.type==='t62') return t62Level(u).bodyScale || 1;
+  if(u.type==='t80') return t80Level(u).bodyScale || 1;
+  if(u.type==='t90') return t90Level(u).bodyScale || 1;
   return SPRITE_BODY_SCALE[u.type] || 1;
 }
 // 整体缩放(车身+炮塔):tank 按阵营区分,M60(盟军)=0.85,T54(苏军)=0.85×0.9=0.765;
@@ -627,9 +722,13 @@ function unitBodyScale(u){
 function unitSpriteScale(u){
   if(u.type==='tank') return unitFactionOf(u.team)==='soviet' ? 0.765 : 0.85;
   if(u.type==='t72') return (SPRITE_SCALE.t72||1) * t72Level(u).overall;
+  if(u.type==='t62') return (SPRITE_SCALE.t62||1) * t62Level(u).overall;
+  if(u.type==='t80') return (SPRITE_SCALE.t80||1) * t80Level(u).overall;
+  if(u.type==='t90') return (SPRITE_SCALE.t90||1) * t90Level(u).overall;
+  if(u.type==='abrams' && u.tusk) return SPRITE_SCALE.abrams||0.8;   // TUSK 贴图与原艾布拉姆同缩放
   return SPRITE_SCALE[u.type] || 1;
 }
-const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1], mcv:[0,1], airfield_car:[0,-1], bradley:[0,-1], marder:[0,-1], leclerc:[0,-1], leopard:[0,-1], challenger:[0,-1], b11:[0,1], f16:[0,-1], su35:[0,-1], t84bm:[0,-1], t72:[0,1], t62:[0,-1] };
+const SPRITE_FRONT = { abrams:[-1,0], t90:[-1,0], harvester:[0,-1], destroyer:[0,-1], transport:[0,-1], tank:[0,-1], infantry:[0,1], exo:[0,1], magnet:[0,-1], mcv:[0,1], airfield_car:[0,-1], bradley:[0,-1], marder:[0,-1], leclerc:[0,-1], leopard:[0,-1], challenger:[0,-1], b11:[0,1], f16:[0,-1], su35:[0,-1], t84bm:[0,-1], t72:[0,1], t62:[0,-1], t80:[0,-1], merkava:[0,-1] };
 // 草地贴图块:由 tools/split-terrain.js 从"草地.png"切成 4x4=16 块,
 // 每个草地格随机取一块平铺,提升陆地细致度
 const TERRAIN_TILE_COUNT = 16;
@@ -674,7 +773,7 @@ function isCoastProtruding(x, y){
 // 可碾树的重型单位:坦克/艾布拉姆/T90/基地车/采矿车/两栖运输艇/机场建筑车/新步兵战车主战坦克
 function crushesTrees(type){
   return type==='tank' || type==='abrams' || type==='t90' || type==='mcv' || type==='harvester' || type==='transport' || type==='airfield_car' ||
-         type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='t84bm' || type==='t72' || type==='t62';
+         type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='t84bm' || type==='t72' || type==='t62' || type==='t80' || type==='merkava';
 }
 function preloadImages(onProgress){
   // 预缓存全部贴图:返回 Promise,全部加载完成(或失败容错)后 resolve。
@@ -708,7 +807,7 @@ function preloadImages(onProgress){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-const GAME_VERSION = 'v93';
+const GAME_VERSION = 'v114';
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');

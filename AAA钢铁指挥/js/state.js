@@ -10,6 +10,7 @@ let keys = {};
 let credits = [10000, 3500];
 let selected = [];          // 选中的单位
 let selBuilding = null;     // 选中的建筑
+let selectedBlds = [];      // 多选建筑(「选择全体同类」后的批量升级集合,selBuilding 为主选中)
 let placing = null;         // {def} 正在放置的建筑
 let selling = false;        // 出售模式
 let paused = false;         // 暂停

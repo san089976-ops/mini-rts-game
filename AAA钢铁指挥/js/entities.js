@@ -10,6 +10,7 @@ class Unit {
     this.x = x; this.y = y;
     this.hp = d.hp; this.maxHp = d.hp;
     this.speed = d.speed; this.r = d.r;
+    this.invested = 0;                 // 累计升级/安装投入(本体+投入=信息面板显示总价)
     const bx = UNIT_BOX[type];
     this.hw = bx ? bx.hw : d.r*0.85;   // 碰撞箱半宽(方框)
     this.hh = bx ? bx.hh : d.r*0.85;   // 碰撞箱半高(方框)
@@ -44,6 +45,9 @@ class Unit {
     this.ir = false;   this.irUpgrading  = false; this.irProg  = 0;     // 红外干扰装置
     this.irOn = true;                                                    // 红外干扰 开启/关闭
     this.irOn = true;   // 红外干扰 开启/关闭(装好后可切换)
+    // 艾布拉姆专属升级包:TUSK(300盾回15 + 换 M1A2TUSK 外观) / 火炮升级(+15伤+15射程)
+    this.tusk = false; this.tuskUpgrading = false; this.tuskProg = 0;
+    this.gunUp = false; this.gunUpgrading = false; this.gunUpProg = 0;
     this.crushTrees = crushesTrees(type);   // 重型单位可碾倒树林(坦克/两栖登陆艇等)
     this.capacity = d.capacity || 0;
     this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
@@ -58,9 +62,8 @@ class Unit {
     this.vx = 0; this.vy = 0;              // 当前实际速度(像素/秒)
     this.wantVx = 0; this.wantVy = 0;      // 期望速度(来自寻路/追击)
     this.sepVx = 0; this.sepVy = 0;        // 分离力(来自同伴防挤压)
-    // 反应装甲(T90):护盾 + 一次免死
+    // 反应装甲(T90/T72BVM等):护盾 + 一次免死
     this.shield = 0; this.survivedOnce = false;
-    if(type==='t90' && hasResearch(team,'reactiveArmor')) this.shield = REACTIVE_SHIELD;
     // 采矿车
     this.cargo = 0; this.mode = 'mine';
     this.oreTarget = null; this.refinery = null; this.mineT = 0;
@@ -123,6 +126,7 @@ class Building {
     this.x = tx*TILE + d.w*TILE/2; this.y = ty*TILE + d.h*TILE/2;
     this.hp = d.hp; this.maxHp = d.hp;
     this.constructing = true; this.progress = 0; this.buildTime = d.buildTime;
+    this.invested = 0;                 // 累计升级投入(本体+投入=信息面板显示总价/出售返还)
     // 中立建筑(team=-1):出生即完工,不参与建造流程
     if(team < 0){ this.constructing = false; this.progress = 0; this.hp = d.hp; }
     this.armor = d.armor;

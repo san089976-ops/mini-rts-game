@@ -34,13 +34,16 @@ function unitStatsHTML(u, multi){
     h+=statRow('攻速', d.rof>0? d.rof.toFixed(2)+' 秒/发' : '—');
   }
   h+=statRow('移速', d.speed);
-  h+=statRow('造价', '$'+d.cost);
+  h+=statRow('造价', '$'+(d.cost+(u.invested||0)));
   h+=statRow('护甲', ARMOR_NAME[u.armor]||'—');
   if(u.shield>0){
-    const regen = u.type==='t90' ? REACTIVE_REGEN
+    const regen = u.type==='t62' ? t62Level(u).shieldRegen
+      : (u.type==='t80' ? t80Level(u).shieldRegen
+      : (u.type==='t90' ? t90Level(u).shieldRegen
       : (u.type==='t72' ? t72Level(u).shieldRegen
       : (u.type==='tank' && unitFactionOf(u.team)==='soviet' && u.t54Branch ? t54Branch(u).shieldRegen
-      : (u.rarm ? T84BM_SHIELD_REGEN : 0)));
+      : (u.rarm ? T84BM_SHIELD_REGEN
+      : (u.tusk ? TUSK_SHIELD_REGEN : 0))))));
     h+=statRow('护盾', Math.ceil(u.shield)+'/'+unitShieldMax(u)+' (回'+(regen>0?regen+'/秒':' —')+')');
   }
   if(u.fly){
@@ -55,6 +58,9 @@ function unitStatsHTML(u, multi){
   if(!isCarrier(u) && !u.naval && transportCost(u)>0) h+=statRow('占点', transportCost(u)+' 点');
   if(u.type==='challenger') h+=statRow('等级', u.upgrading ? ('升级中 '+Math.floor(u.upgradeProg/CHALL_UPGRADE_TIME*100)+'%') : (u.upgradeLvl>0 ? (u.upgradeLvl+' 级 · '+CHALL_NAMES[u.upgradeLvl]) : '未升级(可升级)'));
   if(u.type==='t72') h+=statRow('型号', u.upgrading ? (t72Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T72_UPGRADE_TIME*100)+'%') : t72Level(u).name);
+  if(u.type==='t62') h+=statRow('型号', u.upgrading ? (t62Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T62_UPGRADE_TIME*100)+'%') : t62Level(u).name);
+  if(u.type==='t80') h+=statRow('型号', u.upgrading ? (t80Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T80_UPGRADE_TIME*100)+'%') : t80Level(u).name);
+  if(u.type==='t90') h+=statRow('型号', u.upgrading ? (t90Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T90_UPGRADE_TIME*100)+'%') : t90Level(u).name);
   if(u.type==='tank' && unitFactionOf(u.team)==='soviet') h+=statRow('型号', u.upgrading ? ('升级中 '+Math.floor(u.upgradeProg/T54_UPGRADE_TIME*100)+'%') : t54Branch(u).name);
   if(u.atgm || u.atgmUpgrading){
     h+=statRow(atgmTypeName(u), u.atgmUpgrading ? ('安装中 '+Math.floor(u.atgmProg/ATGM_UPGRADE_TIME*100)+'%') :
@@ -63,6 +69,12 @@ function unitStatsHTML(u, multi){
   if(u.aps || u.apsUpgrading){
     h+=statRow('自主防御', u.apsUpgrading ? ('安装中 '+Math.floor(u.apsProg/APS_UPGRADE_TIME*100)+'%') :
       (u.aps ? (u.apsOn?'开启':'关闭')+' · 反导弹 '+u.apsAmmo+'/'+APS_MAX_AMMO+(u.apsAmmo<APS_MAX_AMMO?(' · 填充 '+Math.ceil(u.apsReload)+'s'):'')+' · 只反TOW' : ''));
+  }
+  if(u.tusk || u.tuskUpgrading){
+    h+=statRow('TUSK', u.tuskUpgrading ? ('安装中 '+Math.floor(u.tuskProg/TUSK_UPGRADE_TIME*100)+'%') : ('300盾 · 回'+TUSK_SHIELD_REGEN+'/秒 · M1A2外观'));
+  }
+  if(u.gunUp || u.gunUpgrading){
+    h+=statRow('火炮升级', u.gunUpgrading ? ('安装中 '+Math.floor(u.gunUpProg/GUN_UPGRADE_TIME*100)+'%') : ('伤害+'+GUN_DMG+' · 射程+'+GUN_RANGE));
   }
   h+='<div class="udesc">'+(d.desc||UNIT_DESC[u.type]||'')+'</div>';
   return h;
@@ -81,7 +93,7 @@ function buildingStatsHTML(b){
   }
   let h=selImgHTML(bldPanelKey(b.defName));
   h+=hpBarHTML(b.hp,b.maxHp);
-  h+=statRow('造价', '$'+d.cost);
+  h+=statRow('造价', '$'+(d.cost+(b.invested||0)));
   h+=statRow('护甲', ARMOR_NAME[b.armor]||'—');
   h+=statRow('电力', d.power>0? '+'+d.power : (b.powerUse>0? '-'+b.powerUse : '0'));
   h+=statRow('建造时间', d.buildTime.toFixed(1)+' 秒');
@@ -342,7 +354,9 @@ function updatePanel(){
           } else if(selBuilding.upgrading){
             mkAction('升级中...','none',false);
           } else {
-            mkAction('升级 建造厂 $'+COMMAND_UPGRADE_COST,'cmdUp',true);
+            const cn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='command').length;
+            if(cn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+cn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+            mkAction('升级 建造厂 $'+COMMAND_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'cmdUp',true);
           }
         }
       } else if(selBuilding.def.train && selBuilding.def.train.length){
@@ -360,18 +374,26 @@ function updatePanel(){
         if(selBuilding.defName==='factory'){
           if(selBuilding.upgraded){
             const facUnits = unitFactionOf(TEAM_A)==='allies'
-              ? ['abrams','bradley','marder','leclerc','leopard','challenger','puma','mcv']
-              : ['t90','t84bm','t72','b11','mcv'];
+              ? ['abrams','merkava','bradley','marder','leclerc','leopard','challenger','puma','mcv']
+              : ['t90','t84bm','t72','t80','b11','mcv'];
             for(const t of facUnits) mkUnit(t);
           }
           else if(selBuilding.upgrading){ mkAction('升级中...','none',false); }
-          else { mkAction('升级 战车工厂 $'+FACTORY_UPGRADE_COST,'upgrade',true); }
+          else {
+            const fn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='factory').length;
+            if(fn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+fn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+            mkAction('升级 战车工厂 $'+FACTORY_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'upgrade',true);
+          }
         }
         // 兵营:升级 / 高级步兵
         if(selBuilding.defName==='barracks'){
           if(selBuilding.upgraded){ mkUnit(advancedInfantryType(TEAM_A)); }
           else if(selBuilding.upgrading){ mkAction('升级中...','none',false); }
-          else { mkAction('升级 兵营 $'+BARRAX_UPGRADE_COST,'barrackUp',true); }
+          else {
+            const bn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='barracks').length;
+            if(bn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+bn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+            mkAction('升级 兵营 $'+BARRAX_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'barrackUp',true);
+          }
         }
         // 机场:释放停驻的战斗机
         if(selBuilding.defName==='airfield'){
@@ -380,10 +402,14 @@ function updatePanel(){
           if(parked) mkAction('释放战斗机 ('+parked+' 架)','releaseAir',true);
         }
       } else {
+        if(selBuilding.defName==='power'){
+          const pn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='power').length;
+          if(pn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+pn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+        }
         if(selBuilding.defName==='power' && selBuilding.pwrUpgrading){
           mkAction('升级中...','none',false);
         } else if(selBuilding.defName==='power' && selBuilding.powerLevel<POWER_MAX_LEVEL){
-          mkAction('升级发电厂 $'+POWER_UPGRADE_COST,'pwrUp',true);
+          mkAction('升级发电厂 $'+POWER_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'pwrUp',true);
         } else if(selBuilding.defName==='power'){
           mkAction('已满级','none',false);
         } else if(selBuilding.defName==='lab'){
@@ -450,6 +476,24 @@ function updatePanel(){
       else if(first.upgradeLvl<2) mkAction('升级 → '+T72_LEVELS[first.upgradeLvl+1].name+' $'+T72_UPGRADE_COST[first.upgradeLvl+1],'t72Upgrade',true);
       else mkAction('已满级 '+T72_LEVELS[2].name,'none',false);
     }
+    if(first.type==='t62'){
+      // T62 → T64 → T64B → T64BM 四阶升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T62_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<3) mkAction('升级 → '+T62_LEVELS[first.upgradeLvl+1].name+' $'+T62_UPGRADE_COST[first.upgradeLvl+1],'t62Upgrade',true);
+      else mkAction('已满级 '+T62_LEVELS[3].name,'none',false);
+    }
+    if(first.type==='t80'){
+      // T80 → T80B → T80U → T80BVM 四阶升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T80_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<3) mkAction('升级 → '+T80_LEVELS[first.upgradeLvl+1].name+' $'+T80_UPGRADE_COST[first.upgradeLvl+1],'t80Upgrade',true);
+      else mkAction('已满级 '+T80_LEVELS[3].name,'none',false);
+    }
+    if(first.type==='t90'){
+      // T90 → T90M 单次升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T90_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<1) mkAction('升级 → T90M $'+T90_UPGRADE_COST[1],'t90Upgrade',true);
+      else mkAction('已升级 T90M','none',false);
+    }
     if(first.type==='tank' && unitFactionOf(first.team)==='soviet'){
       // T54 双分支升级:二选一,互斥一次
       if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T54_UPGRADE_TIME*100)+'%','none',false);
@@ -462,11 +506,25 @@ function updatePanel(){
       if(first.atgmUpgrading) mkAction(atgmModuleName(first)+' 安装中 '+Math.floor(first.atgmProg/ATGM_UPGRADE_TIME*100)+'%','none',false);
       else if(!first.atgm) mkAction(atgmModuleName(first)+' $'+ATGM_COST,'atgmUp',true);
     }
-    const apsReady = first.type==='abrams' || (first.type==='t72' && first.upgradeLvl===2);
+    const apsReady = first.type==='abrams' || (first.type==='t72' && first.upgradeLvl===2) || first.type==='merkava';
     if(apsReady){
       if(first.apsUpgrading) mkAction('自主防御系统 安装中 '+Math.floor(first.apsProg/APS_UPGRADE_TIME*100)+'%','none',false);
       else if(!first.aps) mkAction('自主防御系统 $'+APS_COST,'apsUp',true);
       else mkAction('自主防御系统:'+(first.apsOn?'开启':'关闭')+' (反导弹 '+first.apsAmmo+'/'+APS_MAX_AMMO+')','apsToggle',true);
+    }
+    // T80BVM / T90M:升级自带自主防御系统(无需安装,仅开关)
+    if((first.type==='t80' && first.upgradeLvl===3) || (first.type==='t90' && first.upgradeLvl===1)){
+      if(first.aps) mkAction('自主防御系统:'+(first.apsOn?'开启':'关闭')+' (反导弹 '+first.apsAmmo+'/'+APS_MAX_AMMO+')','apsToggle',true);
+    }
+    if(first.type==='abrams'){
+      // TUSK 升级包:300盾回15 + 换 M1A2TUSK 外观
+      if(first.tuskUpgrading) mkAction('TUSK 升级包 安装中 '+Math.floor(first.tuskProg/TUSK_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.tusk) mkAction('TUSK 升级包 $'+TUSK_COST,'tuskUp',true);
+      else mkAction('TUSK:300盾 · 回'+TUSK_SHIELD_REGEN+'/秒 · M1A2外观','none',false);
+      // 火炮升级包:+15 伤害 +15 射程
+      if(first.gunUpgrading) mkAction('火炮升级 安装中 '+Math.floor(first.gunUpProg/GUN_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.gunUp) mkAction('火炮升级 $'+GUN_COST,'gunUp',true);
+      else mkAction('火炮升级:伤害+'+GUN_DMG+' · 射程+'+GUN_RANGE,'none',false);
     }
     if(first.type==='t84bm'){
       // 反应装甲模块(300盾/回10)
@@ -478,6 +536,7 @@ function updatePanel(){
       else if(!first.ir) mkAction('红外干扰装置 $'+IR_COST,'irUp',true);
       else mkAction('红外干扰装置:'+(first.irOn?'开启':'关闭'),'irToggle',true);
     }
+    mkAction('选择全体同类','selectSameType',true);
     mkAction('全选作战单位','selectall',true);
     return;
   }

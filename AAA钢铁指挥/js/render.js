@@ -2075,10 +2075,12 @@ function drawSel(){
     ctx.beginPath(); ctx.moveTo(tx-10,ty); ctx.lineTo(tx+10,ty); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(tx,ty-10); ctx.lineTo(tx,ty+10); ctx.stroke();
   }
-  if(selBuilding && selBuilding.alive){
+  const selBldList = selectedBlds.length ? selectedBlds : (selBuilding?[selBuilding]:[]);
+  for(const b of selBldList){
+    if(!b.alive) continue;
     const pul=0.5+0.5*Math.sin(time*6);
-    const bx=selBuilding.tx*TILE-3, by=selBuilding.ty*TILE-3;
-    const bw=selBuilding.w*TILE+6, bh=selBuilding.h*TILE+6;
+    const bx=b.tx*TILE-3, by=b.ty*TILE-3;
+    const bw=b.w*TILE+6, bh=b.h*TILE+6;
     // 选中框:圆角贴地轮廓(代替生硬正方形),底部压一条接地亮线
     ctx.strokeStyle='rgba(140,255,170,'+(0.55+0.45*pul)+')'; ctx.lineWidth=2;
     roundRectPath(bx, by, bw, bh, 5); ctx.stroke();
@@ -2126,7 +2128,7 @@ function drawSelling(){
   for(const b of buildings){
     if(!b.alive || b.team!==TEAM_A || b.defName==='command') continue;
     const x=b.tx*TILE, y=b.ty*TILE, w=b.w*TILE, h=b.h*TILE;
-    const refund=Math.floor(b.def.cost*(b.constructing?0.5:0.75));
+    const refund=Math.floor((b.def.cost+(b.invested||0)) * 0.75);   // 出售获利 = 本体造价 + 升级投入总价 的 75%
     ctx.fillStyle='rgba(255,80,80,.15)'; ctx.fillRect(x,y,w,h);
     ctx.strokeStyle='#ff6a6a'; ctx.lineWidth=2; ctx.strokeRect(x-2,y-2,w+4,h+4);
     ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(b.x-18, y-18, 36, 14);

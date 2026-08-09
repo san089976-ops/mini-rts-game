@@ -153,7 +153,7 @@ function updateAI(dt, team){
     if(time>55 && !aiHas(team,'lab') && credits[team]>900) aiPlaceBuilding(team,'lab');
     const lab = buildings.find(b=>b.team===team && b.defName==='lab' && b.alive && !b.constructing && !b.researching);
     if(lab && credits[team]>=800){
-      const order = ['oreRefine','advTurret','depletedUranium','reactiveArmor'];
+      const order = ['oreRefine','advTurret','depletedUranium'];
       for(const id of order){
         const rd = RESEARCH_DEFS[id];
         if(!rd) continue;
