@@ -2,6 +2,7 @@
 /* ============ entities.js: 实体类 ============ */
 class Unit {
   constructor(type, team, x, y){
+    this.uid = (Unit._seq = (Unit._seq||0) + 1);   // 稳定唯一ID(右侧机场飞机面板按钮定位用)
     const fac = unitFactionOf(team);
     const d = getUnitDefs(fac)[type];
     this._def = d;
@@ -9,6 +10,7 @@ class Unit {
     this.x = x; this.y = y;
     this.hp = d.hp; this.maxHp = d.hp;
     this.speed = d.speed; this.r = d.r;
+    this.invested = 0;                 // 累计升级/安装投入(本体+投入=信息面板显示总价)
     const bx = UNIT_BOX[type];
     this.hw = bx ? bx.hw : d.r*0.85;   // 碰撞箱半宽(方框)
     this.hh = bx ? bx.hh : d.r*0.85;   // 碰撞箱半高(方框)
@@ -19,6 +21,33 @@ class Unit {
     this.armor = d.armor;
     this.naval = !!d.naval;        // 只能在水中航行
     this.amphib = !!d.amphib;      // 陆海两栖
+    this.fly = !!d.fly;            // 空军单位:飞越一切地形,移动/碰撞/渲染按飞行处理
+    this.homeBase = null;          // 所属机场(生产它的建筑):用于统计停机位占用
+    this.parked = false;           // 停驻在机场内(占停机位,不渲染/不参战)
+    this.patrol = null;            // 盘旋中心 {x,y}(释放=机场点;右键移动=目标点)
+    this._returning = false;       // 正在返回机场入住
+    // 空军武器包(F16/苏35,替换原测试炸弹包):A-120c 空对空 / A-174b 空对地
+    this.aa = false; this.aaUpgrading = false; this.aaProg = 0;   // A-120c 已装/安装中/进度
+    this.aaAmmo = 0; this.aaCd = 0;                               // A-120c 弹舱/冷却
+    this.ag = false; this.agUpgrading = false; this.agProg = 0;   // A-174b 已装/安装中/进度
+    this.agAmmo = 0; this.agCd = 0;                               // A-174b 弹舱/冷却
+    this.modeAA = 0; this.modeAG = 0;                             // 攻击模式:0手动/1自动/2倾泻
+    this.aaScan = null; this.aaLastFire = null;                   // 雷达自动:圈内集合/单目标冷却
+    this.agScan = null; this.agLastFire = null;
+    this.radar = false; this.radarUpgrading = false; this.radarProg = 0;   // 雷达火控
+    this.coat = false; this.coatUpgrading = false; this.coatProg = 0;     // 涂层更新
+    this._mission = null;          // 出战任务: {kind:'precision', target} | {kind:'distributed', jobs:[{target,type,count,fired}]}(出击规划用)
+    this._needRefuel = false;      // 任一弹舱已空,需要返场补充弹药
+    this._refuelAfterMove = false; // 玩家下了移动指令:先执行指令,到位后再自动返场
+    this._refuelArriveT = 0;       // 已到达新盘旋点后的计时(执行完指令的判定)
+    // T84BM 专属升级模块:反应装甲(300盾/回10) + 红外干扰装置(前方120°扇形干扰敌TOW)
+    this.rarm = false; this.rarmUpgrading = false; this.rarmProg = 0;   // 反应装甲模块
+    this.ir = false;   this.irUpgrading  = false; this.irProg  = 0;     // 红外干扰装置
+    this.irOn = true;                                                    // 红外干扰 开启/关闭
+    this.irOn = true;   // 红外干扰 开启/关闭(装好后可切换)
+    // 艾布拉姆专属升级包:TUSK(300盾回15 + 换 M1A2TUSK 外观) / 火炮升级(+15伤+15射程)
+    this.tusk = false; this.tuskUpgrading = false; this.tuskProg = 0;
+    this.gunUp = false; this.gunUpgrading = false; this.gunUpProg = 0;
     this.crushTrees = crushesTrees(type);   // 重型单位可碾倒树林(坦克/两栖登陆艇等)
     this.capacity = d.capacity || 0;
     this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
@@ -33,20 +62,29 @@ class Unit {
     this.vx = 0; this.vy = 0;              // 当前实际速度(像素/秒)
     this.wantVx = 0; this.wantVy = 0;      // 期望速度(来自寻路/追击)
     this.sepVx = 0; this.sepVy = 0;        // 分离力(来自同伴防挤压)
-    // 反应装甲(T90):护盾 + 一次免死
+    // 反应装甲(T90/T72BVM等):护盾 + 一次免死
     this.shield = 0; this.survivedOnce = false;
-    if(type==='t90' && hasResearch(team,'reactiveArmor')) this.shield = REACTIVE_SHIELD;
     // 采矿车
     this.cargo = 0; this.mode = 'mine';
     this.oreTarget = null; this.refinery = null; this.mineT = 0;
     this.sepT = 0;
     // 挑战者坦克升级状态(0/1/2 级)
     this.upgradeLvl = 0; this.upgrading = false; this.upgradeProg = 0;
+    // T54 双分支升级状态(苏军 tank):0=未升 / 1=T54B / 2=T55AM(互斥一次)
+    this.t54Branch = 0;
+    this.t54Target = 0;              // 升级进行中的目标分支(完成后才写入 t54Branch)
     // 反坦克导弹模块(美洲狮/黄鼠狼/布拉德利)
     this.atgm = false;              // 是否已装备反坦克导弹模块
     this.atgmUpgrading = false;     // 正在安装模块
     this.atgmProg = 0;              // 安装进度
     this.atgmReload = 0;            // 导弹装填倒计时(0=就绪)
+    this.aps = false;               // 是否已安装自主防御系统(艾布拉姆专属)
+    this.apsUpgrading = false;      // 正在安装 APS
+    this.apsProg = 0;               // 安装进度
+    this.apsOn = true;              // 自主防御 开启/关闭
+    this.apsAmmo = 0;               // 反导弹弹夹剩余(上限 APS_MAX_AMMO)
+    this.apsReload = 0;             // 反导弹填充倒计时(0=可直接补弹)
+    this.apsEngaged = [];           // 已接战(发射过反导)的来袭导弹记录:每个新导弹只打一发
     // 上次收到玩家移动指令的时间:用于战斗脱离保护期(刚被拉动时不被拉回战斗)
     this._lastMoveCmd = -99;
     // 载具物理感渲染状态(只影响绘制偏移,不改逻辑坐标)
@@ -58,11 +96,20 @@ class Unit {
   }
   // 该单位处在 (x,y) 且朝向为 facing 时,两个碰撞圆的中心与半径(胶囊近似)。
   // 圆形单位(colOff=0)只返回一个圆;长条单位返回车头(+facing)/车尾(-facing)两圆。
+  // 结果写入单位自带缓冲 _circles 复用,避免 separateAll/resolveRigid 每帧分配对象。
+  // 注意:结果只读且即刻使用,不得跨多次调用保存;不同单位缓冲互不干扰。
   circlesAt(x, y, facing){
     const c = this.colOff || 0;
-    if(c <= 0) return [{x, y, r:this.colR}];
+    const r = this.colR;
+    let buf = this._circles;
+    if(!buf) buf = this._circles = [{x:0,y:0,r:0},{x:0,y:0,r:0}];
+    buf[0].x = x; buf[0].y = y; buf[0].r = r;
+    if(c <= 0){ buf.length = 1; return buf; }
     const fx = Math.cos(facing), fy = Math.sin(facing);
-    return [{ x:x+fx*c, y:y+fy*c, r:this.colR }, { x:x-fx*c, y:y-fy*c, r:this.colR }];
+    if(buf.length < 2) buf.push({x:0,y:0,r:0});
+    buf[1].x = x-fx*c; buf[1].y = y-fy*c; buf[1].r = r;
+    buf.length = 2;
+    return buf;
   }
   circles(){ return this.circlesAt(this.x, this.y, this.facing); }
   get alive(){ return this.hp > 0; }
@@ -79,6 +126,7 @@ class Building {
     this.x = tx*TILE + d.w*TILE/2; this.y = ty*TILE + d.h*TILE/2;
     this.hp = d.hp; this.maxHp = d.hp;
     this.constructing = true; this.progress = 0; this.buildTime = d.buildTime;
+    this.invested = 0;                 // 累计升级投入(本体+投入=信息面板显示总价/出售返还)
     // 中立建筑(team=-1):出生即完工,不参与建造流程
     if(team < 0){ this.constructing = false; this.progress = 0; this.hp = d.hp; }
     this.armor = d.armor;
@@ -123,7 +171,8 @@ class Missile {
     this.x=x; this.y=y;
     this.target=target;      // 制导目标(单位/建筑)
     this.team=team; this.attacker=attacker;
-    this.spriteType=spriteType;        // 'tow' | 'spike'
+    this.spriteType=spriteType;        // 'tow' | 'spike' | 'a120c'(F16空对空) | 'a174b'(F16空对地) | 'r37m'(苏35空对空) | 'kh29'(苏35空对地)
+    this.air=false;                    // 空军导弹(A-120c/A-174b):不可被红外干扰/APS反导/目标挡弹
     this.speed=ATGM_SPEED*ATGM_START_FACTOR;   // 先加速
     this.maxSpeed=ATGM_SPEED;
     this.accel=ATGM_ACCEL;
@@ -132,6 +181,22 @@ class Missile {
     this.maxRange=ATGM_RANGE;
     this.damage=ATGM_DAMAGE;
     this.explodeR=ATGM_AOE_RADIUS;
+    this.dead=false;
+  }
+  get alive(){ return !this.dead; }
+}
+/* ============ 自主防御反导弹(拦截弹):朝来袭的 TOW 导弹追踪,命中即摧毁 ============ */
+class Interceptor {
+  constructor(x, y, targetMissile, team){
+    this.x=x; this.y=y;
+    this.targetMissile=targetMissile;   // 目标:来袭的 TOW 导弹(missiles 里的对象)
+    this.team=team;
+    this.speed=APS_COUNTER_SPEED*0.4;   // 初速(先加速后匀速)
+    this.maxSpeed=APS_COUNTER_SPEED;
+    this.accel=ATGM_ACCEL;
+    this.ang=Math.atan2(targetMissile.y-y, targetMissile.x-x);
+    this.travelled=0;
+    this.maxRange=APS_RANGE+60;
     this.dead=false;
   }
   get alive(){ return !this.dead; }

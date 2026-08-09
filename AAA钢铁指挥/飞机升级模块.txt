@@ -1,0 +1,161 @@
+===============================================================================
+《钢铁指挥》飞机升级模块 具体事项与经验
+（A-120c 空对空导弹包 + A-174b 空对地导弹包 + 雷达火控 + 涂层更新）
+===============================================================================
+
+本文件记录 F16/苏-35 战斗机上的"额外升级模块"的完整逻辑、代码位置和踩坑经验。
+这套系统替换了旧的"测试炸弹包"(PLANE_BOMB_*)。改代码前先通读。
+
+-------------------------------------------------------------------------------
+一、模块总览
+-------------------------------------------------------------------------------
+| 模块          | 价格 | 安装时间 | 弹舱/效果                        |
+| A-120c 空对空 | 1000 | 15秒     | 2发 · 伤200 · 速180 · 射程300     |
+| A-174b 空对地 | 1000 | 15秒     | 2发 · 伤650 · 速150 · 射程310     |
+| 雷达火控      | 2500 | 15秒     | 射程+30;解锁攻击模式按键(1号/2号) |
+| 涂层更新      | 1200 | 15秒     | 敌方雷达式探测范围 -50             |
+
+适用单位:F16(盟军)/ 苏35(苏军),两套导弹包可同时装、各自独立弹舱。
+核心文件:
+  js/config.js    AA_*/AG_*/RADAR_*/COAT_*/AIR_MISSILE_CD/airMissileEffRange()/
+                  AIR_MODE_MANUAL|AUTO|DUMP/AIR_MODE_NAME/isAirWpnUnit()
+  js/entities.js  Unit 构造里 aa/aaAmmo/aaCd/modeAA/aaScan/aaLastFire、
+                  ag/agAmmo/agCd/modeAG/agScan/agLastFire、radar、coat 及各自
+                  Upgrading/Prog;Missile 类 this.air(空军导弹标记)
+  js/build.js     startAAUpgrade/startAGUpgrade/startRadarUpgrade/startCoatUpgrade
+  js/update.js    updateAircraft(安装进度+手动攻击+雷达自动)、
+                  updatePlaneRadarWeapon(u,dt,'aa'|'ag')、
+                  launchAirMissile(u,target,kind)、planeNeedRefuel(u)、
+                  updateMissiles 的 if(m.air) 分支
+  js/orders.js    orderAttack 按 enemy.fly 分流 aa/ag;giveOrder selHasFly 允许
+                  飞机指定敌机(地面部队仍不能点飞机)
+  js/ui.js        updatePanel 4 安装按钮 + 2 模式键;updateAirPanel 每架 4 小按钮;
+                  unitStatsHTML 弹舱/模式/涂层行
+  js/input.js     'aaUp'/'agUp'/'radarUp'/'coatUp'/'modeAA'/'modeAG'
+  js/render.js    drawMissiles 三种导弹贴图;drawSel 雷达探测圈虚线圆
+  贴图:img/units/aim120c_field.png(长24px)/aim174b_field.png(长28px),机头朝上
+
+-------------------------------------------------------------------------------
+二、A-120c 空对空导弹包(只打飞机)
+-------------------------------------------------------------------------------
+  常量:AA_COST=1000 / AA_UPGRADE_TIME=15 / AA_AMMO=2 / AA_RANGE=300 /
+        AA_DAMAGE=200 / AA_SPEED=180 / AA_SPRITE='aim120c_field' / AA_SPRITE_LEN=24。
+  设计:空对空导弹,只能右键攻击敌机时发射(目标必须是 fly 单位),地面/建筑打不了。
+  手动发射条件(updateAircraft):
+    u.target.fly === true 且 u.aa 已装 且 u.aaAmmo>0 且 u.aaCd<=0
+    且 dist(u,target) <= airMissileEffRange(u, AA_RANGE, target)。
+  冷却:每发之间 u.aaCd = AIR_MISSILE_CD(1.2s),防止每帧连射瞬间清空弹舱。
+  右键判定:orders.js orderAttack 里 enemy.fly → 走 A-120c 分支(giveOrder 的
+    selHasFly 让战斗机选择能指定敌机;纯地面部队仍然点不了飞机)。
+
+-------------------------------------------------------------------------------
+三、A-174b 空对地导弹包(只打地面)
+-------------------------------------------------------------------------------
+  常量:AG_COST=1000 / AG_UPGRADE_TIME=15 / AG_AMMO=2 / AG_RANGE=310 /
+        AG_DAMAGE=650 / AG_SPEED=150 / AG_SPRITE='aim174b_field' / AG_SPRITE_LEN=28。
+  设计:空对地导弹,只能右键地面单位/建筑时发射(target 非 fly)。
+  手动发射条件:u.target.fly !== true 且 u.ag 已装 且 u.agAmmo>0 且 u.agCd<=0
+    且 dist <= airMissileEffRange(u, AG_RANGE, target)。
+  威力大(650)、射程远(310),是清地面/拆建筑的主力。
+
+-------------------------------------------------------------------------------
+四、空军导弹弹体(Missile.air)——三种导弹的统一与区别
+-------------------------------------------------------------------------------
+  1. 与 TOW/长钉(地面 ATGM)的"本质一致":先加速后匀速、限转角追踪目标、
+     命中(或超射程/目标死亡)爆炸、AOE 范围伤害(explodeATGM)。
+  2. 与 TOW/长钉的三大区别(用户明确要求):
+     · 不可被 T84BM 红外干扰:IR 探测条件 spriteType!=='tow',
+       a120c/a174b 天然不属于 'tow',不会被打上 jammed。
+     · 不可被 APS(自主防御)反导:APS 探测条件从"非 spike"收紧为
+       "必须是 tow"(m.spriteType!=='tow' 直接跳过)。
+     · 不被任何目标挡弹:updateMissiles 的 if(m.air) 分支【不查 atgmBlocker】,
+       穿透一切直奔目标。
+  3. 建弹:launchAirMissile(u, target, kind) —— kind 'aa'|'ag' 决定贴图/速度/
+     伤害/射程,new Missile 后覆盖 m.speed/maxSpeed/maxRange/m.damage,置 m.air=true。
+  4. 渲染:drawMissiles 按 spriteType 三路分支(tow/spike 横向贴图 rotate(m.ang);
+     a120c/a174b 机头朝上贴图 rotate(m.ang+π/2),长轴按【高】对齐到
+     AA_SPRITE_LEN/AG_SPRITE_LEN)。朝上贴图的尾焰画在本地 +y(弹尾)。
+
+-------------------------------------------------------------------------------
+五、返场补弹逻辑(任一弹舱打空即返场,玩家指令优先)
+-------------------------------------------------------------------------------
+  1. 触发:只要 A-120c 或 A-174b 任一弹舱归零 → planeNeedRefuel(u):
+       置 u._needRefuel=true;若不在"移动后返场"状态则立刻 _returning=true。
+  2. 玩家移动指令优先:若玩家在返场途中/打空后下达移动指令(orderMove),
+     orderMove 里 if(u._needRefuel) 置 _refuelAfterMove=true 并取消立即返场;
+     飞机先飞到新盘旋点,盘旋约 2 秒(视为执行完指令)再自动返场。
+  3. 返场落地 parkAircraft:清 _needRefuel/_refuelAfterMove,并补满 aaAmmo=AA_AMMO、
+     agAmmo=AG_AMMO。releaseAircraft(释放)也各补满(双保险)。
+  4. 旧版是单弹舱(bombAmmo),现在是双弹舱各自判定;别漏掉任何一边。
+
+-------------------------------------------------------------------------------
+六、雷达火控(射程+30 + 三态攻击模式)
+-------------------------------------------------------------------------------
+  1. 常量:RADAR_COST=2500 / RADAR_UPGRADE_TIME=15 / RADAR_RANGE_BONUS=30;
+     模式:AIR_MODE_MANUAL=0 / AIR_MODE_AUTO=1 / AIR_MODE_DUMP=2;AIR_MODE_NAME。
+  2. 效果:所有己方导弹有效射程 +30(经 airMissileEffRange);
+     解锁两个模式键(1号→A-120c / 2号→A-174b),按键循环
+     手动 → 自动分配 → 倾泻 → 手动(仅对应武器已装时按键可用)。
+  3. 自动分配/倾泻(updatePlaneRadarWeapon(u,dt,'aa'|'ag')):
+     · 探测圈 = 以自己为圆心、半径 = 武器有效射程(airMissileEffRange)。
+       AA 圈查敌方飞机;AG 圈查敌方地面单位+建筑。
+     · 每帧重建"当前圈内" Set,与上一帧(u.aaScan/u.agScan)对比:
+        新进入圈内的敌人:
+          自动模式 → 打 1 发,lastFire[该单位]=time;
+          倾泻模式 → while(有弹) 一次打光全部(齐射)。
+     · 自动模式补刀:lastFire(Map,单位对象做键)里仍在圈内且存活、且距上次发射
+       ≥AIR_MODE_AUTO_COOLDOWN(2.8秒) → 再打 1 发,直到炸死或弹舱空。
+       (A-120c/A-174b 都是 2.8 秒对同一单位再补刀;手动发射的两发之间仍用
+       AIR_MISSILE_CD=1.2s,二者不是一回事,别混。)
+     · 弹药打光自动 planeNeedRefuel 返场(与手动一致)。
+  4. 渲染:选中处于自动/倾泻模式的飞机,drawSel 画该武器探测圈虚线圆(便于观察)。
+
+-------------------------------------------------------------------------------
+七、涂层更新(敌方雷达式探测 -50)
+-------------------------------------------------------------------------------
+  1. 常量:COAT_COST=1200 / COAT_UPGRADE_TIME=15 / COAT_RANGE_PENALTY=50。
+  2. 效果:本机进入任何"敌方雷达式探测"时,等效对方探测范围缩小 50px。
+     核心函数 airMissileEffRange(u, base, target):
+         return base + (u.radar ? 30 : 0) - (target.coat ? 50 : 0);
+     即:己方雷达 +30(在射击方算),目标涂层 -50(在被探测方算)。
+  3. 适用:空对空导弹有效射程、雷达自动探测圈;未来新增地对空导弹(SAM)/雷达
+     系统时,只要都走 airMissileEffRange 或等效判定,涂层自动生效。
+  4. 踩坑:涂层只作用于"飞机目标"(地面单位没有 coat,空对地不受影响);
+     +30 与 -50 会同时存在,别漏算其中一边。
+
+-------------------------------------------------------------------------------
+八、踩坑记录(真实事故)
+-------------------------------------------------------------------------------
+  1. 新导弹贴图"朝上"渲染:朝上的导弹贴图不能照抄 tow/spike 的 rotate(m.ang),
+     必须 rotate(m.ang + π/2);等比缩放的基准轴也不同——横向贴图按宽、朝上贴图
+     按高对齐到目标长度。
+  2. APS 漏反新导弹:APS 原来条件是"非 spike 就反",会连 A-120c/A-174b 一起拦;
+     必须收紧为"只反 tow",否则新导弹能被 APS 反掉(违背"不可被反导")。
+  3. 目标类型判定:空对空目标必须是敌方飞机;测试里用 `new Unit('f16',1,...)`
+     建苏军敌机直接崩(getUnitDefs('soviet')['f16'] undefined)——苏军要用 su35。
+  4. 弹舱冷却缺失:手动攻击分支每帧都会进,若不加 u.aaCd/u.agCd 冷却会一帧把
+     2 发全打出去;加了 1.2s 冷却才有"打一发、等装填"的节奏。
+  5. 返场只看一个弹舱:双弹舱下如果只判 aaAmmo 会漏 agAmmo;必须任一归零即返场。
+  6. 雷达自动的"新进入"判定:必须用上一帧的圈内集合做差分,否则导弹一直在圈内
+     会每帧全打光(与 APS 的 apsEngaged 同思路);lastFire 用 Map 存单位引用,
+     死亡/出圈的及时 delete,防止内存膨胀。
+  7. 测试残留敌人干扰探测圈:雷达自动测试若圈内还有旧敌机会多打一发,断言就乱;
+     测试前先清场(把上一批敌机 hp=0 并 filter)。
+  8. 迁移旧炸弹包:改之前先 grep 全部 bomb/PLANE_BOMB 引用(entities/config/build/
+     update/orders/ui/input/右侧机场面板),一次性换干净,别留半套。
+
+-------------------------------------------------------------------------------
+九、如何验证
+-------------------------------------------------------------------------------
+  冒烟测试(拼接全部 js + DOM/canvas stub):
+    - 安装 A-120c/A-174b → 各弹舱 2/2;价格各扣 1000
+    - 右键地面建筑 → A-174b x2 打空自动返场补弹
+    - 右键敌机(厚血靶机)→ A-120c 连射 2 发,敌机掉血,自动返场
+    - 地面部队索敌/右键/强制攻击均不能点飞机;战斗机可空对空
+    - 右侧机场面板不释放安装 A-120c
+    - 空弹 → 玩家移动指令先执行(飞到新盘旋点)再自动返场
+    - 雷达火控:射程+30;自动分配"新进入圈打1发";倾泻"进入打光全部"
+    - 涂层:敌方对涂层机的有效射程 = 基础-50
+    - render() 无异常(含新导弹贴图/雷达圈分支)
+  语法检查:node --check js/*.js
+===============================================================================
