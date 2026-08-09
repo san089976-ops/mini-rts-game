@@ -14,12 +14,17 @@
   img/units/*.png       单位素材（含坦克照片贴图）
   tools/process-sprite.js  单位照片素材预处理脚本（去背景/裁切/居中）
   img/units/README.txt  素材替换说明
+  坦克与步兵战车修改经验.txt  坦克/步战车贴图结构与缩放经验（方向约定、几分之几法则等）
+  装甲升级包具体事项.txt  升级包类功能的经验与逻辑（反坦克导弹 TOW/长钉、自主防御系统、T84BM反应装甲/红外干扰）
+  飞机与机场修改经验.txt  飞机/机场/飞机升级模块的经验与踩坑（停驻/释放/盘旋/返场/测试炸弹包）
+  飞机升级模块.txt  飞机额外升级模块的经验与逻辑（A-120c空对空/A-174b空对地/雷达火控/涂层更新）
+  F16战斗机技术文档.txt  F-16 战斗机完整技术文档（属性/机场生产/盘旋/双导弹包/雷达火控/涂层/返场）
 
 【JS 加载顺序（勿乱，存在函数/变量依赖）】
-  config.js   常量、护甲/弹丸克制、单位/建筑/科技定义、贴图映射、RENDER_SCALE、SPRITE_ROT
-  state.js    全局状态变量与工具函数（canvas、cam、credits、units/buildings 数组等）
+  config.js   常量、护甲/弹丸克制、单位/建筑/科技定义、贴图映射、RENDER_SCALE、SPRITE_ROT、升级包常量(ATGM/APS)
+  state.js    全局状态变量与工具函数（canvas、cam、credits、units/buildings 数组、missiles/interceptors 等）
   maps.js     地图预设 MAPS、出生点 SPAWN_POINTS、getSpawns()
-  entities.js Unit / Building / Projectile / Effect 类
+  entities.js Unit / Building / Projectile / Missile / Interceptor / Effect 类
   map.js      genTerrain() 地形生成、genNavalTerrain() 海战图、通行性(unitPassable/uCellBlocked)
   path.js     寻路(A*)：findPath(陆地) / findPathFor(单位) / pathFor() 自动分流
               + smoothPath() 路径拉直:把 A* 逐格直角阶梯塌缩成直线段(lineClear 做
@@ -32,8 +37,8 @@
   ai.js       电脑对手逻辑
   ui.js       底部 HUD 面板（选中信息、建造/生产按钮）
   input.js    键盘/鼠标输入（QWERTYUI 快捷键、编队、框选、小地图）
-  update.js   每帧更新：战斗、寻路、生产、装卸、胜负判定
-  render.js   渲染：地形、建筑、单位、弹丸、特效、小地图、坦克照片贴图
+  update.js   每帧更新：战斗、寻路、生产、装卸、胜负判定、导弹/拦截弹/自主防御
+  render.js   渲染：地形、建筑、单位、弹丸、导弹/拦截弹、特效、小地图、坦克照片贴图
   menu.js     主菜单（地图卡片/队伍/资金/分组/颜色/出生点）
   music.js    背景音乐(4 首 mp3 循环)、开关/持久化、设置弹层入口
   game.js     主循环 frame()、resize()、setupGame()、启动入口
@@ -51,7 +56,7 @@
 
 【单位/建筑/护甲系统】
   单位定义在 getUnitDefs(faction)（按阵营返回），建筑在 BLD_DEFS。
-  弹丸类型：cannon火炮 / bullet子弹 / machinegun机炮。
+  弹丸类型：cannon火炮 / bullet子弹 / machinegun机炮 / missile导弹(反坦克导弹,走 MISSILE_MOD 修正表)。
   护甲类型：cloth布甲/steel钢甲/castiron铸铁甲/titanium钛合金甲/concrete混凝土/wood木甲。
 
 【菜单流程(模式选择页 + 遭遇战设置)】
@@ -290,6 +295,67 @@
      浅色描边)再 trimContent() 重新收紧——彻底清掉白底照片的渐变白边/抗锯齿光晕/下采样残边
      (车辆内部白色部件不受影响)。新素材按旧命令重跑即可。
 
+【空军系统：机场生产战斗机(停驻/释放/盘旋/武器模块,近期新增)】
+  机场 airfield(2x3,由机场建筑车展开)生产战斗机:
+   - F-16 盟军专属 / 苏-35 苏军专属(照片挖白底,机头朝上,img/units/f16_field.png 等,
+     SPRITE_ROT=π/2,SPRITE_FRONT=[0,-1],SPRITE_SCALE=0.5859375)。价格各 12000、生产 20 秒。
+   - 属性:血 150 / 铸铁甲 / 移速 150 / 无武器(range=0)。def 里 fly:true、slotCost:1;
+     Unit 构造设 this.fly / homeBase / parked / patrol / _returning / _needRefuel /
+     _refuelAfterMove / _refuelArriveT / aa(+aaAmmo/aaCd/modeAA/aaScan/aaLastFire) /
+     ag(+agAmmo/agCd/modeAG/agScan/agLastFire) / radar(+radarUpgrading/radarProg) /
+     coat(+coatUpgrading/coatProg)。
+   - 停机位:每机场 AIRFIELD_CAPACITY=4 格,每架占 planeSlotCost 格(目前1)。
+     airfieldUsedSlots = 存活飞机(homeBase 归属,停驻+出击都算)+ 队列格数,下单即占位。
+   - 生产即停驻:updateBuilding 产出飞机后直接 parkAircraft(进机场占停机位,不设集结点)。
+   - 释放/返场:
+     · 选中机场点「释放战斗机」→ releaseAircraft:全部停驻飞机在机场周围散开,
+       围绕机场上空盘旋(patrol=机场中心)。
+      · 右键己方机场(选中飞机)→ 返场:飞回 homeBase,距离≤60px 即 parkAircraft 入住,
+        入住重新装弹(aaAmmo=AA_AMMO / agAmmo=AG_AMMO)。
+     · 停驻飞机:不渲染/不上小地图/不可点选(entityAt/boxSelect 跳过)/不参与任何战斗逻辑。
+   - 盘旋(基础设定):orbitAround 绕 patrol 中心半径 PLANE_PATROL_R=48 绕圈(切向+半径修正;
+     太近/太远直接径向飞向轨道,圆心处先沿 facing 挪出 4px 防径向方向抖动)。
+     右键移动 = 改 patrol 为点击点(不是落地)。
+   - 武器模块(替换原"测试炸弹包",F16/苏35,详见《装甲升级包具体事项.txt》六~八节):
+      · A-120c 空对空(1000/15秒):2发/伤200/速180/射程300,只打飞机。
+      · A-174b 空对地(1000/15秒):2发/伤650/速150/射程310,只打地面/建筑。
+      · 两者都:不可被红外干扰/APS反导、不被目标挡弹、爆炸AOE(范围伤只打敌方地面)。
+      · 雷达火控(2500/15秒):射程+30;解锁 1号(A-120c)/2号(A-174b) 模式键
+        (手动→自动分配[进圈打1发,单目标冷却1.2s补刀]→倾泻[进圈打光]→手动),
+        探测圈半径=武器有效射程。
+      · 涂层更新(1200/15秒):本机进入敌方任何雷达式探测等效对方范围-50。
+      · 手动攻击:右键敌机→A-120c;右键地面/建筑→A-174b(giveOrder 允许飞机
+        指定敌机,地面部队仍不能点飞机)。
+   - 关键修坑:
+     · 导弹 AOE 只打敌方(!isEnemy 跳过),发射者也免伤——否则飞机贴脸命中时
+       自己/友机被 300×0.5×1.2=180 的范围伤秒杀(150 血)。
+     · 飞机不参与 stuck 脱困(stuckT 判定加 !u.fly)——圆心处径向方向抖动会导致
+       误判卡住,循环"脱困+让行"把飞机钉在圆心。
+    - 防空(地面打不到飞机):findEnemyNear/碉堡炮台/进驻建筑索敌排除 fly;
+      giveOrder 地面部队右键/强制攻击目标排除 fly(点飞机退化为移动);
+      orderAttack 守卫(地面攻击者跳过 fly 目标);弹道不跟踪飞机;反坦克导弹 AOE
+      跳过 fly;atgmBlocker 不把飞机当挡弹体。只有战斗机装 A-120c 才能空对空。
+    - 攻击 vs 盘旋:攻击指令优先于盘旋——有目标时 updateAircraft 直接 seekVelocity
+      直线飞向目标接战,进入对应射程发射(A-120c/A-174b);任一弹舱打空
+      (planeNeedRefuel)自动返场;无目标/无弹才回到盘旋。
+   - 停机位显示:机场格子只显示"停驻中"的飞机占格(飞出去格子即消除),出击数量
+     在面板文字显示;生产占用(airfieldUsedSlots)仍按停驻+出击+队列计算。
+   - 返场补充弹药:_needRefuel 标记弹舱已空;默认立即 _returning 返场;若玩家在
+     返场途中/打空后下达移动指令(orderMove),先飞到新盘旋点(执行指令)盘旋约2秒
+     再自动返场(parkAircraft 清 _needRefuel 并重新装弹)。
+   - 机场修复:机场对停驻其中的战斗机每秒恢复 10 生命(维修厂修不了飞机)。
+    - 右侧机场飞机面板:#airPanel(右缘 top:225,仅选中己方机场显示)。列出该机场
+      绑定的每架飞机(名称/停驻或出击/血条/各弹舱弹药),每架 4 个小按钮可在
+      不释放的情况下远程安装模块(A-120c/A-174b/雷达/涂层,airPlaneUpgrade(uid,which))。
+      updatePanel 每 0.3s 重建面板,升级进度实时可见。
+   - UI 显示:飞机不显示伤害/射程/攻速三行(伤害靠武器包,另行显示弹舱);
+     不画盘旋半径圈(取消 drawSel 里的虚线圆)。模型缩放 SPRITE_SCALE=0.5859375
+     (0.46875 再放大 1.25 倍)。
+   - 渲染:飞机最后绘制(最高显示权,盖过所有单位/建筑);地面模糊椭圆投影
+     (drawAircraftShadow);本体抬高 AIR_ALTITUDE=16px;尾焰 drawAircraftFlame
+     画在机尾(本地 -x 方向,外焰橙黄/内焰亮白,按时间抖动);血条/角标跟随高度。
+   - 替换素材:node tools/process-sprite.js "新图.png" f16_field img/units 512
+
 【高分辨率渲染 RENDER_SCALE】  画布后备缓冲按 max(devicePixelRatio, RENDER_SCALE) 放大，再 CSS 缩回窗口，
   让画面（含照片贴图）更精细。当前 RENDER_SCALE=4；卡顿可调小。
   逻辑坐标仍按窗口 CSS 尺寸，鼠标取 getBoundingClientRect，勿与 backing store 混淆。
@@ -327,6 +393,56 @@
   建造中(全息投影):地基/阴影按进度淡出,不投浓影。调参集中:config.js 【建筑真实感
   渲染调参】区块(BUILDING_PAD_*/SHADOW_*/AO_*)。
 
+【装甲升级包:反坦克导弹模块 + 自主防御系统(重点,详细经验见"装甲升级包具体事项.txt")】
+  两类升级包走同一套路(六处缺一不可):
+    config.js 加常量 + isXxxUnit 判定;entities.js Unit 构造加字段(xxx/xxxUpgrading/
+    xxxProg + 可选 xxxReload/xxxAmmo/xxxOn/xxxEngaged);build.js 写 startXxxUpgrade(u);
+    update.js updateUnit 推进进度 + 跑运行时逻辑;ui.js 加属性行与按钮;input.js 分发按钮;
+    最后版本号 +1。
+  反坦克导弹(进攻武器):ATGM_TYPES=['puma','bradley','marder'],$150/6秒。
+    - 两种导弹按 spriteType 严格区分,不是一套:
+        TOW  = 布拉德利/黄鼠狼发,贴图 tow_missile(28px)
+        长钉 = 美洲狮发,贴图 spike_missile(25px)
+      launchATGM 里 `u.type==='puma'?'spike':'tow'` 打标;渲染 drawMissiles、
+      APS 拦截过滤都按 spriteType 分叉。命名辅助:atgmMissileName(spriteType)/
+      atgmTypeName(u)/atgmModuleName(u)。
+    - 导弹是"类单位"存全局 missiles 数组(Missile 类):先加速后匀速(speed→maxSpeed+
+      accel)、限转角追踪目标(ATGM_TURN_RATE)、目标死亡原地爆炸、超射程自爆、
+      路径被敌方单位挡路撞上爆炸、命中目标爆炸。伤害=命中者吃单体满伤 + 周围
+      ATGM_AOE_RADIUS 内 50% 范围伤;弹种 proj='missile' 走 MISSILE_MOD(铸铁/钢甲
+      120%,钛合金90%,布/木/混凝土80%)。
+    - 单发装填 ATGM_RELOAD=15s;攻击指令内目标在 ATGM_RANGE(180) 且装填就绪才发射。
+      AI 也会装(ai.js 检查 ATGM_TYPES)。
+    - 踩坑:名称辅助函数漏定义(ui 用 atgmTypeName 而 config 没写)会一点安装按钮就
+      ReferenceError,加函数后 grep 一遍引用点。
+  自主防御系统(被动防御,艾布拉姆专属):APS_TYPES=['abrams'],$500/12秒。
+    - 反导弹弹夹 4 发(APS_MAX_AMMO),每发填充 16s(APS_RELOAD);可开关(apsOn)。
+    - 只反敌方 TOW:条件 m.spriteType!=='spike' && isEnemy(u.team, m.team)。
+    - 反应圈 APS_RANGE=220px:只对"新进入圈内的敌 TOW"各打一发——用 u.apsEngaged[]
+      记录已接战导弹,否则同一枚停在圈内会每帧发射把弹夹打光(真实 bug)。
+    - 反导弹(Interceptor 类)存独立 interceptors 数组:贴图照用 25mm 子弹,速度=
+      ATGM_SPEED×2(420),追踪来袭导弹,命中(APS_HIT_R+4)即拦截——把来袭导弹
+      dead=true(不再造成伤害)+爆炸特效,超射程自毁。渲染 drawInterceptors(绿色曳光)。
+    - 循环顺序:updateMissiles 先动飞弹,updateInterceptors 再追(追最新位置)。
+    - 选中开启 APS 的艾布拉姆画 220px 虚线反应圈(drawSel)。
+
+【T84BM 苏军专属重坦 + 双升级模块(近期新增)】
+  苏军升级战车工厂生产:价格1500/建造12秒/血1100/钛合金甲/火炮伤害120/射程140/
+  射速1.1秒/移速65。车身+炮塔照片(T84BM_body/turret,车头朝上,SPRITE_ROT=π/2),
+  独立旋转炮塔、座圈居中(默认 turretRotCenter=0)、2/3 法则(默认 turretPivotK)。
+  已接入:UNIT_BOX/TRACK_UNITS/isTurretUnit/unitRotOff(π/2)/isTankShellUnit/
+  transportCost(6点)/crushesTrees/IMAGES/SPRITE_SCALE(0.8)/SPRITE_FRONT/
+  SPRITE_BODY_SCALE(0.9,只缩车身不动炮塔)/canTrain+canProduceIn(升级工厂)/ui.js 苏军工厂列表/map KNOWN/map-editor。
+  两个升级模块(均 T84BM 专属、15秒):
+   - 反应装甲(300金):300 护盾、每秒回10。复用 u.shield(applyDamage 盾吸收已放宽
+     为任意 shield>0 单位);装好即满盾,盾破也能再生。UI 护盾行回血按单位动态取。
+   - 红外干扰装置(200金):炮塔朝向为前方 120° 扇形、半径180;敌 TOW 一进入即
+     m.jammed=true(长钉/同队无效),导弹随机乱飞每步16px、满3步 explodeIRJam
+     爆炸——AOE 不分敌我(友军/发射者都吃,飞机免疫),中途撞到任何目标也爆炸。
+     updateMissiles 顶部处理 jammed;irOn 可开关(选中按钮切换),drawSel 扇形在
+     开启时显示。
+  详细经验见《装甲升级包具体事项.txt》第四、五节。
+
 【已知注意事项 / 坑】
   1. 地图尺寸是动态的：改地图前先 setMapSize，别把 MAP_W/H 当常量硬编码。
   2. canvas.getImageData 在 file:// 下会被浏览器安全策略拦截(SecurityError)，
@@ -336,6 +452,12 @@
   4. Unit.cargo 被矿车占用；运输艇的装载是 cargoUnits，不要混。
   5. orderMove 里不要对自己递归（历史：选中运输艇再点运输艇会死循环栈溢出）。
   6. 单位移动、寻路、出生格都要考虑 naval/amphib，用 pathFor/unitPassable/spawnUnitNear 的分支。
+  7. 新增升级包:config 常量 + entities 字段 + build 安装函数 + update 运行时 + ui 按钮
+     + input 分发 + 版本号,七处缺一不可;加函数后 grep 一遍引用防漏定义。
+  8. 探测型武器(如 APS)对持续在范围内的目标只打一发:用 xxxEngaged 记录已接战目标,
+     否则每帧重复发射把弹夹打光。
+  9. ★改 UTF-8 中文文件别用 PowerShell 的 Get-Content/Set-Content(按 ANSI 编解码会
+     把中文写坏,本项目真实事故),用 Node 或编辑工具。
 
 【如何验证】
   无测试框架，靠 Node 语法检查 + 自制 DOM/canvas stub 冒烟测试：

@@ -1,0 +1,314 @@
+===============================================================================
+《钢铁指挥》飞机 / 机场 / 飞机升级模块 修改经验
+（基于:F-16 / 苏-35 战斗机、机场停机驻留、盘旋返场、苏-35 专属导弹 R-37m/Kh-29、
+   出击规划(精确打击/分布式攻击)、飞机绿色移动线、机场面板攻击模式按钮的实际改动）
+===============================================================================
+
+本文件记录本项目里"给游戏加空军单位 + 机场生产 + 飞机升级包"时踩过的坑和沉淀的
+经验。所有结论都以当前代码为准,改代码前先通读下列要点。
+
+-------------------------------------------------------------------------------
+一、整体架构(一句话)
+-------------------------------------------------------------------------------
+飞机 = 普通 Unit(带 fly:true),但走一套完全独立的逻辑:
+  生产即停驻(parkAircraft 进机场)→ 选中机场「释放战斗机」→ 以巡逻点为中心
+  盘旋(orbitAround)→ 右键移动=换盘旋点 / 右键敌人=脱离盘旋直线接战(A-120c 空对空
+  或 A-174b 空对地,任一弹舱打空自动返场)→ 右键己方机场=返场入住(占回停机位 + 装弹)。
+  另有一套"出击规划"高优先级任务(精确打击/分布式攻击,见第十一节):飞机带 _mission
+  时 updateAircraft 先走任务逻辑(updatePlaneMission),任务完成/目标死亡才返场,
+  优先级高于普通盘旋/雷达自动/手动攻击。
+
+关键文件:
+  js/config.js    AIR_TYPES/AIR_FACTION/AIRFIELD_CAPACITY/AIR_ALTITUDE/
+                  PLANE_PATROL_R/AA_*/AG_*/RADAR_*/COAT_*/R37M_*/KH29_*/
+                  airMissileEffRange()/isAircraft()/isPlannablePlane()/airTypeShort()/
+                  airAAName()/airAGName()/airAASpriteType()/airAGSpriteType()
+  js/entities.js  Unit 构造里 this.fly/homeBase/parked/patrol/_returning/_needRefuel/
+                  _refuelAfterMove/_refuelArriveT/aa/ag/radar/coat(+各自Upgrading/Prog/Ammo/
+                  Cd/mode/Scan/LastFire)/uid/_mission
+  js/map.js       unitPassable 对 fly 恒 true(飞越水/树/建筑,不碾树)
+  js/path.js      pathFor / processPathJobs 对 fly 直接返回直线目标点(不跑 A*)
+  js/build.js     canTrain/canProduceIn(机场+阵营+停机位)、airfieldUsedSlots、
+                  tryTrain 停机位提示、startAAUpgrade/startAGUpgrade/startRadarUpgrade/startCoatUpgrade
+  js/update.js    updateAircraft(停驻/返场/任务/攻击/盘旋)、parkAircraft、
+                  releaseAircraft、orbitAround、updatePlaneMission/updatePrecisionMission/
+                  updateDistributedMission、launchPrecisionStrike/launchDistributed
+  js/orders.js    orderMove(飞机=换盘旋点/打断任务)、orderAttack(飞机/地面守卫)、
+                  giveOrder 右键机场返场分支 + 规划阶段右键拦截(精确打击指定目标/分布式分配导弹)
+  js/ui.js        updateAirPanel 右侧机场飞机面板(出击规划区:号位+两个任务按钮+确定/取消)、
+                  airPlaneUpgrade/airPlaneMode/airSlotToggle/airStartPrecision/
+                  airStartDistributed/airConfirmDistributed/airCancelMission
+  js/render.js    drawAircraftShadow(地面模糊投影)、drawAircraftFlame(尾焰)、
+                  飞机最后绘制(最高显示权)、机场停机位小格(只显示停驻)、
+                  drawSel 飞机绿色移动线(飞机→盘旋中心)
+
+-------------------------------------------------------------------------------
+二、素材处理(与坦克同款挖白底)
+-------------------------------------------------------------------------------
+  机头朝上照片直接用,不旋转(游戏里 SPRITE_ROT=π/2 对齐到朝向前方):
+    node tools/process-sprite.js "苏35.png" su35_field img/units 512
+    node tools/process-sprite.js "F16.png"  f16_field  img/units 512
+  惯例:
+    - IMAGES 里 面板图标 key 与战场贴图 key 都用同一张
+      (f16:'img/units/f16_field.png', f16_field:'...') → 选中/面板都有图标。
+    - SPRITE_ROT.f16=su35=Math.PI/2(机头朝上);SPRITE_FRONT=[0,-1](机头方向,
+      决定开火闪光位置);SPRITE_SCALE=0.75(照片飞机约 360~445x515,缩到合适大小)。
+    - 尾焰喷口在"机头朝上贴图"的 +y 侧(机尾),画在 u.facing 本地坐标的 -x 方向。
+
+-------------------------------------------------------------------------------
+三、停机位 / 生产绑定(哪里生产哪里出 + 机场绑定自己产的飞机)
+-------------------------------------------------------------------------------
+  1. BLD_DEFS.airfield.train = ['f16','su35'](两阵营共用列表);
+     ui.js 的 train 循环按 getUnitDefs(playerFaction)[t] 过滤阵营,防跨阵营崩溃。
+  2. canTrain / canProduceIn 对 f16/su35 额外判定:
+        b.defName==='airfield' && AIR_FACTION[type]===unitFactionOf(team)
+        && airfieldUsedSlots(b) < AIRFIELD_CAPACITY
+  3. 停机位占用 = 存活飞机(停驻+出击都算,按 homeBase 归属)+ 队列里的飞机格数:
+        airfieldUsedSlots(b) = aircraftCountOf(b) + Σ queue 的 planeSlotCost(it.type)
+     下单即占位,满 4 格拒绝生产(提示"机场停机位已满")。
+     每架占 planeSlotCost 格(目前 1);未来占多格的飞机在 def 写 slotCost。
+  4. 生产即停驻:updateBuilding 里 spawnUnitNear 之后直接 parkAircraft(u,b),
+     不执行 moveToRally(不给飞机设集结点)。
+  5. spawnUnitNear 里 isAircraft(u) → u.homeBase=b(记录生产机场)。
+
+-------------------------------------------------------------------------------
+四、停驻 / 释放 / 返场
+-------------------------------------------------------------------------------
+  parkAircraft(u,b):
+    - u.parked=true; 坐标归到机场中心;清 order/路径/目标/patrol/_returning;
+      停速;if(u.aa) u.aaAmmo=AA_AMMO; if(u.ag) u.agAmmo=AG_AMMO(入住重新装弹)。
+    - 停驻飞机:不渲染(drawUnit 顶部 return)/不上小地图/不可点选
+      (entityAt、boxSelect 跳过 parked)/不参与任何战斗与碰撞。
+  releaseAircraft(b):
+    - 把该机场所有停驻飞机用 formationTargets 在机场周围散开,
+      u.parked=false; u.patrol={x:b.x, y:b.y}(在机场上空盘旋);出击满弹。
+  updateAircraft 顺序(每帧):
+    模块安装进度 → aaCd/agCd 冷却倒计时 → 停驻(不动)
+    → _returning(朝 homeBase 直线飞,距离≤60 即 parkAircraft)
+    → 出击规划任务(u._mission,见第十一节:精确打击/分布式攻击,接管本机行动,return)
+    → 攻击(见第六节)→ 否则 orbitAround 盘旋。
+  parkAircraft 额外清 u._mission 并把 modeAA/modeAG 复位手动(任务切走的"倾泻"不留残)。
+  返场触发:
+    - 手动:选中飞机右键己方机场(giveOrder 分支,回 homeBase,不要求点中 homeBase)。
+    - 自动:弹舱打空(攻击分支里 ammo→0 置 _returning)。
+    - 机场被摧毁:destroyBuilding 里把停驻飞机自动释放(patrol=残骸点,无法再返场)。
+
+-------------------------------------------------------------------------------
+五、盘旋(基础设定)
+-------------------------------------------------------------------------------
+  orbitAround(u, center, dt):绕 center 半径 PLANE_PATROL_R(48)绕圈。
+    - 速度 = 逆时针切向 + 径向修正;err=(R-d)/R,太近向外/太远向内。
+    - 偏离轨道较远(>85%)时直接朝轨道最近点径向飞(到位自动转入绕圈),防止从远处
+      缓慢螺旋收敛(曾导致右键移动后半天到不了新盘旋点)。
+    - 恰好在圆心(d<2)时:沿当前朝向把坐标挪到半径 4px 处——否则径向方向在圆心
+      来回抖动,速度起不来(真实 bug,见坑 3)。
+  右键移动 = orderMove 对 fly 单位改为 u.patrol={x,y}(不是落地停止)。
+  drawSel 里选中飞机画虚线盘旋圈 + 飞机→盘旋中心连线(方便看它在哪绕)。
+
+-------------------------------------------------------------------------------
+六、空军武器/火控/涂层模块(替换原"测试炸弹包",通用套路)
+-------------------------------------------------------------------------------
+  四个模块(常量全部在 config.js,详见《装甲升级包具体事项.txt》六~八节):
+    A-120c 空对空(AA_COST=1000/15s,AA_AMMO=2,AA_RANGE=300,AA_DAMAGE=200,AA_SPEED=180)
+    A-174b 空对地(AG_COST=1000/15s,AG_AMMO=2,AG_RANGE=310,AG_DAMAGE=650,AG_SPEED=150)
+    雷达火控(RADAR_COST=2500/15s,射程+30,模式按键)
+    涂层更新(COAT_COST=1200/15s,敌方探测-50)
+  安装:startAAUpgrade/startAGUpgrade/startRadarUpgrade/startCoatUpgrade(build.js)
+        → updateAircraft 推对应 Prog → 装好置 true 并满弹。
+  弹体:Missile.air=true 的"空军导弹"(spriteType:
+     'a120c'=F16空对空 / 'a174b'=F16空对地 / 'r37m'=苏35空对空 / 'kh29'=苏35空对地):
+    - 不可被 T84BM 红外干扰(IR 只认 spriteType==='tow');
+    - 不可被 APS 反导(APS 条件收紧为只反 'tow');
+    - 不被任何目标挡弹(m.air 分支不查 atgmBlocker);
+    - 直线追踪(限转角)+ 命中爆炸 AOE(explodeATGM)。
+    launchAirMissile(u,target,kind) 建弹并覆盖速度/射程/伤害。
+  弹种分型(苏35 与 F16 是"不同导弹",数值完全相同,只换贴图/名字/spriteType):
+    launchAirMissile 用 airAASpriteType(u)/airAGSpriteType(u) 选 spriteType;
+    渲染 drawMissiles 按 spriteType 选贴图(苏35 走 r37m_field/kh29_field,
+      渲染长 R37M_SPRITE_LEN=24 / KH29_SPRITE_LEN=30,机头朝上按高对齐);
+    显示名走 airAAName(u)/airAGName(u)("R37m"/"Kh29" vs "A-120c"/"A-174b")。
+  手动攻击(updateAircraft):目标 fly→A-120c;目标地面→A-174b;冷却 u.aaCd/u.agCd
+    (1.2s)限速。orders.js orderAttack 按 enemy.fly 分流;giveOrder 允许飞机右键
+    指定敌机(selHasFly),地面部队仍不能点飞机。
+  雷达火控 updatePlaneRadarWeapon(u,dt,'aa'/'ag'):探测圈=以己为心、半径=武器
+    有效射程;新进入圈内敌人:自动打1发(单目标冷却1.2s,未死补刀)/倾泻打光全部;
+    每帧重建 scan Set 作"上帧圈内"基准,lastFire 用 Map(单位做键)。
+  返场补弹:任一弹舱打空 → planeNeedRefuel(u)(_needRefuel+_returning);
+    玩家移动指令优先(orderMove 置 _refuelAfterMove,到新盘旋点盘旋约2秒再返场);
+    parkAircraft/releaseAircraft 补满 aa/ag。
+  按钮/面板:
+    - updatePanel 选中飞机 4 个安装按钮 + 雷达的两个模式键('modeAA'/'modeAG')。
+    - 右侧机场面板每架飞机 4 个小安装按钮(airPlaneUpgrade(uid,'aa'|'ag'|'radar'|'coat'))。
+    - input.js 分发 'aaUp'/'agUp'/'radarUp'/'coatUp'/'modeAA'/'modeAG'。
+    - Unit.uid(构造里 Unit._seq 递增)用于右侧面板按钮定位飞机。
+
+-------------------------------------------------------------------------------
+七、渲染
+-------------------------------------------------------------------------------
+  1. 最高显示权:render() 里建筑 → 普通单位 → **飞机单独最后绘制**,盖过一切单位/建筑。
+  2. 地面投影:drawAircraftShadow 径向渐变模糊椭圆(边缘柔和,光在左上投影偏右下),
+     画在逻辑坐标(地面);本体 ctx.translate(0,-AIR_ALTITUDE) 抬高 16px。
+  3. 尾焰 drawAircraftFlame(dh, phase):画在机身下面(先画,被机身盖住根部),
+     本地 -x 方向从机尾喷出,外焰橙黄/内焰亮白,按 time 抖动 + 每架相位错开。
+     长度 = max(10, dh*0.30)。
+  4. 血条/队伍角标跟随悬停高度(血条在机身上方约 40px,角标在机身下方)。
+  5. 机场停机位小格:只统计"停驻中"飞机(u.parked),飞出去的对应格子即消除;
+     出击数量在面板文字里显示。生产占用(airfieldUsedSlots)仍按停驻+出击+队列算。
+  6. 模型缩放:SPRITE_SCALE.f16=su35=0.5859375(照片 360~445x515 太大;历次调整:
+     0.75 → 0.375(一半)→ 0.46875(×1.25)→ 0.5859375(×1.25),当前定 0.5859375);
+     阴影/尾焰随贴图尺寸自动比例缩放,不用额外改。
+  7. 盘旋半径圈不画,但选中飞机画"绿色移动线":drawSel 对 u.fly 且带 patrol 的单位,
+     画 飞机→盘旋中心 的绿色虚线 + 准星(drawMoveMarker),与地面单位同款,选中期间
+     持续显示;只画线不画半径圆(仍不暴露半径)。注意飞机 orderMove 只改 patrol、
+     order={kind:'none'},不会走进地面单位那条 order.kind==='move' 分支,要单独给
+     fly 单位画(见 render.js drawSel 的 u.fly 分支)。
+  8. 飞机 UI 不显示伤害/射程/攻速:unitStatsHTML 里这三行用 if(!u.fly) 包起来,
+     伤害由武器包体现(面板单独显示弹舱)。
+
+-------------------------------------------------------------------------------
+八、飞机不可被攻击(所有单位都打不到飞机)
+-------------------------------------------------------------------------------
+  这是明确的设计:飞机飞越一切,地面/建筑/进驻/飞机都打不到飞机。堵漏点:
+  - findEnemyNear / 碉堡炮台索敌 / 进驻建筑索敌:全部排除 u.fly。
+  - giveOrder:攻击目标确定时排除 fly(点飞机退化为移动);Ctrl+强制攻击点飞机
+    退化为攻击移动。
+  - orderAttack 统一守卫:地面攻击者跳过 fly 目标;飞机攻击者也要求 !enemy.fly。
+  - 弹道:不对 fly 设目标、不做跟踪(上一版加过跟踪又删了,见坑 5)。
+  - explodeATGM AOE 跳过 fly;atgmBlocker 不把飞机当挡弹体。
+  - updateAircraft 里若目标变成 fly 直接清掉。
+
+-------------------------------------------------------------------------------
+九、踩坑记录(按时间顺序,个个都是真实事故)
+-------------------------------------------------------------------------------
+  1. 圆心自旋卡死(盘旋起不来):释放落点正好在盘旋中心时,径向方向在圆心处来回
+     抖动导致 wantVx/vy 方向每帧翻转,实际速度起不来,又触发地面"卡住脱困 +
+     让行"循环把飞机钉在原地绕圈。
+     修复:① applyMovement 的 stuckT 判定加 !u.fly(飞机无静态障碍,不参与脱困);
+     ② orbitAround 在 d<2 时直接沿 facing 把坐标挪到半径 4px,避开圆心奇点。
+  2. 盘旋修正方向写反:最初 err=(d-R)/R 配 -rx 导致"太近向内、太远向外",
+     飞机从圆心飞出后一路加速越飞越远(d=266)。
+     修复:err=(R-d)/R(太近为正向外修),且远离轨道时纯径向直飞,收敛快。
+  3. 贴脸命中自爆:飞机贴着目标(出膛 32px 即在目标命中判定内)发射时导弹瞬间
+     命中,爆炸 AOE(300×0.5×1.2=180)把自己 150 血炸死;同盘旋的友机也会被炸。
+     修复:explodeATGM AOE 加 !isEnemy(m.team, u.team) 跳过(自己的导弹不炸自己人)
+     以及发射者免伤;后来又加 u.fly 跳过(飞机免疫一切范围伤)。
+  4. 停机位统计漏算:只数存活飞机时,队列里已下单的飞机不算 → 能下超过 4 架的
+     订单。修复:airfieldUsedSlots 把队列里的飞机格数也算上。
+  5. 防空反反复复:曾按"地面要能打飞机"加了索敌/跟踪,用户明确要求"所有单位都
+     打不到飞机"后全部还原,并改成各环节统一排除 fly。改这类全局规则前先确认
+     意图,涉及面广(findEnemyNear/炮台/进驻/右键/强制攻击/AOE/挡弹/弹道)。
+  6. 弹舱打空返场判断:曾在发射后立即判断 ammo<=0 却用 target 非空条件,导致
+     返场与盘旋分支冲突;统一为"攻击分支里 ammo→0 置 _returning=true,返场优先
+     于盘旋"。
+  7. 停驻飞机可被点选:曾发现停驻飞机挡在机场上,点击机场会选到飞机而非建筑。
+     修复:entityAt / boxSelect 跳过 u.parked。
+  8. 生产队列渲染跨阵营崩溃:机场 train=['f16','su35'],苏军机场的队列渲染取
+     getUnitDefs(faction)[it.type] 可能 undefined。修复:ui 过滤阵营单位 +
+     渲染里 qd 判空兜底。
+  9. 版本号忘了同步:改完必须 config.js GAME_VERSION +1 且 index.html 所有
+     ?v=xx 一起 +1、map-editor.html 也要(否则浏览器缓存旧代码白改)。
+  10. 模型缩放比例:飞机照片特别大,SPRITE_SCALE 调整史:0.75 → 0.375(缩小一半)→
+      0.46875(×1.25)→ 0.5859375(×1.25)才合适;改完看阴影/尾焰/血条是否跟着缩,
+      它们都按贴图尺寸自动比例。
+  11. 返场 vs 移动指令优先级:弹舱打空后默认立即返场;但玩家在途中右键移动,必须
+     先执行移动(到新盘旋点盘旋片刻)再自动返场,否则玩家会感觉"指令被吞了"。
+     实现靠 _needRefuel / _refuelAfterMove / _refuelArriveT 三个字段。
+  12. 机场回血:维修厂(repair)修不了飞机(fly 已排除),所以机场自身要给停驻飞机
+     每秒 +10 血(updateBuilding airfield 分支,只作用于 parked && homeBase 归属)。
+  13. 苏35 导弹分型:launchAirMissile 的 spriteType 必须按机种选
+     (airAASpriteType/airAGSpriteType),drawMissiles 渲染必须加 r37m/kh29 分支,
+     否则苏35 发射的导弹会显示成 F-16 的 A-120c/A-174b 贴图;面板/发射提示的
+     名字也要走 airAAName/airAGName,别写死 A-120c/A-174b。
+  14. 出击规划 hook 位置:u._mission 分支必须插在 _returning 之后、雷达自动/手动攻击
+     之前,且任务接管期间直接 return——否则任务飞机还会被雷达倾泻/手动攻击抢着发射,
+     弹量对不上任务分配。
+  15. 返场 homeBase 必须是真在 buildings[] 里的机场:updateAircraft 的 _returning
+     分支用 !buildings.includes(b) 判断"机场没了"→ 会重置 _returning=false。
+     冒烟测试里用假 homeBase 会让"目标死亡返场"断言假失败(真实游戏没有此问题)。
+  16. parkAircraft 要清 _mission 并把 modeAA/AG 复位手动:精确打击把模式切到"倾泻"
+     后若不清,飞机下次释放会对随机目标倾泻误射。
+  17. 分布式分配要按每架武器弹量封顶(round-robin):分配总数来自各架实弹量,若某架
+     没装对应导弹包就跳过;没分到任务的飞机留在机场不出发,别空飞一趟立即返场。
+  18. Esc 优先级:出击规划进行中按 Esc 应先取消规划(airCancelMission),再考虑
+     暂停/取消放置/退出出售——否则玩家想取消规划会误触暂停。
+
+-------------------------------------------------------------------------------
+十、苏-35 专属导弹(R-37m / Kh-29,与 F-16 是"不同导弹")
+------------------------------------------------------------------------------
+  需求:苏35 与 F16 完全同模式同数值,只换导弹贴图/名字,且要区分为不同导弹。
+  spriteType 分型(见第六节):launchAirMissile 按 airAASpriteType(u)/
+    airAGSpriteType(u) 选 'r37m'/'kh29'(F16 走 'a120c'/'a174b')。
+  常量:config.js 里 R37M_SPRITE/R37M_SPRITE_LEN=24、KH29_SPRITE/KH29_SPRITE_LEN=30
+    (渲染按"机头朝上贴图的高"对齐到该长度,等比缩放);IMAGES 加 r37m_field/kh29_field。
+  素材:node tools/process-sprite.js "俄制R37m..png" r37m_field img/units 512
+       node tools/process-sprite.js "俄制Kh29.png"  kh29_field img/units 512
+  UI:ui.js 里 statRow/mkBtn/mkAction/airPanel 的导弹名都改用 airAAName(u)/airAGName(u),
+    input.js 模式键提示、build.js/update.js 安装与发射提示同样按机种命名。
+  挖坑:名称/spriteType 写死 A-120c/A-174b 的地方要 grep 干净(见踩坑 13)。
+
+------------------------------------------------------------------------------
+十一、出击规划(精确打击 / 分布式攻击)——重点
+------------------------------------------------------------------------------
+  定位:机场右侧面板的高优先级任务系统。目前 F16/苏35 开放(config.js isPlannablePlane
+    控制,新机型放开就移植)。只有"停驻 + 已装雷达火控"的飞机能进入规划。
+  号位(slot):按建造顺序(uid)排 1~N,阵亡自动重排;面板上可任意勾选 1~4 号组合。
+    全局状态(state.js):airSortieSel(Set<uid> 勾选)、planeMission(进行中的规划
+    {mode:'precision'|'distributed', uids:[...], remaining:{aa,ag}, assignments:[{target,type}]})。
+  流程:
+    1) 精确打击:勾号位 → 点「精确打击」→ 右键一个敌方目标 → launchPrecisionStrike:
+       全部选中飞机释放(parked=false,patrol=机场中心)、modeAA/AG 切 DUMP(倾泻)、
+       各自 _mission={kind:'precision', target};目标死亡或对应弹舱(敌机→aa/地面→ag)
+       打空 → 强制 _returning。只有装了对应弹种的飞机才出动。
+    2) 分布式攻击:勾号位 → 点「分布式攻击」→ 系统统计全部选中飞机实弹量
+       remaining{aa,ag} → 右键敌方目标分配导弹(每右键 1 发:敌机→aa/地面建筑→ag,
+       自动扣对应 remaining,分完有提示)→ 点「确定」→ launchDistributed:把 assignments
+       round-robin 分到各架 jobs(按每架武器弹量封顶),有 jobs 的才出发,
+       _mission={kind:'distributed', jobs:[{target,type,count,fired}]}。
+  执行(update.js,插在 _returning 之后、雷达/手动攻击之前,接管后 return):
+    updatePrecisionMission:直线接敌,冷却就绪即发(launchAirMissile),目标死/对应弹舱空
+      → 清任务 + _returning。
+    updateDistributedMission:按序处理 jobs,每个目标打满 count 发或目标死亡即跳下一个,
+      全部完成 → 清任务 + _returning。每架独立,被击落不影响同伴(任务状态在单位自己身上)。
+  打断/取消:任务中飞机被右键移动(orderMove 清 _mission)或右键己方机场返场可打断;
+    Esc 先取消进行中的规划(input.js)。任务返场 parkAircraft 清 _mission 并复位倾泻为手动。
+  右键拦截(orders.js giveOrder 顶部):planeMission 激活时,右键不再走普通指令——
+    精确打击=指定唯一目标;分布式=给目标分配 1 发导弹。注意拦截要放在 placing 判断之后、
+    其余逻辑之前,用 entityAt + isEnemy(TEAM_A,...) 判定敌方目标(建筑/单位均可)。
+
+------------------------------------------------------------------------------
+十二、机场面板攻击模式按钮 + 飞机绿色移动线(小改进)
+------------------------------------------------------------------------------
+  1) 机场面板攻击模式按钮:每架飞机行的雷达/涂层按钮下,装了雷达+对应导弹包后显示
+     「1号/2号:手动/自动分配/倾泻」按钮,点击循环(airPlaneMode(uid,'aa'|'ag'),
+     mode=(mode+1)%3)。此前模式切换只能在底部面板(选中飞机)操作,机场面板远程可调。
+  2) 飞机绿色移动线:见第七节第 7 条——选中飞机画 飞机→盘旋中心 绿虚线 + 准星,
+     与地面单位"移动指令线"同视觉语言(飞机右键移动=改盘旋点,并非落地移动)。
+
+------------------------------------------------------------------------------
+十三、如何验证
+-------------------------------------------------------------------------------
+  无测试框架,用 Node 冒烟测试(拼接全部 js + DOM/canvas stub):
+    - 部署机场 → 生产 4 架(应全部停驻,第 5 架被拒)
+    - 释放 → 4 架在机场上空半径约 48px 盘旋(10 秒内距离 20~130)
+    - 右键移动 → 绕目标点盘旋(允许较远距离的收敛时间)
+    - 安装A-120c/A-174b → 各弹舱 2/2
+    - 右键地面目标 → 脱离盘旋直线逼近,发射 A-174b x2 → 打空自动返场 + 补满弹
+    - 右键敌机 → A-120c 空对空(敌机受伤)
+    - 右键机场 → 手动返场
+    - 停驻飞机不可点选;机场被摧毁 → 停驻飞机自动释放
+    - 地面单位索敌/指定攻击飞机均无效(打不到飞机)
+    - render() 无异常(含尾焰分支)
+  出击规划专项(空中战机):
+    - isPlannablePlane: f16/su35 true,f22 等未来机型 false(待开放)
+    - 精确打击:勾号位→launchPrecisionStrike → 飞机释放、模式=DUMP、_mission=precision;
+      推进 updateAircraft 若干帧 → 对应弹舱打空 → _returning 且 _mission 清空;
+      目标先死(hp=0) → 同样强制返场
+    - 分布式:launchDistributed 分配 N 发 → jobs 总数==N、两架均起飞;推进各架 →
+      各自发射完分配数并返场;某架被击落不影响另一架;目标全死 → 跳过任务返场
+    - airStartDistributed 剩余弹量:两架 f16 各 2+2 → remaining.aa=4/ag=4;
+      airCancelMission 后 planeMission 清空
+    - 苏35 移植:精确打击空对地发射 spriteType 应为 kh29、空对空为 r37m
+    - ★测试 homeBase 必须是真的 Building 且 push 进 buildings[](见踩坑 15)
+  语法检查:node --check js/*.js
+
+===============================================================================

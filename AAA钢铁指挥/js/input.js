@@ -71,7 +71,8 @@ function setupInput(){
   window.addEventListener('keydown', e=>{
   keys[e.code]=true;
   if(e.code==='Escape'){
-    if(paused){ resumeGame(); }
+    if(planeMission){ airCancelMission(); }          // 先取消进行中的出击规划
+    else if(paused){ resumeGame(); }
     else if(placing){ placing=null; updatePanel(); }
     else if(selling){ setSelling(false); }
     else { pauseGame(); }
@@ -141,17 +142,48 @@ function setupInput(){
     if(act==='build') startPlace(btn.dataset.def);
     else if(act==='train') tryTrain(btn.dataset.def);
     else if(act==='cancel'){ placing=null; updatePanel(); }
-    else if(act==='upgrade') startUpgrade(selBuilding);
-    else if(act==='cmdUp') startCommandUpgrade(selBuilding);
-    else if(act==='pwrUp') startPowerUpgrade(selBuilding);
-    else if(act==='barrackUp') startBarracksUpgrade(selBuilding);
+    else if(act==='upgrade') massUpgrade(selectedBlds.length?selectedBlds:[selBuilding], b=>startUpgrade(b), '战车工厂升级');
+    else if(act==='cmdUp') massUpgrade(selectedBlds.length?selectedBlds:[selBuilding], b=>startCommandUpgrade(b), '建造厂升级');
+    else if(act==='pwrUp') massUpgrade(selectedBlds.length?selectedBlds:[selBuilding], b=>startPowerUpgrade(b), '发电厂升级');
+    else if(act==='barrackUp') massUpgrade(selectedBlds.length?selectedBlds:[selBuilding], b=>startBarracksUpgrade(b), '兵营升级');
     else if(act==='research'){ if(selBuilding) startResearch(selBuilding, btn.dataset.def); }
     else if(act==='cancelprod'){ if(selBuilding) cancelProduction(selBuilding); }
     else if(act==='deploy'){ const u=selected[0]; if(u){ if(u.type==='airfield_car') deployAirfieldCar(u); else deployMCV(u); } }
-    else if(act==='challUpgrade'){ const u=selected[0]; if(u) startChallUpgrade(u); }
-    else if(act==='atgmUp'){ const u=selected[0]; if(u) startATGMAttach(u); }
+    else if(act==='challUpgrade') massUpgrade(selected, u=>startChallUpgrade(u), '挑战者升级');
+    else if(act==='t72Upgrade') massUpgrade(selected, u=>startT72Upgrade(u), 'T72 升级');
+    else if(act==='t62Upgrade') massUpgrade(selected, u=>startT62Upgrade(u), 'T62 升级');
+    else if(act==='t80Upgrade') massUpgrade(selected, u=>startT80Upgrade(u), 'T80 升级');
+    else if(act==='t90Upgrade') massUpgrade(selected, u=>startT90Upgrade(u), 'T90 升级');
+    else if(act==='t54bUp') massUpgrade(selected, u=>startT54BUpgrade(u), 'T54B 升级');
+    else if(act==='t55amUp') massUpgrade(selected, u=>startT55AMUpgrade(u), 'T55AM 升级');
+    else if(act==='atgmUp') massUpgrade(selected, u=>startATGMAttach(u), '反坦克导弹安装');
+    else if(act==='aaUp') massUpgrade(selected, u=>startAAUpgrade(u), (selected[0]?airAAName(selected[0]):'空对空导弹')+'安装');
+    else if(act==='agUp') massUpgrade(selected, u=>startAGUpgrade(u), (selected[0]?airAGName(selected[0]):'空对地导弹')+'安装');
+    else if(act==='radarUp') massUpgrade(selected, u=>startRadarUpgrade(u), '雷达火控安装');
+    else if(act==='coatUp') massUpgrade(selected, u=>startCoatUpgrade(u), '涂层更新安装');
+    else if(act==='modeAA'){ const u=selected[0]; if(u && u.radar && u.aa){ u.modeAA=(u.modeAA+1)%3; textPopup(u.x,u.y-20,'1号位 '+airAAName(u)+': '+AIR_MODE_NAME[u.modeAA],'#8aff8a'); updatePanel(); } }
+    else if(act==='modeAG'){ const u=selected[0]; if(u && u.radar && u.ag){ u.modeAG=(u.modeAG+1)%3; textPopup(u.x,u.y-20,'2号位 '+airAGName(u)+': '+AIR_MODE_NAME[u.modeAG],'#8aff8a'); updatePanel(); } }
+    else if(act==='rarmUp') massUpgrade(selected, u=>startRarmUpgrade(u), '反应装甲安装');
+    else if(act==='irUp') massUpgrade(selected, u=>startIRUpgrade(u), '红外干扰安装');
+    else if(act==='tuskUp') massUpgrade(selected, u=>startTuskUpgrade(u), 'TUSK 安装');
+    else if(act==='gunUp') massUpgrade(selected, u=>startGunUpgrade(u), '火炮升级安装');
+    else if(act==='irToggle'){ const u=selected[0]; if(u && u.ir){ u.irOn=!u.irOn; textPopup(u.x,u.y-20, u.irOn?'红外干扰 开启':'红外干扰 关闭', u.irOn?'#8aff8a':'#ffd0d0'); updatePanel(); } }
+    else if(act==='apsUp') massUpgrade(selected, u=>startAPSUpgrade(u), '自主防御安装');
+    else if(act==='apsToggle'){ const u=selected[0]; if(u && u.aps){ u.apsOn=!u.apsOn; textPopup(u.x,u.y-20, u.apsOn?'自主防御 开启':'自主防御 关闭', u.apsOn?'#8aff8a':'#ffd0d0'); updatePanel(); } }
     else if(act==='release'){ if(selBuilding) releaseGarrison(selBuilding); }
+    else if(act==='releaseAir'){ if(selBuilding) releaseAircraft(selBuilding); }
     else if(act==='unload'){ const t=selected.find(u=>isCarrier(u)); if(t) manualUnload(t); }
+    else if(act==='selectSameType') selectSameType();
+    else if(act==='selAllSameBld') selectAllSameBlds();
     else if(act==='selectall') selectAllCombat();
   });
+}
+// 批量升级:对列表里每个实体调用 fn,统计成功数(可升/资金充足/未满级)并汇总一次提示
+function massUpgrade(list, fn, label){
+  let n=0;
+  for(const ent of list){ if(ent && ent.alive!==false && fn(ent)) n++; }
+  if(n && list.length && list[0].x!==undefined){
+    textPopup(list[0].x, list[0].y-20, (label||'升级')+' ×'+n, '#8aff8a');
+  }
+  updatePanel();
 }

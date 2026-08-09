@@ -27,20 +27,54 @@ function unitStatsHTML(u, multi){
   let h=selImgHTML(unitPanelKey(u.type, unitFactionOf(u.team)));
   h+=hpBarHTML(u.hp,u.maxHp);
   if(multi) h+=statRow('编队生命', selected.reduce((s,x)=>s+x.hp,0)+' / '+selected.reduce((s,x)=>s+x.maxHp,0));
-  h+=statRow('伤害', d.damage>0? d.damage+' · '+PROJ_NAME[d.proj] : '—');
-  h+=statRow('射程', d.range>0? d.range : '—');
-  h+=statRow('攻速', d.rof>0? d.rof.toFixed(2)+' 秒/发' : '—');
+  if(!u.fly){
+    // 飞机不显示伤害/射程/攻速:它靠安装武器包(测试炸弹包)实现伤害,面板另行显示弹舱
+    h+=statRow('伤害', d.damage>0? d.damage+' · '+PROJ_NAME[d.proj] : '—');
+    h+=statRow('射程', d.range>0? d.range : '—');
+    h+=statRow('攻速', d.rof>0? d.rof.toFixed(2)+' 秒/发' : '—');
+  }
   h+=statRow('移速', d.speed);
-  h+=statRow('造价', '$'+d.cost);
+  h+=statRow('造价', '$'+(d.cost+(u.invested||0)));
   h+=statRow('护甲', ARMOR_NAME[u.armor]||'—');
-  if(u.shield>0) h+=statRow('护盾', Math.ceil(u.shield)+' (回'+REACTIVE_REGEN+'/秒)');
+  if(u.shield>0){
+    const regen = u.type==='t62' ? t62Level(u).shieldRegen
+      : (u.type==='t80' ? t80Level(u).shieldRegen
+      : (u.type==='t90' ? t90Level(u).shieldRegen
+      : (u.type==='t72' ? t72Level(u).shieldRegen
+      : (u.type==='tank' && unitFactionOf(u.team)==='soviet' && u.t54Branch ? t54Branch(u).shieldRegen
+      : (u.rarm ? T84BM_SHIELD_REGEN
+      : (u.tusk ? TUSK_SHIELD_REGEN : 0))))));
+    h+=statRow('护盾', Math.ceil(u.shield)+'/'+unitShieldMax(u)+' (回'+(regen>0?regen+'/秒':' —')+')');
+  }
+  if(u.fly){
+    h+=statRow('盘旋', '半径 '+PLANE_PATROL_R+' px 绕点绕圈');
+    if(u.aa) h+=statRow(airAAName(u), u.aaAmmo+' / '+AA_AMMO+' 发 · 空对空'+(u.aaCd>0?(' · 冷却 '+u.aaCd.toFixed(1)+'s'):''));
+    if(u.ag) h+=statRow(airAGName(u), u.agAmmo+' / '+AG_AMMO+' 发 · 空对地'+(u.agCd>0?(' · 冷却 '+u.agCd.toFixed(1)+'s'):''));
+    if(u.radar) h+=statRow('雷达火控', '射程+'+RADAR_RANGE_BONUS+' · 1号:'+AIR_MODE_NAME[u.modeAA]+' / 2号:'+AIR_MODE_NAME[u.modeAG]);
+    if(u.coat) h+=statRow('涂层更新', '敌方探测 -'+COAT_RANGE_PENALTY+'px');
+  }
   if(u.type==='harvester') h+=statRow('内含矿', Math.floor(u.cargo)+' / '+d.capacity);
   if(isCarrier(u)) h+=statRow('运载', usedCapacity(u)+' / '+u.capacity+' 点'+(u.def.carrier?'(可装步兵)':''));
   if(!isCarrier(u) && !u.naval && transportCost(u)>0) h+=statRow('占点', transportCost(u)+' 点');
   if(u.type==='challenger') h+=statRow('等级', u.upgrading ? ('升级中 '+Math.floor(u.upgradeProg/CHALL_UPGRADE_TIME*100)+'%') : (u.upgradeLvl>0 ? (u.upgradeLvl+' 级 · '+CHALL_NAMES[u.upgradeLvl]) : '未升级(可升级)'));
+  if(u.type==='t72') h+=statRow('型号', u.upgrading ? (t72Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T72_UPGRADE_TIME*100)+'%') : t72Level(u).name);
+  if(u.type==='t62') h+=statRow('型号', u.upgrading ? (t62Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T62_UPGRADE_TIME*100)+'%') : t62Level(u).name);
+  if(u.type==='t80') h+=statRow('型号', u.upgrading ? (t80Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T80_UPGRADE_TIME*100)+'%') : t80Level(u).name);
+  if(u.type==='t90') h+=statRow('型号', u.upgrading ? (t90Level(u).name+' 升级中 '+Math.floor(u.upgradeProg/T90_UPGRADE_TIME*100)+'%') : t90Level(u).name);
+  if(u.type==='tank' && unitFactionOf(u.team)==='soviet') h+=statRow('型号', u.upgrading ? ('升级中 '+Math.floor(u.upgradeProg/T54_UPGRADE_TIME*100)+'%') : t54Branch(u).name);
   if(u.atgm || u.atgmUpgrading){
-    h+=statRow('反坦克导弹', u.atgmUpgrading ? ('安装中 '+Math.floor(u.atgmProg/ATGM_UPGRADE_TIME*100)+'%') :
+    h+=statRow(atgmTypeName(u), u.atgmUpgrading ? ('安装中 '+Math.floor(u.atgmProg/ATGM_UPGRADE_TIME*100)+'%') :
       (u.atgm ? ('射程'+ATGM_RANGE+' · 伤害'+ATGM_DAMAGE+(u.atgmReload>0?(' · 装填 '+Math.ceil(u.atgmReload)+'s'):' · 已就绪')) : ''));
+  }
+  if(u.aps || u.apsUpgrading){
+    h+=statRow('自主防御', u.apsUpgrading ? ('安装中 '+Math.floor(u.apsProg/APS_UPGRADE_TIME*100)+'%') :
+      (u.aps ? (u.apsOn?'开启':'关闭')+' · 反导弹 '+u.apsAmmo+'/'+APS_MAX_AMMO+(u.apsAmmo<APS_MAX_AMMO?(' · 填充 '+Math.ceil(u.apsReload)+'s'):'')+' · 只反TOW' : ''));
+  }
+  if(u.tusk || u.tuskUpgrading){
+    h+=statRow('TUSK', u.tuskUpgrading ? ('安装中 '+Math.floor(u.tuskProg/TUSK_UPGRADE_TIME*100)+'%') : ('300盾 · 回'+TUSK_SHIELD_REGEN+'/秒 · M1A2外观'));
+  }
+  if(u.gunUp || u.gunUpgrading){
+    h+=statRow('火炮升级', u.gunUpgrading ? ('安装中 '+Math.floor(u.gunUpProg/GUN_UPGRADE_TIME*100)+'%') : ('伤害+'+GUN_DMG+' · 射程+'+GUN_RANGE));
   }
   h+='<div class="udesc">'+(d.desc||UNIT_DESC[u.type]||'')+'</div>';
   return h;
@@ -59,7 +93,7 @@ function buildingStatsHTML(b){
   }
   let h=selImgHTML(bldPanelKey(b.defName));
   h+=hpBarHTML(b.hp,b.maxHp);
-  h+=statRow('造价', '$'+d.cost);
+  h+=statRow('造价', '$'+(d.cost+(b.invested||0)));
   h+=statRow('护甲', ARMOR_NAME[b.armor]||'—');
   h+=statRow('电力', d.power>0? '+'+d.power : (b.powerUse>0? '-'+b.powerUse : '0'));
   h+=statRow('建造时间', d.buildTime.toFixed(1)+' 秒');
@@ -72,6 +106,11 @@ function buildingStatsHTML(b){
     h+=statRow('升级', Math.floor(b.upgradeProg/uTime*100)+'%');
   }
   if(b.queue.length) h+=statRow('生产', b.queue.map(q=>getUnitDefs(unitFactionOf(b.team))[q.type].name).join('、'));
+  if(b.defName==='airfield'){
+    let parked=0, flying=0;
+    for(const u of units) if(u.hp>0 && u.fly && u.homeBase===b){ if(u.parked) parked++; else flying++; }
+    h+=statRow('停机位', parked+' / '+AIRFIELD_CAPACITY+' (出击 '+flying+(b.queue.length?(' · 生产中 '+b.queue.length):'')+')');
+  }
   if(b.garrison && (b.garrison.length || b.garrisonTank)) h+=statRow('进驻', garrisonUnitCount(b)+' 个单位 · 射程+20');
   h+='<div class="udesc">'+(UNIT_DESC['b_'+b.defName]||'')+'</div>';
   return h;
@@ -85,8 +124,167 @@ function updateStats(){
   document.getElementById('powerBadge').style.display = (p.give>0 && p.use>p.give) ? 'block' : 'none';
   powerInfo=p;
 }
+// 右侧机场飞机面板:仅选中己方机场时显示,列出该机场绑定的战斗机(停驻/出击都列),
+// 可在不释放的情况下远程升级(测试炸弹包)
+function updateAirPanel(){
+  const p=document.getElementById('airPanel');
+  if(!p) return;
+  const show = selBuilding && selBuilding.alive && selBuilding.team===TEAM_A && selBuilding.defName==='airfield';
+  if(!show){ p.classList.add('hidden'); return; }
+  p.classList.remove('hidden');
+  const b=selBuilding;
+  let parked=0, flying=0;
+  const bound=[];
+  for(const u of units){
+    if(u.hp<=0 || !u.fly || u.homeBase!==b) continue;
+    if(u.parked) parked++; else flying++;
+    bound.push(u);
+  }
+  document.getElementById('airPanelTitle').textContent = '机场部队 · 停驻 '+parked+'/'+AIRFIELD_CAPACITY+' (出击 '+flying+')';
+  const list=document.getElementById('airPanelList');
+  list.innerHTML='';
+  // ---- 出击规划区:号位按建造顺序(uid)排,阵亡自动重排;本阶段仅 停驻+雷达 的 F16 可选 ----
+  const slots = bound.slice().sort((a,b)=>a.uid-b.uid);
+  for(const uid of Array.from(airSortieSel)){
+    const u = slots.find(x=>x.uid===uid);
+    if(!u || u.hp<=0 || !u.parked || !u.radar || !isPlannablePlane(u)) airSortieSel.delete(uid);
+  }
+  const plan=document.createElement('div');
+  plan.className='airPlan';
+  let sh='<div class="airPlanTitle">出击规划</div><div class="airSlots">';
+  const slotN = Math.max(4, slots.length);
+  for(let i=0;i<slotN;i++){
+    const u=slots[i];
+    let cls='airSlot';
+    let tip='';
+    if(!u){ sh+='<div class="airSlot disabled">'+(i+1)+':—</div>'; continue; }
+    const sel=airSortieSel.has(u.uid);
+    if(sel) cls+=' sel';
+    if(planeMission) cls+=' disabled';
+    else if(!u.parked){ cls+=' disabled'; tip='出击中'; }
+    else if(!u.radar){ cls+=' disabled'; tip='无雷达'; }
+    else if(!isPlannablePlane(u)){ cls+=' disabled'; tip='待移植'; }
+    const onClick = (cls.indexOf('disabled')===-1) ? (' onclick="airSlotToggle('+u.uid+')"') : '';
+    sh+='<div class="'+cls+'"'+onClick+'>'+(i+1)+':'+airTypeShort(u)+(tip?('<span class="slotTip">'+tip+'</span>'):'')+'</div>';
+  }
+  sh+='</div>';
+  const selCnt=airSortieSel.size;
+  if(!planeMission){
+    const ok = selCnt>0;
+    sh+='<div class="airPlanBtns">'+
+        '<button class="airbtn'+(ok?'':' disabled')+'"'+(ok?' onclick="airStartPrecision()"':'')+'>精确打击</button>'+
+        '<button class="airbtn'+(ok?'':' disabled')+'"'+(ok?' onclick="airStartDistributed()"':'')+'>分布式攻击</button></div>'+
+        '<div class="airPlanState">勾选停驻且已装雷达的 F16/苏27 号位 ('+(selCnt?('已选 '+selCnt+' 架'):'未选')+')</div>';
+  } else if(planeMission.mode==='precision'){
+    sh+='<div class="airPlanState">精确打击待命:右键敌方目标锁定 ('+selCnt+' 架,全部倾泻后返场)</div>'+
+        '<div class="airPlanBtns"><button class="airbtn" onclick="airCancelMission()">取消</button></div>';
+  } else {
+    sh+='<div class="airPlanState">剩余 对空:'+planeMission.remaining.aa+' / 对地:'+planeMission.remaining.ag+' · 已分配 '+planeMission.assignments.length+' 发</div>'+
+        '<div class="airPlanBtns">'+
+        '<button class="airbtn" onclick="airConfirmDistributed()">确定</button>'+
+        '<button class="airbtn" onclick="airCancelMission()">取消</button></div>';
+  }
+  plan.innerHTML=sh;
+  list.appendChild(plan);
+  if(!bound.length){
+    const empty=document.createElement('div');
+    empty.className='airRow';
+    empty.innerHTML='<div class="airTag">暂无战斗机,先生产几架</div>';
+    list.appendChild(empty);
+    return;
+  }
+  for(const u of bound){
+    const row=document.createElement('div');
+    row.className='airRow';
+    const hpPct=Math.max(0,Math.min(100,u.hp/u.maxHp*100));
+    const mkBtn=(label,upgrading,progTime,installed,uid)=>{
+      if(upgrading) return '<div class="airbtn disabled">'+label+' 安装中 '+Math.floor(u[installed==='aa'?'aaProg':installed==='ag'?'agProg':installed==='radar'?'radarProg':'coatProg']/progTime*100)+'%</div>';
+      if(u[installed]) return '<div class="airbtn disabled">'+label+' 已装</div>';
+      return '<button class="airbtn" onclick="airPlaneUpgrade('+uid+',\''+installed+'\')">'+label+' $'+(installed==='aa'?AA_COST:installed==='ag'?AG_COST:installed==='radar'?RADAR_COST:COAT_COST)+'</button>';
+    };
+    let btnHTML = mkBtn(airAAName(u), u.aaUpgrading, AA_UPGRADE_TIME, 'aa', u.uid)
+      + mkBtn(airAGName(u), u.agUpgrading, AG_UPGRADE_TIME, 'ag', u.uid)
+      + mkBtn('雷达', u.radarUpgrading, RADAR_UPGRADE_TIME, 'radar', u.uid)
+      + mkBtn('涂层', u.coatUpgrading, COAT_UPGRADE_TIME, 'coat', u.uid);
+    // 攻击模式按钮(需已装雷达 + 对应导弹包):点击循环 手动→自动分配→倾泻
+    if(u.radar){
+      if(u.aa) btnHTML += '<button class="airbtn" onclick="airPlaneMode('+u.uid+',\'aa\')">1号 '+airAAName(u)+': '+AIR_MODE_NAME[u.modeAA]+'</button>';
+      if(u.ag) btnHTML += '<button class="airbtn" onclick="airPlaneMode('+u.uid+',\'ag\')">2号 '+airAGName(u)+': '+AIR_MODE_NAME[u.modeAG]+'</button>';
+    }
+    row.innerHTML =
+      '<div class="airName">'+u.def.name+' <span class="airTag">'+(u.parked?'[停驻]':'[出击中]')+'</span></div>'+
+      '<div class="airStat">生命 '+Math.ceil(u.hp)+'/'+u.maxHp+' · 移速 '+u.speed+
+        (u.aa?(' · '+airAAName(u)+' '+u.aaAmmo+'/'+AA_AMMO):'')+
+        (u.ag?(' · '+airAGName(u)+' '+u.agAmmo+'/'+AG_AMMO):'')+'</div>'+
+      '<div class="airhp"><i style="width:'+hpPct+'%"></i></div>'+
+      btnHTML;
+    list.appendChild(row);
+  }
+}
+// 右侧机场面板:给指定 uid 的飞机安装对应模块(无需释放即可升级)
+function airPlaneUpgrade(uid, which){
+  const u = units.find(x=>x.uid===uid);
+  if(!u || !u.fly || !u.homeBase || u.homeBase!==selBuilding) return;
+  if(which==='aa' && !u.aaUpgrading && !u.aa) startAAUpgrade(u);
+  else if(which==='ag' && !u.agUpgrading && !u.ag) startAGUpgrade(u);
+  else if(which==='radar' && !u.radarUpgrading && !u.radar) startRadarUpgrade(u);
+  else if(which==='coat' && !u.coatUpgrading && !u.coat) startCoatUpgrade(u);
+}
+// 右侧机场面板:循环切换指定飞机的攻击模式(需已装雷达 + 对应导弹包)
+function airPlaneMode(uid, which){
+  const u = units.find(x=>x.uid===uid);
+  if(!u || !u.fly || !u.radar) return;
+  if(which==='aa' && u.aa){
+    u.modeAA=(u.modeAA+1)%3;
+    textPopup(u.x, u.y-20, '1号 '+airAAName(u)+': '+AIR_MODE_NAME[u.modeAA], '#8aff8a');
+    updatePanel();
+  } else if(which==='ag' && u.ag){
+    u.modeAG=(u.modeAG+1)%3;
+    textPopup(u.x, u.y-20, '2号 '+airAGName(u)+': '+AIR_MODE_NAME[u.modeAG], '#8aff8a');
+    updatePanel();
+  }
+}
+/* ============ 出击规划(精确打击 / 分布式攻击,F16) ============ */
+function airSlotToggle(uid){
+  if(planeMission) return;
+  if(airSortieSel.has(uid)) airSortieSel.delete(uid);
+  else airSortieSel.add(uid);
+  updatePanel();
+}
+function airStartPrecision(){
+  if(planeMission || !airSortieSel.size) return;
+  planeMission = { mode:'precision', uids:Array.from(airSortieSel) };
+  updatePanel();
+}
+function airStartDistributed(){
+  if(planeMission || !airSortieSel.size) return;
+  const uids = Array.from(airSortieSel);
+  let remaining = { aa:0, ag:0 };
+  for(const u of units){
+    if(uids.includes(u.uid) && u.fly && u.parked && u.hp>0 && u.radar){
+      remaining.aa += u.aaAmmo; remaining.ag += u.agAmmo;
+    }
+  }
+  planeMission = { mode:'distributed', uids, remaining, assignments:[] };
+  updatePanel();
+}
+function airConfirmDistributed(){
+  if(!planeMission || planeMission.mode!=='distributed') return;
+  if(!planeMission.assignments.length){
+    if(selBuilding) textPopup(selBuilding.x, selBuilding.y-24, '未分配任何导弹,无法出动','#ff8080');
+    return;
+  }
+  launchDistributed(planeMission.uids, planeMission.assignments);
+  planeMission = null; airSortieSel.clear();
+  updatePanel();
+}
+function airCancelMission(){
+  planeMission = null;
+  updatePanel();
+}
 function updatePanel(){
   updateStats();
+  updateAirPanel();   // 右侧机场飞机面板(仅选中机场时显示)
   const panel=document.getElementById('panel');
   panel.innerHTML='';
   const title=document.getElementById('selTitle');
@@ -156,12 +354,15 @@ function updatePanel(){
           } else if(selBuilding.upgrading){
             mkAction('升级中...','none',false);
           } else {
-            mkAction('升级 建造厂 $'+COMMAND_UPGRADE_COST,'cmdUp',true);
+            const cn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='command').length;
+            if(cn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+cn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+            mkAction('升级 建造厂 $'+COMMAND_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'cmdUp',true);
           }
         }
       } else if(selBuilding.def.train && selBuilding.def.train.length){
         if(selBuilding.queue.length) mkAction('生产中...','none',false);
-        for(const t of selBuilding.def.train) mkUnit(t);
+        // 阵营专属单位(如战斗机)只显示本阵营可生产的
+        for(const t of selBuilding.def.train){ if(getUnitDefs(playerFaction)[t]) mkUnit(t); }
         // 取消制造:只取消队列末尾的一个单位,全额退款
         if(selBuilding.queue.length){
           const fac=unitFactionOf(selBuilding.team);
@@ -173,24 +374,42 @@ function updatePanel(){
         if(selBuilding.defName==='factory'){
           if(selBuilding.upgraded){
             const facUnits = unitFactionOf(TEAM_A)==='allies'
-              ? ['abrams','bradley','marder','leclerc','leopard','challenger','puma','mcv']
-              : ['t90','b11','mcv'];
+              ? ['abrams','merkava','bradley','marder','leclerc','leopard','challenger','puma','mcv']
+              : ['t90','t84bm','t72','t80','b11','mcv'];
             for(const t of facUnits) mkUnit(t);
           }
           else if(selBuilding.upgrading){ mkAction('升级中...','none',false); }
-          else { mkAction('升级 战车工厂 $'+FACTORY_UPGRADE_COST,'upgrade',true); }
+          else {
+            const fn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='factory').length;
+            if(fn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+fn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+            mkAction('升级 战车工厂 $'+FACTORY_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'upgrade',true);
+          }
         }
         // 兵营:升级 / 高级步兵
         if(selBuilding.defName==='barracks'){
           if(selBuilding.upgraded){ mkUnit(advancedInfantryType(TEAM_A)); }
           else if(selBuilding.upgrading){ mkAction('升级中...','none',false); }
-          else { mkAction('升级 兵营 $'+BARRAX_UPGRADE_COST,'barrackUp',true); }
+          else {
+            const bn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='barracks').length;
+            if(bn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+bn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+            mkAction('升级 兵营 $'+BARRAX_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'barrackUp',true);
+          }
+        }
+        // 机场:释放停驻的战斗机
+        if(selBuilding.defName==='airfield'){
+          let parked=0;
+          for(const u of units) if(u.hp>0 && u.fly && u.parked && u.homeBase===selBuilding) parked++;
+          if(parked) mkAction('释放战斗机 ('+parked+' 架)','releaseAir',true);
         }
       } else {
+        if(selBuilding.defName==='power'){
+          const pn = buildings.filter(b=>b.team===TEAM_A&&b.alive&&b.defName==='power').length;
+          if(pn>1) mkAction(selectedBlds.length>1 ? '已选择全体 ('+selectedBlds.length+' 座)' : '选择全体同类 ('+pn+' 座)', selectedBlds.length>1?'none':'selAllSameBld', true);
+        }
         if(selBuilding.defName==='power' && selBuilding.pwrUpgrading){
           mkAction('升级中...','none',false);
         } else if(selBuilding.defName==='power' && selBuilding.powerLevel<POWER_MAX_LEVEL){
-          mkAction('升级发电厂 $'+POWER_UPGRADE_COST,'pwrUp',true);
+          mkAction('升级发电厂 $'+POWER_UPGRADE_COST+(selectedBlds.length>1?' ×'+selectedBlds.length:''),'pwrUp',true);
         } else if(selBuilding.defName==='power'){
           mkAction('已满级','none',false);
         } else if(selBuilding.defName==='lab'){
@@ -223,16 +442,101 @@ function updatePanel(){
     desc.innerHTML = unitStatsHTML(first, selected.length>1);
     if(first.type==='mcv') mkAction('展开基地车 (E)','deploy',true);
     if(first.type==='airfield_car') mkAction('展开机场 (E)','deploy',true);
+    if(first.type==='f16' || first.type==='su35'){
+      // 空对空导弹包(A-120c=F16 / R-37m=苏35)
+      if(first.aaUpgrading) mkAction(airAAName(first)+' 空对空导弹包 安装中 '+Math.floor(first.aaProg/AA_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.aa) mkAction(airAAName(first)+' 空对空导弹包 $'+AA_COST,'aaUp',true);
+      else mkAction(airAAName(first)+': '+first.aaAmmo+'/'+AA_AMMO+' 发(空对空)','none',false);
+      // 空对地导弹包(A-174b=F16 / Kh-29=苏35)
+      if(first.agUpgrading) mkAction(airAGName(first)+' 空对地导弹包 安装中 '+Math.floor(first.agProg/AG_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.ag) mkAction(airAGName(first)+' 空对地导弹包 $'+AG_COST,'agUp',true);
+      else mkAction(airAGName(first)+': '+first.agAmmo+'/'+AG_AMMO+' 发(空对地)','none',false);
+      // 雷达火控(射程+30,解锁攻击模式按键)
+      if(first.radarUpgrading) mkAction('雷达火控 安装中 '+Math.floor(first.radarProg/RADAR_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.radar) mkAction('雷达火控 $'+RADAR_COST,'radarUp',true);
+      else {
+        mkAction('雷达火控:导弹射程+'+RADAR_RANGE_BONUS,'none',false);
+        if(first.aa) mkAction('1号位 '+airAAName(first)+': '+AIR_MODE_NAME[first.modeAA],'modeAA',true);
+        if(first.ag) mkAction('2号位 '+airAGName(first)+': '+AIR_MODE_NAME[first.modeAG],'modeAG',true);
+      }
+      // 涂层更新(敌方雷达式探测-50px)
+      if(first.coatUpgrading) mkAction('涂层更新 安装中 '+Math.floor(first.coatProg/COAT_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.coat) mkAction('涂层更新 $'+COAT_COST,'coatUp',true);
+      else mkAction('涂层更新:敌方探测 -'+COAT_RANGE_PENALTY+'px','none',false);
+    }
     if(isCarrier(first) && first.cargoUnits && first.cargoUnits.length) mkAction('释放部队 ('+first.cargoUnits.length+')','unload',true);
     if(first.type==='challenger'){
       if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/CHALL_UPGRADE_TIME*100)+'%','none',false);
       else if(first.upgradeLvl<2) mkAction('升级 → '+CHALL_NAMES[first.upgradeLvl+1]+' $'+CHALL_UPGRADE_COST,'challUpgrade',true);
       else mkAction('已满级 '+CHALL_NAMES[2],'none',false);
     }
-    if(ATGM_TYPES.indexOf(first.type)!==-1){
-      if(first.atgmUpgrading) mkAction('反坦克导弹模块 安装中 '+Math.floor(first.atgmProg/ATGM_UPGRADE_TIME*100)+'%','none',false);
-      else if(!first.atgm) mkAction('反坦克导弹模块 $'+ATGM_COST,'atgmUp',true);
+    if(first.type==='t72'){
+      // T72 → T72B → T72BVM 三阶升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T72_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<2) mkAction('升级 → '+T72_LEVELS[first.upgradeLvl+1].name+' $'+T72_UPGRADE_COST[first.upgradeLvl+1],'t72Upgrade',true);
+      else mkAction('已满级 '+T72_LEVELS[2].name,'none',false);
     }
+    if(first.type==='t62'){
+      // T62 → T64 → T64B → T64BM 四阶升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T62_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<3) mkAction('升级 → '+T62_LEVELS[first.upgradeLvl+1].name+' $'+T62_UPGRADE_COST[first.upgradeLvl+1],'t62Upgrade',true);
+      else mkAction('已满级 '+T62_LEVELS[3].name,'none',false);
+    }
+    if(first.type==='t80'){
+      // T80 → T80B → T80U → T80BVM 四阶升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T80_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<3) mkAction('升级 → '+T80_LEVELS[first.upgradeLvl+1].name+' $'+T80_UPGRADE_COST[first.upgradeLvl+1],'t80Upgrade',true);
+      else mkAction('已满级 '+T80_LEVELS[3].name,'none',false);
+    }
+    if(first.type==='t90'){
+      // T90 → T90M 单次升级
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T90_UPGRADE_TIME*100)+'%','none',false);
+      else if(first.upgradeLvl<1) mkAction('升级 → T90M $'+T90_UPGRADE_COST[1],'t90Upgrade',true);
+      else mkAction('已升级 T90M','none',false);
+    }
+    if(first.type==='tank' && unitFactionOf(first.team)==='soviet'){
+      // T54 双分支升级:二选一,互斥一次
+      if(first.upgrading) mkAction('升级中 '+Math.floor(first.upgradeProg/T54_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.t54Branch){
+        mkAction('升级 → T54B $'+T54_BRANCHES[1].cost,'t54bUp',true);
+        mkAction('升级 → T55AM $'+T54_BRANCHES[2].cost,'t55amUp',true);
+      } else mkAction('已升级 '+t54Branch(first).name,'none',false);
+    }
+    if(ATGM_TYPES.indexOf(first.type)!==-1){
+      if(first.atgmUpgrading) mkAction(atgmModuleName(first)+' 安装中 '+Math.floor(first.atgmProg/ATGM_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.atgm) mkAction(atgmModuleName(first)+' $'+ATGM_COST,'atgmUp',true);
+    }
+    const apsReady = first.type==='abrams' || (first.type==='t72' && first.upgradeLvl===2) || first.type==='merkava';
+    if(apsReady){
+      if(first.apsUpgrading) mkAction('自主防御系统 安装中 '+Math.floor(first.apsProg/APS_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.aps) mkAction('自主防御系统 $'+APS_COST,'apsUp',true);
+      else mkAction('自主防御系统:'+(first.apsOn?'开启':'关闭')+' (反导弹 '+first.apsAmmo+'/'+APS_MAX_AMMO+')','apsToggle',true);
+    }
+    // T80BVM / T90M:升级自带自主防御系统(无需安装,仅开关)
+    if((first.type==='t80' && first.upgradeLvl===3) || (first.type==='t90' && first.upgradeLvl===1)){
+      if(first.aps) mkAction('自主防御系统:'+(first.apsOn?'开启':'关闭')+' (反导弹 '+first.apsAmmo+'/'+APS_MAX_AMMO+')','apsToggle',true);
+    }
+    if(first.type==='abrams'){
+      // TUSK 升级包:300盾回15 + 换 M1A2TUSK 外观
+      if(first.tuskUpgrading) mkAction('TUSK 升级包 安装中 '+Math.floor(first.tuskProg/TUSK_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.tusk) mkAction('TUSK 升级包 $'+TUSK_COST,'tuskUp',true);
+      else mkAction('TUSK:300盾 · 回'+TUSK_SHIELD_REGEN+'/秒 · M1A2外观','none',false);
+      // 火炮升级包:+15 伤害 +15 射程
+      if(first.gunUpgrading) mkAction('火炮升级 安装中 '+Math.floor(first.gunUpProg/GUN_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.gunUp) mkAction('火炮升级 $'+GUN_COST,'gunUp',true);
+      else mkAction('火炮升级:伤害+'+GUN_DMG+' · 射程+'+GUN_RANGE,'none',false);
+    }
+    if(first.type==='t84bm'){
+      // 反应装甲模块(300盾/回10)
+      if(first.rarmUpgrading) mkAction('反应装甲 安装中 '+Math.floor(first.rarmProg/RARM_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.rarm) mkAction('反应装甲 $'+RARM_COST,'rarmUp',true);
+      else mkAction('反应装甲:盾 '+Math.ceil(first.shield)+'/'+T84BM_SHIELD+' (回'+T84BM_SHIELD_REGEN+'/秒)','none',false);
+      // 红外干扰装置(前方120°扇形干扰敌TOW),可开关
+      if(first.irUpgrading) mkAction('红外干扰装置 安装中 '+Math.floor(first.irProg/IR_UPGRADE_TIME*100)+'%','none',false);
+      else if(!first.ir) mkAction('红外干扰装置 $'+IR_COST,'irUp',true);
+      else mkAction('红外干扰装置:'+(first.irOn?'开启':'关闭'),'irToggle',true);
+    }
+    mkAction('选择全体同类','selectSameType',true);
     mkAction('全选作战单位','selectall',true);
     return;
   }
