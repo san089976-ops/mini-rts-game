@@ -9,6 +9,7 @@ const MUSIC_FILES = [
 let musicOn = true;
 let musicIdx = 0;
 let musicEl = null;
+let musicVolume = 0.6;   // 音量 0~1,默认 60%
 function initMusic(){
   try{
     musicEl = new Audio();
@@ -16,6 +17,7 @@ function initMusic(){
       if(!musicOn) return;
       musicIdx = (musicIdx+1) % MUSIC_FILES.length;
       musicEl.src = MUSIC_FILES[musicIdx];
+      musicEl.volume = musicVolume;
       musicEl.play().catch(()=>{});
     });
   }catch(e){ musicEl = null; }
@@ -24,10 +26,16 @@ function initMusic(){
     const m = parseInt(localStorage.getItem('ra_music_idx'),10);
     if(!isNaN(m) && m>=0 && m<MUSIC_FILES.length) musicIdx = m;
   }catch(e){}
+  try{
+    const vol = parseFloat(localStorage.getItem('ra_volume'));
+    if(!isNaN(vol) && vol>=0 && vol<=100) musicVolume = vol/100;
+  }catch(e){}
+  if(musicEl) musicEl.volume = musicVolume;
   updateMusicUI();
 }
 function playMusic(){
   if(!musicOn || !musicEl) return;
+  musicEl.volume = musicVolume;
   if(musicEl.paused || musicEl.ended){
     musicEl.src = MUSIC_FILES[musicIdx % MUSIC_FILES.length];
     musicEl.play().catch(()=>{});
@@ -38,6 +46,7 @@ function setMusic(on){
   try{ localStorage.setItem('ra_music', musicOn ? 'on' : 'off'); }catch(e){}
   if(musicOn){
     if(!musicEl) initMusic();
+    else musicEl.volume = musicVolume;
     playMusic();
   } else if(musicEl){
     musicEl.pause();
@@ -45,6 +54,13 @@ function setMusic(on){
   updateMusicUI();
 }
 function toggleMusic(){ setMusic(!musicOn); }
+function setMusicVolume(v){
+  const pct = Math.max(0, Math.min(100, Number(v)||0));
+  musicVolume = pct/100;
+  if(musicEl) musicEl.volume = musicVolume;
+  try{ localStorage.setItem('ra_volume', String(pct)); }catch(e){}
+  updateMusicUI();
+}
 // 手动选择播放哪一首(音乐1~4)
 function selectMusic(i){
   if(!musicEl) initMusic();
@@ -53,11 +69,17 @@ function selectMusic(i){
   if(!musicOn){ musicOn = true; try{ localStorage.setItem('ra_music','on'); }catch(e){} }
   if(musicEl){
     musicEl.src = MUSIC_FILES[musicIdx];
+    musicEl.volume = musicVolume;
     musicEl.play().catch(()=>{});
   }
   updateMusicUI();
 }
 function updateMusicUI(){
+  const vol = Math.round(musicVolume*100);
+  const slider = document.getElementById('musicVolume');
+  if(slider) slider.value = String(vol);
+  const volLabel = document.getElementById('musicVolLabel');
+  if(volLabel) volLabel.textContent = String(vol);
   const btns = document.querySelectorAll('[data-music-toggle]');
   for(const b of btns) b.textContent = musicOn ? '背景音乐：开' : '背景音乐：关';
   const picks = document.querySelectorAll('[data-music-pick]');
