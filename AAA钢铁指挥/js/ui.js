@@ -163,6 +163,7 @@ function updateAirPanel(){
     if(planeMission) cls+=' disabled';
     else if(!u.parked){ cls+=' disabled'; tip='出击中'; }
     else if(!u.radar){ cls+=' disabled'; tip='无雷达'; }
+    else if(!u.aa && !u.ag){ cls+=' disabled'; tip='未安装导弹包'; }
     else if(!isPlannablePlane(u)){ cls+=' disabled'; tip='待移植'; }
     const onClick = (cls.indexOf('disabled')===-1) ? (' onclick="airSlotToggle('+u.uid+')"') : '';
     sh+='<div class="'+cls+'"'+onClick+'>'+(i+1)+':'+airTypeShort(u)+(tip?('<span class="slotTip">'+tip+'</span>'):'')+'</div>';
@@ -215,7 +216,8 @@ function updateAirPanel(){
       '<div class="airName">'+u.def.name+' <span class="airTag">'+(u.parked?'[停驻]':'[出击中]')+'</span></div>'+
       '<div class="airStat">生命 '+Math.ceil(u.hp)+'/'+u.maxHp+' · 移速 '+u.speed+
         (u.aa?(' · '+airAAName(u)+' '+u.aaAmmo+'/'+AA_AMMO):'')+
-        (u.ag?(' · '+airAGName(u)+' '+u.agAmmo+'/'+AG_AMMO):'')+'</div>'+
+        (u.ag?(' · '+airAGName(u)+' '+u.agAmmo+'/'+AG_AMMO):'')+
+        (u.radar && !u.aa && !u.ag ? ' · 未安装导弹包' : '')+'</div>'+
       '<div class="airhp"><i style="width:'+hpPct+'%"></i></div>'+
       btnHTML;
     list.appendChild(row);
@@ -262,7 +264,8 @@ function airStartDistributed(){
   let remaining = { aa:0, ag:0 };
   for(const u of units){
     if(uids.includes(u.uid) && u.fly && u.parked && u.hp>0 && u.radar){
-      remaining.aa += u.aaAmmo; remaining.ag += u.agAmmo;
+      remaining.aa += u.aa ? (u.aaAmmo||0) : 0;
+      remaining.ag += u.ag ? (u.agAmmo||0) : 0;
     }
   }
   planeMission = { mode:'distributed', uids, remaining, assignments:[] };

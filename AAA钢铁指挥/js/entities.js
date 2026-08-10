@@ -26,6 +26,7 @@ class Unit {
     this.parked = false;           // 停驻在机场内(占停机位,不渲染/不参战)
     this.patrol = null;            // 盘旋中心 {x,y}(释放=机场点;右键移动=目标点)
     this._returning = false;       // 正在返回机场入住
+    this._returnBase = null;       // 临时返场目标(母港被摧毁/出售后改投新机场)
     // 空军武器包(F16/苏35,替换原测试炸弹包):A-120c 空对空 / A-174b 空对地
     this.aa = false; this.aaUpgrading = false; this.aaProg = 0;   // A-120c 已装/安装中/进度
     this.aaAmmo = 0; this.aaCd = 0;                               // A-120c 弹舱/冷却

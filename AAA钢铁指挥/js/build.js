@@ -423,6 +423,7 @@ function sellBuilding(ent){
   textPopup(ent.x,ent.y-20,'出售 +$'+refund,'#ffe27a');
   markBlocked(ent,false);
   ent.alive=false;
+  if(ent.defName==='airfield') releaseParkedAircraft(ent);   // 出售机场:停驻战斗机自动释放
   if(selected.includes(ent)) selected=selected.filter(s=>s!==ent);
   if(selBuilding===ent) selBuilding=null;
   if(selectedBlds.includes(ent)) selectedBlds=selectedBlds.filter(s=>s!==ent);

@@ -174,8 +174,9 @@ function giveOrder(ctrl){
     const validTgt = tgt && tgt.alive!==false && isEnemy(TEAM_A, tgt.team);
     if(planeMission.mode==='precision'){
       if(validTgt){
-        launchPrecisionStrike(planeMission.uids, tgt);
+        const launched = launchPrecisionStrike(planeMission.uids, tgt);
         planeMission = null; airSortieSel.clear();
+        if(!launched) textPopup(mw.x, mw.y-20, '所选飞机没有对应导弹包','#ff8080');
       } else {
         textPopup(mw.x, mw.y-12, '右键敌方目标发起精确打击 (Esc 取消)','#ffb0b0');
       }
@@ -226,7 +227,10 @@ function giveOrder(ctrl){
   if(planeList.length && enemy && enemy instanceof Building && enemy.alive && enemy.defName==='airfield' && enemy.team===TEAM_A){
     let returned=0;
     for(const u of planeList){
-      if(u.homeBase && u.homeBase.alive){
+      // 母港还在则回原机场;母港被摧毁/出售则改投当前点击的新机场
+      const dest = (u.homeBase && u.homeBase.alive) ? u.homeBase : enemy;
+      if(dest && dest.alive && dest.defName==='airfield' && dest.team===TEAM_A){
+        u._returnBase = (dest===u.homeBase) ? null : dest;
         u._returning = true;
         u._mission = null;             // 打断进行中的规划任务
         u.target = null; u.order = {kind:'none'}; u.path = null;

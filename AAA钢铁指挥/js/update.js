@@ -166,20 +166,24 @@ function applyDamage(ent, dmg, attacker, proj){
     }
   }
 }
+// 机场被摧毁/出售时释放停驻飞机,让它们在废墟上空继续盘旋
+function releaseParkedAircraft(b){
+  if(!b) return;
+  for(const u of units){
+    if(u.hp>0 && u.fly && u.homeBase===b && u.parked){
+      u.parked=false;
+      u.patrol={x:b.x, y:b.y};
+      u.order={kind:'none'}; u.path=null; u._returning=false; u._returnBase=null;
+    }
+  }
+}
+
 function destroyBuilding(ent){
   if(!ent.alive) return;
   ent.alive=false;
   markBlocked(ent,false);
   // 机场被摧毁:停驻的战斗机自动释放(失去母港,在机场残骸上空盘旋;无法再返场)
-  if(ent.defName==='airfield'){
-    for(const u of units){
-      if(u.hp>0 && u.fly && u.homeBase===ent && u.parked){
-        u.parked=false;
-        u.patrol={x:ent.x, y:ent.y};
-        u.order={kind:'none'}; u.path=null; u._returning=false;
-      }
-    }
-  }
+  if(ent.defName==='airfield') releaseParkedAircraft(ent);
   shake=Math.max(shake, Math.min(7, ent.w*ent.h*0.7));
   effects.push(new Effect(ent.x,ent.y,'explode',Math.max(ent.w,ent.h)*TILE*0.55));
   for(let i=0;i<8;i++){ const sm=new Effect(ent.x+rnd(-ent.w*TILE/2,ent.w*TILE/2),ent.y+rnd(-ent.h*TILE/2,ent.h*TILE/2),'smoke',rnd(6,12)); sm.life=1.4; sm.maxLife=1.4; effects.push(sm); }
@@ -759,6 +763,7 @@ function parkAircraft(u, b){
   u.path = null; u.pathIdx = 0;
   u.target = null;
   u._returning = false;
+  if(u._returnBase){ u.homeBase = b; u._returnBase = null; }   // 母港丢失后转投新机场
   if(u._mission){
     // 任务完成返场:复位被任务切走的"倾泻"模式,清空任务
     u.modeAA = AIR_MODE_MANUAL; u.modeAG = AIR_MODE_MANUAL;
@@ -908,14 +913,20 @@ function updateAircraft(u, dt){
   if(u.parked){ u.wantVx=0; u.wantVy=0; return; }   // 停驻:不动
   // 返回机场入住(手动右键机场 / 任一弹舱打空自动返场)
   if(u._returning){
-    const b = u.homeBase;
+    const home = u.homeBase;
+    const b = (u._returnBase && u._returnBase.alive && buildings.includes(u._returnBase)) ? u._returnBase : home;
     if(!b || !b.alive || !buildings.includes(b)){
-      u._returning = false;   // 机场没了:继续盘旋
+      u._returning = false; u._returnBase = null;   // 机场没了:继续盘旋
     } else {
       const d = Math.hypot(b.x-u.x, b.y-u.y);
       if(d <= 60){
-        parkAircraft(u, b);
-        updatePanel();
+        if(u._returnBase && airfieldUsedSlots(b) >= AIRFIELD_CAPACITY){
+          u._returning = false; u._returnBase = null;   // 新机场停机位满,继续盘旋
+          if(!u.patrol) u.patrol = {x:b.x, y:b.y};
+        } else {
+          parkAircraft(u, b);
+          updatePanel();
+        }
       } else {
         u.turnTarget = Math.atan2(b.y-u.y, b.x-u.x);
         const w = seekVelocity(u, b.x, b.y);
@@ -1052,6 +1063,7 @@ function launchPrecisionStrike(uids, target){
   }
   if(launched) textPopup(target.x, target.y-22, '精确打击 '+launched+' 架 锁定目标','#ffb0b0');
   updatePanel();
+  return launched;
 }
 // 分布式攻击:把玩家右键分配结果 round-robin 分到各架(按每架武器弹量封顶),分到任务的才出动
 function launchDistributed(uids, assignments){
