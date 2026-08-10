@@ -146,6 +146,5 @@ window.addEventListener('load', async ()=>{
   setupInput();
   buildMenu(true);         // 生成菜单:地图/队伍/预览(内部会生成地图)
   loadCustomMaps(()=>buildMenu(true));   // 加载 map/index.js 列出的自制地图后刷新地图列表
-  autoScanStored();                       // 若有已保存的 map 文件夹句柄,自动扫描刷新(尽力而为)
   requestAnimationFrame(frame);
 });

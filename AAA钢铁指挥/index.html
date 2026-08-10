@@ -150,6 +150,8 @@
         <button class="setRow" onclick="selectMusic(3)" data-music-pick="3">音乐4</button>
       </div>
       <button class="setRow" onclick="toggleMusic()" data-music-toggle>背景音乐：开</button>
+      <div class="setLabel">音量 <span id="musicVolLabel">60</span></div>
+      <input id="musicVolume" class="setVolume" type="range" min="0" max="100" value="60" oninput="setMusicVolume(this.value)">
       <button class="setClose" onclick="closeSettings()">关 闭</button>
     </div>
   </div>

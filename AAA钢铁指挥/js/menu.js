@@ -56,7 +56,11 @@ function initSpawnIdx(){
 function loadCustomMaps(done){
   window.CUSTOM_MAPS = window.CUSTOM_MAPS || [];
   const idx = window.CUSTOM_MAPS_INDEX || [];
-  if(!idx.length){ customMapsLoaded=true; if(done) done(); return; }
+  if(!idx.length){
+    customMapsLoaded = true;
+    autoScanStored(done);   // 无清单时也尝试从已授权 map 文件夹发现自声明地图
+    return;
+  }
   let remaining = idx.length;
   for(const name of idx){
     const start = window.CUSTOM_MAPS.length;
@@ -64,9 +68,9 @@ function loadCustomMaps(done){
     s.src='map/'+name;
     s.onload=()=>{
       for(let i=start;i<window.CUSTOM_MAPS.length;i++){ const m=window.CUSTOM_MAPS[i]; if(m && !m._file) m._file=name; }
-      remaining--; if(remaining<=0){ customMapsLoaded=true; if(done) done(); }
+      remaining--; if(remaining<=0){ customMapsLoaded=true; autoScanStored(done); }
     };
-    s.onerror=()=>{ remaining--; if(remaining<=0){ customMapsLoaded=true; if(done) done(); } };
+    s.onerror=()=>{ remaining--; if(remaining<=0){ customMapsLoaded=true; autoScanStored(done); } };
     document.head.appendChild(s);
   }
 }
@@ -75,7 +79,7 @@ function loadCustomMaps(done){
 function enterSkirmish(){
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('menu').classList.remove('hidden');
-  buildMenu(true);
+  if(done) done(); else buildMenu(true);
 }
 function comingSoon(){
   document.getElementById('soonOv').classList.add('show');
@@ -320,9 +324,9 @@ async function scanMapFolder(){
   }catch(e){ if(e && e.name!=='AbortError') setMenuStatus('扫描失败: '+e.message); }
 }
 // 启动时若有已保存的文件夹句柄,自动扫描刷新(不用手动重新连接;无用户手势时可能被浏览器拒,失败则保留 index.js 的列表)
-async function autoScanStored(){
+async function autoScanStored(done){
   const h=await idbGet('dirHandle');
-  if(!h) return;
+  if(!h){ if(done) done(); else buildMenu(true); return; }
   mapDirHandle=h;
   try{
     if(h.queryPermission && (await h.queryPermission({mode:'read'}))!=='granted'){

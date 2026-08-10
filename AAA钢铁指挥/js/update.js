@@ -166,20 +166,24 @@ function applyDamage(ent, dmg, attacker, proj){
     }
   }
 }
+// 机场被摧毁/出售时释放停驻飞机,让它们在废墟上空继续盘旋
+function releaseParkedAircraft(b){
+  if(!b) return;
+  for(const u of units){
+    if(u.hp>0 && u.fly && u.homeBase===b && u.parked){
+      u.parked=false;
+      u.patrol={x:b.x, y:b.y};
+      u.order={kind:'none'}; u.path=null; u._returning=false; u._returnBase=null;
+    }
+  }
+}
+
 function destroyBuilding(ent){
   if(!ent.alive) return;
   ent.alive=false;
   markBlocked(ent,false);
   // 机场被摧毁:停驻的战斗机自动释放(失去母港,在机场残骸上空盘旋;无法再返场)
-  if(ent.defName==='airfield'){
-    for(const u of units){
-      if(u.hp>0 && u.fly && u.homeBase===ent && u.parked){
-        u.parked=false;
-        u.patrol={x:ent.x, y:ent.y};
-        u.order={kind:'none'}; u.path=null; u._returning=false;
-      }
-    }
-  }
+  if(ent.defName==='airfield') releaseParkedAircraft(ent);
   shake=Math.max(shake, Math.min(7, ent.w*ent.h*0.7));
   effects.push(new Effect(ent.x,ent.y,'explode',Math.max(ent.w,ent.h)*TILE*0.55));
   for(let i=0;i<8;i++){ const sm=new Effect(ent.x+rnd(-ent.w*TILE/2,ent.w*TILE/2),ent.y+rnd(-ent.h*TILE/2,ent.h*TILE/2),'smoke',rnd(6,12)); sm.life=1.4; sm.maxLife=1.4; effects.push(sm); }
@@ -759,6 +763,7 @@ function parkAircraft(u, b){
   u.path = null; u.pathIdx = 0;
   u.target = null;
   u._returning = false;
+  if(u._returnBase){ u.homeBase = b; u._returnBase = null; }   // 母港丢失后转投新机场
   if(u._mission){
     // 任务完成返场:复位被任务切走的"倾泻"模式,清空任务
     u.modeAA = AIR_MODE_MANUAL; u.modeAG = AIR_MODE_MANUAL;
@@ -908,14 +913,20 @@ function updateAircraft(u, dt){
   if(u.parked){ u.wantVx=0; u.wantVy=0; return; }   // 停驻:不动
   // 返回机场入住(手动右键机场 / 任一弹舱打空自动返场)
   if(u._returning){
-    const b = u.homeBase;
+    const home = u.homeBase;
+    const b = (u._returnBase && u._returnBase.alive && buildings.includes(u._returnBase)) ? u._returnBase : home;
     if(!b || !b.alive || !buildings.includes(b)){
-      u._returning = false;   // 机场没了:继续盘旋
+      u._returning = false; u._returnBase = null;   // 机场没了:继续盘旋
     } else {
       const d = Math.hypot(b.x-u.x, b.y-u.y);
       if(d <= 60){
-        parkAircraft(u, b);
-        updatePanel();
+        if(u._returnBase && airfieldUsedSlots(b) >= AIRFIELD_CAPACITY){
+          u._returning = false; u._returnBase = null;   // 新机场停机位满,继续盘旋
+          if(!u.patrol) u.patrol = {x:b.x, y:b.y};
+        } else {
+          parkAircraft(u, b);
+          updatePanel();
+        }
       } else {
         u.turnTarget = Math.atan2(b.y-u.y, b.x-u.x);
         const w = seekVelocity(u, b.x, b.y);
@@ -1052,6 +1063,7 @@ function launchPrecisionStrike(uids, target){
   }
   if(launched) textPopup(target.x, target.y-22, '精确打击 '+launched+' 架 锁定目标','#ffb0b0');
   updatePanel();
+  return launched;
 }
 // 分布式攻击:把玩家右键分配结果 round-robin 分到各架(按每架武器弹量封顶),分到任务的才出动
 function launchDistributed(uids, assignments){
@@ -1194,10 +1206,11 @@ function arbitrateFlow(){
       const dv=flowDir(v); if(!dv) continue;
       if(du.x*dv.x + du.y*dv.y > 0.2) continue;   // 同向,不冲突
       if(dist(u,v) > 110) continue;
-      const csU=u.circles(), csV=v.circles();
+      const csU=frameCircles(u), csV=frameCircles(v);
       let near=false;
       for(const A of csU) for(const B of csV){
-        if(Math.hypot(A.x-B.x, A.y-B.y) < A.r+B.r+48){ near=true; break; }
+        const dx=A.x-B.x, dy=A.y-B.y, min=A.r+B.r+48;
+        if(dx*dx+dy*dy < min*min){ near=true; break; }
       }
       if(!near) continue;
       if(flowPriority(v) > flowPriority(u)){
@@ -1227,6 +1240,22 @@ function arbitrateFlow(){
     }
   }
 }
+// 每单位每帧胶囊缓存:位置/朝向未变时不重复算 cos/sin
+function frameCircles(u){
+  let c = u._frameCircles;
+  if(c && c._x===u.x && c._y===u.y && c._f===u.facing) return c;
+  const colR = u.colR, off = u.colOff || 0;
+  if(!c) c = u._frameCircles = [{x:0,y:0,r:0},{x:0,y:0,r:0}];
+  c._x = u.x; c._y = u.y; c._f = u.facing;
+  c[0].x = u.x; c[0].y = u.y; c[0].r = colR;
+  if(off <= 0){ c.length = 1; return c; }
+  const fx = Math.cos(u.facing), fy = Math.sin(u.facing);
+  if(c.length < 2) c.push({x:0,y:0,r:0});
+  c[1].x = u.x - fx*off; c[1].y = u.y - fy*off; c[1].r = colR;
+  c.length = 2;
+  return c;
+}
+
 function separateAll(){
   // 局部防挤压(软):按"双圆胶囊"碰撞圆两两距离检测计算排斥力,不直接改坐标
   // 两辆坦克(或单位)靠近重叠时,按圆的重叠量产生平滑推力,互相推开:
@@ -1236,20 +1265,21 @@ function separateAll(){
     u.sepVx=0; u.sepVy=0;
     if(u.fly) continue;   // 飞机在空中,不与地面单位互相推挤
     const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 16);
-    const csU = u.circles();
+    const csU = frameCircles(u);
     for(let c=0;c<cand.length;c++){
       const j=cand[c];
       if(j===i) continue;
       const v=units[j];
       if(v.hp<=0 || v.fly || isEnemy(u.team,v.team)) continue;   // 敌人在战斗中不做分离;飞机不参与地面推挤
-      const csV = v.circles();
+      const csV = frameCircles(v);
       // 双圆 × 双圆:车头/车尾圆之间两两做距离检测
       for(let a=0;a<csU.length;a++) for(let b=0;b<csV.length;b++){
         const A=csU[a], B=csV[b];
         const dx=A.x-B.x, dy=A.y-B.y;
-        const d=Math.hypot(dx,dy)||0.0001;
         const min=A.r+B.r;
-        if(d>=min) continue;
+        const d2=dx*dx+dy*dy;
+        if(d2 >= min*min) continue;
+        const d=Math.sqrt(d2)||0.0001;
         const over=(min-d)/min;             // 0(刚接触)~1(完全重叠)
         const str=over*over*SEPARATE_STRENGTH;   // 二次衰减:越近推力越强
         u.sepVx += (dx/d)*str;              // 沿两圆心连线把 u 推开
@@ -1261,13 +1291,14 @@ function separateAll(){
 /* ============ 刚性碰撞(双圆胶囊):重叠的位置修正 ============ */
 // 双圆胶囊 vs 双圆胶囊:两两(车头/车尾)圆检测,取穿透最深的圆对,沿其圆心连线推开
 function capsuleOverlap(u,v){
-  const csA=u.circles(), csB=v.circles();
+  const csA=frameCircles(u), csB=frameCircles(v);
   let deepest=null, deepPen=0;
   for(const A of csA) for(const B of csB){
     const dx=B.x-A.x, dy=B.y-A.y;
-    const d=Math.hypot(dx,dy)||0.0001;
     const min=A.r+B.r;
-    if(d<min){
+    const d2=dx*dx+dy*dy;
+    if(d2 < min*min){
+      const d=Math.sqrt(d2)||0.0001;
       const pen=min-d;
       if(pen>deepPen){ deepPen=pen; deepest={x:dx/d, y:dy/d}; }
     }
@@ -1291,9 +1322,10 @@ function hasUnitOverlapAt(u, x, y){
   for(let c=0;c<cand.length;c++){
     const v=units[cand[c]];
     if(v===u || v.hp<=0 || v.fly) continue;
-    const csB=v.circles();
+    const csB=frameCircles(v);
     for(const A of csA) for(const B of csB){
-      if(Math.hypot(A.x-B.x,A.y-B.y) < A.r+B.r) return true;
+      const dx=A.x-B.x, dy=A.y-B.y, min=A.r+B.r;
+      if(dx*dx+dy*dy < min*min) return true;
     }
   }
   return false;

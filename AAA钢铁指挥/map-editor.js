@@ -374,9 +374,16 @@ function blobDownload(name, content){
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),3000);
 }
+// 单文件自声明:地图 JS 同时把自己追加进 CUSTOM_MAPS_INDEX,放入 map/ 后扫描即可识别
+function selfDeclareMapContent(fileBase, obj){
+  const fileName = (obj && obj._file) || fileBase+'.js';
+  return '(window.CUSTOM_MAPS=window.CUSTOM_MAPS||[]).push('+JSON.stringify(obj)+');\n'+
+    '(window.CUSTOM_MAPS_INDEX=window.CUSTOM_MAPS_INDEX||[]);\n'+
+    'if(!window.CUSTOM_MAPS_INDEX.includes('+JSON.stringify(fileName)+')) window.CUSTOM_MAPS_INDEX.push('+JSON.stringify(fileName)+');\n';
+}
 async function saveMap(){
   const r=mapJSON(); if(!r) return;
-  const content='(window.CUSTOM_MAPS=window.CUSTOM_MAPS||[]).push('+JSON.stringify(r.obj)+');\n';
+  const content=selfDeclareMapContent(r.fileBase, r.obj);
   if(EDIT.dirHandle){
     try{
       await writeFile(EDIT.dirHandle, r.fileBase+'.js', content);
@@ -385,15 +392,13 @@ async function saveMap(){
     }catch(e){ setStatus('保存失败: '+e.message); }
   } else {
     blobDownload(r.fileBase+'.js', content);
-    downloadIndex();
-    setStatus('已下载 '+r.fileBase+'.js 和 index.js。把两者都放入 map 文件夹(覆盖旧 index.js),游戏即可列出全部地图。');
+    setStatus('已下载 '+r.fileBase+'.js。放入 map/ 后授权一次文件夹或点「扫描 map 文件夹」即可识别。');
   }
 }
 function downloadMap(){
   const r=mapJSON(); if(!r) return;
-  blobDownload(r.fileBase+'.js', '(window.CUSTOM_MAPS=window.CUSTOM_MAPS||[]).push('+JSON.stringify(r.obj)+');\n');
-  downloadIndex();
-  setStatus('已下载 '+r.fileBase+'.js 和 index.js。把两者都放入 map 文件夹(覆盖旧 index.js),游戏即可列出全部地图。');
+  blobDownload(r.fileBase+'.js', selfDeclareMapContent(r.fileBase, r.obj));
+  setStatus('已下载 '+r.fileBase+'.js。放入 map/ 后授权一次文件夹或点「扫描 map 文件夹」即可识别。');
 }
 async function openMaps(){
   if(EDIT.dirHandle){
