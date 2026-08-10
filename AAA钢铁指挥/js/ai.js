@@ -114,7 +114,9 @@ function refreshAIStats(team){
 function updateAI(dt, team){
   const st=aiState[team];
   if(!st) return;
-  refreshAIStats(team);
+  // 统计 0.05 秒刷新一次,避免每帧全量扫描建筑/单位
+  st._refreshT = (st._refreshT||0) - dt;
+  if(st._refreshT <= 0){ refreshAIStats(team); st._refreshT = 0.05; }
   const myBase = st.myBase;
   if(myBase){ st.lastBaseX=myBase.x; st.lastBaseY=myBase.y; }
   if(gameOver) return;
