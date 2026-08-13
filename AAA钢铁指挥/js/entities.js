@@ -22,15 +22,32 @@ class Unit {
     this.naval = !!d.naval;        // 只能在水中航行
     this.amphib = !!d.amphib;      // 陆海两栖
     this.fly = !!d.fly;            // 空军单位:飞越一切地形,移动/碰撞/渲染按飞行处理
+    // 小鸟直升机:机身+旋翼运输直升机,落地/升空双模式(升空才 fly=true,落地可被地面打)
+    this.chopper = !!d.chopper;
+    if(this.chopper) this.fly = false;   // 默认在地面(升空后 updateChopper 置 true)
+    this.landed = !!d.chopper;     // 是否停在地面(落地可装载,旋翼停转)
+    this.rising = false;           // 旋翼加速中(起飞过程,仍在地面)
+    this.landing = false;          // 旋翼减速中(降落过程,仍在空中)
+    this.spin = 0;                 // 旋翼当前角速度(rad/s,0=停转)
+    this.rotorAng = 0;             // 旋翼累计转角(渲染取负即顺时针)
+    this.dest = null;              // 升空后的飞行目标点/悬停点 {x,y}
     this.homeBase = null;          // 所属机场(生产它的建筑):用于统计停机位占用
     this.parked = false;           // 停驻在机场内(占停机位,不渲染/不参战)
     this.patrol = null;            // 盘旋中心 {x,y}(释放=机场点;右键移动=目标点)
     this._returning = false;       // 正在返回机场入住
+    this._returnBase = null;       // 临时返场目标(母港被摧毁/出售后改投新机场)
     // 空军武器包(F16/苏35,替换原测试炸弹包):A-120c 空对空 / A-174b 空对地
     this.aa = false; this.aaUpgrading = false; this.aaProg = 0;   // A-120c 已装/安装中/进度
     this.aaAmmo = 0; this.aaCd = 0;                               // A-120c 弹舱/冷却
     this.ag = false; this.agUpgrading = false; this.agProg = 0;   // A-174b 已装/安装中/进度
     this.agAmmo = 0; this.agCd = 0;                               // A-174b 弹舱/冷却
+    // F-15 重型战斗机:4 个武器挂载点,每点可挂 A-120c / A-174b / GBU-31
+    this.hardpoints = (type==='f15') ? [null,null,null,null] : null;  // 每槽 {kind:'aa'|'ag'|'gbu', upgrading, prog}
+    this.hpSel = null;                                                // 挂载点 UI 选择态:正在选择武器的槽位(0~3),null=未选择
+    this.gbu = false; this.gbuAmmo = 0;                          // GBU31 已装(任一挂点)/总炸弹数
+    this.bombing = false;                                         // 正在连续投弹
+    this.bombReleaseCount = 1;                                    // 每次投弹颗数(1↔2 切换)
+    this.bombCd = 0;                                              // 两颗炸弹之间倒计时
     this.modeAA = 0; this.modeAG = 0;                             // 攻击模式:0手动/1自动/2倾泻
     this.aaScan = null; this.aaLastFire = null;                   // 雷达自动:圈内集合/单目标冷却
     this.agScan = null; this.agLastFire = null;
@@ -49,6 +66,9 @@ class Unit {
     this.tusk = false; this.tuskUpgrading = false; this.tuskProg = 0;
     this.gunUp = false; this.gunUpgrading = false; this.gunUpProg = 0;
     this.crushTrees = crushesTrees(type);   // 重型单位可碾倒树林(坦克/两栖登陆艇等)
+    // 艾布拉姆X:携带弹簧刀无人机(1 发,释放后每 DRONE_RELOAD 秒填装)
+    this.droneAmmo = (d.droneSlots||0) > 0 ? 1 : 0;   // 当前可用无人机数(0/1)
+    this.droneReload = 0;                              // 无人机填装倒计时(秒,0=已就绪)
     this.capacity = d.capacity || 0;
     this.cargoUnits = [];          // 运输艇装载的地面单位(对象引用)
     this.unloadAt = null;          // 运输艇卸载点
@@ -64,6 +84,7 @@ class Unit {
     this.sepVx = 0; this.sepVy = 0;        // 分离力(来自同伴防挤压)
     // 反应装甲(T90/T72BVM等):护盾 + 一次免死
     this.shield = 0; this.survivedOnce = false;
+    if(type==='t14') this.shield = T14_SHIELD;   // T14 出厂即满盾(反应装甲护盾300)
     // 采矿车
     this.cargo = 0; this.mode = 'mine';
     this.oreTarget = null; this.refinery = null; this.mineT = 0;
@@ -84,6 +105,7 @@ class Unit {
     this.apsOn = true;              // 自主防御 开启/关闭
     this.apsAmmo = 0;               // 反导弹弹夹剩余(上限 APS_MAX_AMMO)
     this.apsReload = 0;             // 反导弹填充倒计时(0=可直接补弹)
+    if(type==='abramsx' || type==='t14'){ this.aps=true; this.apsOn=true; this.apsAmmo=APS_MAX_AMMO; this.apsReload=0; }   // 艾布拉姆X / T14 出厂自带 APS
     this.apsEngaged = [];           // 已接战(发射过反导)的来袭导弹记录:每个新导弹只打一发
     // 上次收到玩家移动指令的时间:用于战斗脱离保护期(刚被拉动时不被拉回战斗)
     this._lastMoveCmd = -99;
@@ -133,6 +155,7 @@ class Building {
     this.queue = []; this.spawnWait = 0;
     this.repairT = 0;         // 自动维修计时器
     this.upgraded=false; this.upgrading=false; this.upgradeProg=0;   // 战车工厂升级
+    this.upgradeLvl=0;   // 战车工厂升级等级 0/1/2(第二次升级解锁 T14/艾布拉姆X)
     this.powerLevel=0;   // 发电厂升级等级(0~2)
     this.pwrUpgrading=false; this.pwrUpgradeProg=0;   // 发电厂升级进度
     this.lastAttackT = -9999; this.fireT = 0; this.turretTarget = null;

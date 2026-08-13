@@ -27,9 +27,26 @@ function formationTargets(x, y, list){
   return pts;
 }
 function orderMove(list, x, y){
+  // 弹簧刀无人机:右键移动 = 飞到目标点悬浮待命
+  const drones = list.filter(u=>u.type==='drone');
+  for(const u of drones){
+    u.target=null; u.dest={x:x, y:y};
+    u.order={kind:'none'};
+    u._lastMoveCmd=time;
+  }
+  if(drones.length) textPopup(drones[0].x,drones[0].y-20, '无人机 悬浮 ('+drones.length+' 架)','#8aff8a');
+  // 小鸟直升机:右键移动 = 飞到目标点上空悬停(落地时自动起飞)
+  const choppers = list.filter(u=>u.chopper);
+  for(const u of choppers){
+    u.target=null; u._mission=null; u.prevOrder=null;
+    u.dest={x:x, y:y};
+    if(u.landed && !u.rising) chopperRise(u);
+    u._lastMoveCmd=time;
+  }
+  if(choppers.length) textPopup(choppers[0].x,choppers[0].y-20, '直升机 飞往目标点 ('+choppers.length+' 架)','#8aff8a');
   // 战斗机:右键移动 = 到目标点周围盘旋(不落地),同时取消正在执行的返场
-  const planes = list.filter(u=>u.fly);
-  const rest = list.filter(u=>!u.fly);
+  const planes = list.filter(u=>u.fly && !u.chopper && u.type!=='drone');
+  const rest = list.filter(u=>!u.fly && !u.chopper && u.type!=='drone');
   for(const u of planes){
     u.target=null;
     u._mission = null;                 // 玩家新指令打断规划任务
@@ -74,7 +91,18 @@ function orderMove(list, x, y){
 }
 function orderAttack(list, enemy, force){
   for(const u of list){
+    if(u.type==='drone'){
+      // 弹簧刀无人机:右键任意敌人 → 撞击自爆(飞到目标身上引爆 1800 范围伤)
+      if(enemy && (force || isEnemy(u.team, enemy.team))){
+        u.target = enemy;
+        u._lineT = RED_LINE_TIME;
+        u.order = {kind:'attack', target:enemy, force:!!force};
+        u.path = null; u.dest = null;
+      }
+      continue;
+    }
     if(u.fly){
+      if(u.chopper) continue;   // 直升机无武器,不参与攻击
       // 战斗机:目标为飞机→A-120c空对空;目标为地面/建筑→A-174b空对地。
       // 要求对应导弹包已装且有弹;右键指令触发(雷达自动模式不依赖此函数)。
       if(enemy && enemy.fly){
@@ -174,24 +202,27 @@ function giveOrder(ctrl){
     const validTgt = tgt && tgt.alive!==false && isEnemy(TEAM_A, tgt.team);
     if(planeMission.mode==='precision'){
       if(validTgt){
-        launchPrecisionStrike(planeMission.uids, tgt);
+        const launched = launchPrecisionStrike(planeMission.uids, tgt);
         planeMission = null; airSortieSel.clear();
+        if(!launched) textPopup(mw.x, mw.y-20, '所选飞机没有对应导弹包','#ff8080');
       } else {
         textPopup(mw.x, mw.y-12, '右键敌方目标发起精确打击 (Esc 取消)','#ffb0b0');
       }
       return;
     }
     if(validTgt){
-      const type = tgt.fly ? 'aa' : 'ag';
-      if(planeMission.remaining[type] > 0){
+      const type = tgt.fly ? 'aa' : (planeMission.remaining.ag>0 ? 'ag' : 'gbu');   // 先分配导弹,导弹耗尽才分配垂直炸弹
+      if(type==='gbu' && tgt.fly){
+        textPopup(tgt.x, tgt.y-20, '垂直炸弹无法攻击飞机','#ff8080');
+      } else if(planeMission.remaining[type] > 0){
         planeMission.remaining[type]--;
         planeMission.assignments.push({target:tgt, type:type});
-        textPopup(tgt.x, tgt.y-20, '分配 '+(type==='aa'?'空对空':'空对地')+' 1 发 → 剩余 对空 '+planeMission.remaining.aa+' / 对地 '+planeMission.remaining.ag, '#ffe27a');
+        textPopup(tgt.x, tgt.y-20, '分配 '+(type==='aa'?'空对空':type==='ag'?'空对地':'GBU-31')+' 1 '+(type==='gbu'?'颗':'发')+' → 剩余 对空 '+planeMission.remaining.aa+' / 对地 '+planeMission.remaining.ag+(planeMission.remaining.gbu!==undefined?(' / 炸弹 '+planeMission.remaining.gbu):''), '#ffe27a');
       } else {
-        textPopup(tgt.x, tgt.y-20, (type==='aa'?'空对空':'空对地')+'导弹已全部分配完','#ff8080');
+        textPopup(tgt.x, tgt.y-20, (type==='aa'?'空对空':type==='ag'?'空对地':'垂直炸弹')+'已全部分配完','#ff8080');
       }
     } else {
-      textPopup(mw.x, mw.y-12, '右键敌方目标以分配导弹','#ffb0b0');
+      textPopup(mw.x, mw.y-12, '右键敌方目标以分配武器','#ffb0b0');
     }
     updatePanel();
     return;
@@ -221,12 +252,15 @@ function giveOrder(ctrl){
   }
   if(!list.length && !selBuilding) return;
   const enemy = entityAt(mw.x, mw.y);
-  // 战斗机:右键己方机场 -> 返回入住(回到生产它的机场占停机位)
-  const planeList = list.filter(u=>u.fly);
+  // 战斗机:右键己方机场 -> 返回入住(回到生产它的机场占停机位;直升机/无人机不受此影响)
+  const planeList = list.filter(u=>u.fly && !u.chopper && u.type!=='drone');
   if(planeList.length && enemy && enemy instanceof Building && enemy.alive && enemy.defName==='airfield' && enemy.team===TEAM_A){
     let returned=0;
     for(const u of planeList){
-      if(u.homeBase && u.homeBase.alive){
+      // 母港还在则回原机场;母港被摧毁/出售则改投当前点击的新机场
+      const dest = (u.homeBase && u.homeBase.alive) ? u.homeBase : enemy;
+      if(dest && dest.alive && dest.defName==='airfield' && dest.team===TEAM_A){
+        u._returnBase = (dest===u.homeBase) ? null : dest;
         u._returning = true;
         u._mission = null;             // 打断进行中的规划任务
         u.target = null; u.order = {kind:'none'}; u.path = null;

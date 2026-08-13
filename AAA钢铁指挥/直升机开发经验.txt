@@ -1,0 +1,211 @@
+================================================================================
+《钢铁指挥》直升机开发经验
+（小鸟直升机:机身+旋翼贴图 / 机场生产不占停机位 / 落地·升空双模式 /
+  旋翼旋转渲染 / 空对空·空对地攻击规则 / 载人系统 的实际改动）
+================================================================================
+
+本文件记录"给游戏加一架运输直升机(小鸟 littlebird)"时踩过的坑和沉淀下来的
+经验。所有结论都以当前代码为准，改代码前先通读下列要点。
+
+--------------------------------------------------------------------------------
+一、整体架构(一句话)
+--------------------------------------------------------------------------------
+直升机 = 普通 Unit(带 chopper:true 标记)，但核心是"落地/升空"双状态:
+  - 落地(landed=true，fly=false)：停在地面可装载 5 名步兵，可被地面单位、
+    碉堡、空对地导弹(A-174b/Kh-29)与反坦克导弹(TOW/长钉)攻击。
+  - 升空(landed=false，fly=true)：只被空对空导弹(A-120c/R-37m)攻击。
+  - 中间态:rising=旋翼加速中(仍在地面可被地面打)/ landing=旋翼减速中(仍在空中)。
+  起飞先旋翼加速 2.8 秒到全速才升空;落地旋翼减速 0.8 秒停转即触地。
+
+关键文件:
+  js/config.js   CHOPPER_TYPES/isChopper、ROTOR_FULL_SPEED/ROTOR_SPIN_UP/
+                 ROTOR_LAND_TIME/ROTOR_PIVOT/ROTOR_SCALE/CHOPPER_ALTITUDE/
+                 ROTOR_SPIN_ACCEL/ROTOR_SPIN_DECEL、UNIT_BOX.littlebird、
+                 def(仅盟军 getUnitDefs('allies'))、IMAGES/SPRITE_ROT/SPRITE_SCALE/
+                 SPRITE_FRONT、transportCost/canBoardUnit、BLD_DEFS.airfield.train
+  js/entities.js Unit 构造 this.chopper/landed/rising/landing/spin/rotorAng/dest，
+                 若 chopper 则 this.fly=false(落地初始)
+  js/build.js    canTrain/canProduceIn 的 littlebird 分支(机场、不查停机位)；
+                 aircraftCountOf 只数战斗机(isAircraft)排除直升机
+  js/update.js   updateUnit 顶部 chopper 分支(必须在 u.fly 分支之前)；
+                 updateChopper/chopperRise/chopperLand/canChopperLandAt/
+                 chopperSpawn/onChopperAirborne;doBoard 落地复核;
+                 load 指令里"直升机起飞即取消登机";updateBuilding 生产分支
+  js/orders.js   orderMove 单独处理 chopper(设 dest + 落地自动起飞);
+                 giveOrder 飞机返场 planeList 排除 chopper;orderAttack 跳过 chopper
+  js/ui.js       unitStatsHTML 状态行 + 盘旋行对 chopper 打闸;
+                 updatePanel 升起/降落按钮;释放部队仅落地可用
+  js/input.js    'chopperRise'/'chopperLand' 按钮分发
+  js/render.js   unitPhotoImg 加 littlebird;drawUnit 的 u.chopper 分支;
+                 drawChopper(机身+旋翼旋转+模糊圆盘+悬停起伏);
+                 drawSel 的 直升机→目标点 绿虚线
+  js/map.js      KNOWN 白名单 / map-editor.js UNIT_TYPES+UNIT_LABEL
+
+--------------------------------------------------------------------------------
+二、素材处理(机身 + 旋翼两张图)
+--------------------------------------------------------------------------------
+  node tools/process-sprite.js "开发图片/小鸟运输机身.png" littlebird_body img/units 512
+  node tools/process-sprite.js "开发图片/6旋翼.png"       littlebird_rotor img/units 512
+惯例:
+  - 机身"朝上"贴图(159x516 竖长)，SPRITE_ROT.littlebird=Math.PI/2;
+    SPRITE_FRONT.littlebird=[0,-1](无武器,基本不用);SPRITE_SCALE.littlebird=0.7。
+  - 旋翼"6旋翼"几乎正方形大圆盘(498x516)，比机身宽约 3 倍。
+  - IMAGES 三键:littlebird(面板图标=机身)、littlebird_body、littlebird_rotor
+    (preloadImages 会遍历 IMAGES,三键都加载)。
+  - UNIT_BOX.littlebird={hw:11,hh:22}:竖长胶囊,因为机身是竖长形(与坦克横长相反)。
+
+--------------------------------------------------------------------------------
+三、核心状态机(update.js updateChopper)
+--------------------------------------------------------------------------------
+  旋翼转速(spin):0=停转,ROTOR_FULL_SPEED=16 全速(rad/s,渲染视觉转速)。
+  起飞流程:chopperRise 置 rising=true → 每帧 spin 按 ROTOR_SPIN_ACCEL 加速
+    (ROTOR_SPIN_UP=2.8 秒到全速) → spin 到全速那一刻置 landed=false、
+    fly=true、调 onChopperAirborne() 升空。
+  降落流程:chopperLand 先校验 canChopperLandAt(水面/树林/建筑格拒绝) →
+    landing=true → spin 按 ROTOR_SPIN_DECEL 减速 → 减到 0 置 landed=true。
+  升空后移动:u.dest 目标点,seekVelocity 直飞,距离≤14 悬停(不走 A*/地面寻路)。
+  每帧末尾 u.fly = !u.landed:动态 fly 决定一切系统对它的态度。
+
+  ★方向约定(调试时用户反复纠正过)★
+    ROTOR_PIVOT 在"机身朝上贴图"的本地坐标,-y=机头方向。
+    "向机头方向移动"= y 减小; "远离机头方向"= y 增大。
+    报数值时先确认"当前值 + 目标方向",避免正负反(本项目来回调过几次)。
+
+--------------------------------------------------------------------------------
+四、动态 fly 的妙用(关键设计)
+--------------------------------------------------------------------------------
+  直升机 def 里 fly:true(让构造器初始化飞机类字段),但 Unit 构造里
+    if(this.chopper) this.fly=false 落地开局;升空时 updateChopper 置 true,
+    落地置 false。因为 fly 是运行时字段,以下系统全部自动按状态分流:
+  - findEnemyNear/碉堡炮台/进驻建筑索敌:地面单位对 fly 一律跳过 → 升空免地面。
+  - 空对地雷达自动圈(updatePlaneRadarWeapon 的 !v.fly):落地才进圈。
+  - 空对空雷达圈(v.fly):升空才进圈。
+  - 路径(pathFor fly=直线)、碰撞(separateAll/resolveRigid 跳过 fly)、
+    卡住脱困(stuckT 加 !u.fly)全部自动适配。
+  ★因此改动点非常少:只补"升空瞬间的导弹自爆 + 地面弹丸落空"(见第六节)。
+
+--------------------------------------------------------------------------------
+五、机场生产(不占停机位 / 哪里下单哪里出 / 升起飞出)
+--------------------------------------------------------------------------------
+  1. BLD_DEFS.airfield.train 加 'littlebird'。
+  2. canTrain/canProduceIn 单独 littlebird 分支:只要求 defName==='airfield',
+     不查 airfieldUsedSlots(与 f16/su35 的停机位判定分开)。
+  3. ★别把 littlebird 加进 AIR_TYPES:那是战斗机停机位统计专用列表。
+     aircraftCountOf 用 isAircraft(u) 过滤,airfieldUsedSlots 的队列也按
+     isAircraftType,直升机天然不占位;若误加进 AIR_TYPES 会占停机位、
+     且生产即停驻(parkAircraft)逻辑会对它生效。
+  4. updateBuilding 生产完成分支:if(isAircraft(u)) parkAircraft → 战斗机;
+     else if(u.chopper) { u.homeBase=b; chopperSpawn(u,b); } →
+     设母港、dest=集结点或机场中心、自动 chopperRise(升起飞出)。
+  5. 阵营隔离:def 只写进 getUnitDefs('allies')。苏军 canTrain 里
+     getUnitDefs('soviet')['littlebird'] undefined → 直接 return false,
+     苏军机场 UI 的 mkUnit 也因 getUnitDefs(playerFaction)[t] 不存在而不显示。
+
+--------------------------------------------------------------------------------
+六、攻击规则(空对空 vs 空对地 / 升空瞬间导弹自爆)
+--------------------------------------------------------------------------------
+  1. 升空态=fly:地面/碉堡/进驻/空对地/TOW 自动失效(全走动态 fly 分流)。
+  2. 唯一能打升空直升机的是战斗机空对空(A-120c/R-37m):AA 导弹的
+     explodeATGM 对 primary 目标直接 applyDamage(不管 fly),命中判定
+     atgmHitTarget 用距离,照常生效。
+  3. onChopperAirborne(u) 在升空那一帧:遍历 missiles,
+     目标===u 且非空对空(空对地 a174b/kh29 或地面 tow/spike)→ explodeATGM
+     立即自爆(primary=null,不伤己方);再把 target===u 的地面弹丸 p.dead=true
+     落空。这样"被空对地瞄准后升起,导弹升空瞬间爆炸"就实现了。
+  4. updateUnit 里 chopper 分支必须放在 if(u.fly) 战斗机分支之前,
+     否则升空后(此时 fly=true)会被 updateAircraft 抢走。
+
+--------------------------------------------------------------------------------
+七、载人系统(只有落地能装)
+--------------------------------------------------------------------------------
+  - def 里 carrier:true, capacity:5 → isCarrier(u) 成立,运载行自动显示。
+  - transportCost(u) 加 u.chopper 返回 0 → 直升机本身不会被运输艇/步战车装上。
+  - canBoardUnit:加 `if(u.chopper) return false`(直升机永不当乘客)和
+    `if(carrier.chopper && !carrier.landed) return false`(只有落地能上机)。
+  - doBoard 再加一道落地复核:已起飞就取消登机(u.order=none)。
+  - load 指令执行中(updateUnit 的 load 分支):t.chopper && !t.landed → 取消登机
+    并提示"直升机已起飞,无法登机"。
+  - UI 释放部队按钮对 chopper 只在 landed 时显示(mkAction 加落地闸)。
+  - 被击毁时 cargoUnits 随载具丢失(与运输艇一致,没有梅卡瓦的"载员存活"特例)。
+
+--------------------------------------------------------------------------------
+八、渲染(render.js drawChopper + 各种联动)
+--------------------------------------------------------------------------------
+  drawUnit 顺序:通用阴影(按 u.fly 自动:升空=drawAircraftShadow 椭圆投影,
+    落地=drawShadowSprite 机身剪影)→ 队色圈 → 护盾环 → 渲染偏移 →
+    if(u.chopper) drawChopper else if(u.fly) 战斗机分支...
+  drawChopper 结构(机身朝上贴图,全部相对贴图中心):
+    ctx.translate(0, -CHOPPER_ALTITUDE + 悬停起伏bob)   // 升空抬升+轻微起伏
+    ctx.rotate(u.facing); ctx.rotate(SPRITE_ROT.littlebird) // π/2 对齐
+    drawImage(机身, 居中)
+    ctx.translate(ROTOR_PIVOT.x, ROTOR_PIVOT.y)   // 旋翼枢轴(机身上位置,可调)
+    [半透明模糊圆盘:spinF>0.06 时径向渐变圆,随转速收拢]
+    ctx.rotate(-(u.rotorAng||0))                  // 绕贴图自身正中心顺时针转
+    drawImage(旋翼, 居中)
+  ★要点★:
+  - 旋翼"始终绕自己贴图正中心转":drawImage 居中 + 在枢轴处 rotate,天然满足;
+    枢轴 ROTOR_PIVOT 只是把整张旋翼平移到机身上的位置。
+  - 顺时针 = 取负角:u.rotorAng 由 updateChopper 每帧 +spin*dt 累加,
+    rotate(-rotorAng) 在屏幕坐标(y 向下)即顺时针。
+  - 旋翼必须画在机身之后(之上)。模糊圆盘画在旋翼之下作"转动渲染"。
+  - 大小:ROTOR_SCALE 是相对机身缩放公式的倍率;旋翼源图比机身宽约 3 倍,
+    要让它"转起来像旋翼"必须明显大于机身(0.55 会缩得比机身还小,坑)。
+  - 选中线:drawSel 的 if(u.fly||u.chopper) 分支给 chopper 单独画
+    直升机→u.dest 绿虚线+准星(与战斗机→patrol 并列,别漏 dest 分支)。
+  - 血条/角标:render.js 里按 u.fly 抬 AIR_ALTITUDE 的代码对升空直升机自动生效。
+  - 升空后直升机走 render() 里"飞机最后绘制"的循环(u.fly),盖过一切。
+
+--------------------------------------------------------------------------------
+九、其它接线
+--------------------------------------------------------------------------------
+  - orders.js orderMove:choppers 过滤 → u.dest={x,y},落地且未在升则 chopperRise,
+    然后从原 list 剔除;planes/rest 过滤都加 !u.chopper。
+  - orders.js giveOrder 战斗机返场:planeList 过滤加 !u.chopper,
+    否则升空直升机(此时 fly=true)会被当成战斗机拉去"返场"。
+  - orders.js orderAttack 顶部 if(u.chopper) continue:直升机无武器。
+  - ui.js unitStatsHTML:if(u.fly) 的"盘旋"等行对 chopper 加 !u.chopper 闸,
+    另加 状态行(已降落可装载/正在升起/正在降落/飞行中)+ 攻击说明行。
+  - ui.js updatePanel:first.type==='littlebird' → 升起(ROTOR_SPIN_UP s)/
+    降落 按钮,landing/rising 时显示进度态。
+  - input.js 分发 'chopperRise'/'chopperLand'(走 massUpgrade)。
+  - map.js KNOWN + map-editor.js UNIT_TYPES/UNIT_LABEL 加 littlebird。
+  - 版本号:改完 config.js GAME_VERSION +1 且 index.html 全部 ?v= 同步 +1、
+    map-editor.html 也 +1(本功能从 1.7.3 → 1.7.4 → 1.7.5)。
+
+--------------------------------------------------------------------------------
+十、踩坑记录(个个真实)
+--------------------------------------------------------------------------------
+  1. ★CHOPPER_ALTITUDE 未定义 ReferenceError(最阴):
+     清理重复定义时把唯一一行 `const CHOPPER_ALTITUDE=AIR_ALTITUDE;` 删了。
+     落地时 `airborne ? CHOPPER_ALTITUDE : 0` 走 0 分支不触发引用,
+     一升空(airborne=true)才求值 → 报"出错啦"。地面正常、起飞炸,
+     纯逻辑冒烟测不出,必须加"渲染路径"测试(升空后调 drawUnit/render)。
+  2. 起飞永远不升空:updateChopper 里旋翼加速条件写了 `!u.landed && ...`,
+     而 rising 期间 landed 仍是 true → 永远不加速 → spin 到不了全速。
+     改为 `(u.rising || !u.landed) && u.spin < ROTOR_FULL_SPEED`。
+  3. 重复定义:本项目代码里可能已有半成品/草稿,新增前先 grep 一遍
+     (CHOPPER_TYPES/def/IMAGES 曾出现两套),否则 const 重声明直接 SyntaxError。
+  4. 旋翼朝向与枢轴方向:机头朝上贴图 -y=机头;用户说"向机头移"=y 减,
+     "远离机头"=y 增,正负反了画面就反着跑(调试中来回改过)。
+  5. 停机位误占:littlebird 一旦进 AIR_TYPES,aircraftCountOf/队列统计就把它
+     算进停机位,还能被 parkAircraft 停驻。用 isAircraft(isAircraftType) 隔离。
+  6. 防空规则"升空即免地面"依赖动态 fly:任何"只认构造时 fly"的写法都会漏
+     (如索敌、AOE、挡弹、弹道),全部走运行时 u.fly 即可,别另写一套。
+  7. 空对地导弹对落地直升机是有效目标:雷达 AG 圈 !v.fly、手动 AG 右键
+     enemy.fly=false 都天然成立;升空后因目标变 fly 由 onChopperAirborne 自爆。
+  8. 冒烟测试的 canvas stub:render 路径需要 createRadialGradient 返回
+     {addColorStop}、arcTo 等,否则渲染测试会假失败(distinguish stub 缺方法)。
+
+--------------------------------------------------------------------------------
+十一、如何验证
+--------------------------------------------------------------------------------
+  - node --check js/*.js(含 map-editor.js)。
+  - Node 冒烟(拼接全部 js + DOM/canvas stub,参考本项目既有做法):
+    机场生产→不占停机位→落地出生→2.8 秒升空(fly=true);
+    落地可被地面索敌/可装载 5 步兵,升空地面索敌失效/不可装载;
+    空对地与 TOW 瞄准落地直升机→升空瞬间自爆,空对空继续追踪;
+    水面/树林降落被拒;渲染路径落地+升空 drawUnit/drawSel/render() 无异常。
+  - 浏览器实测:机场下单→升起飞出→右键移动→降落→装 5 步兵→升空→
+    敌方苏35 空对空命中 / 地面与空对地对升空态无效;旋翼位置/大小微调
+    ROTOR_PIVOT / ROTOR_SCALE。
+================================================================================

@@ -1,0 +1,314 @@
+============================================================
+自 6badf82 起的全部修改记录(技术复盘文档)
+============================================================
+仓库: https://github.com/san089976-ops/mini-rts-game
+范围: 6badf82..HEAD(当前 husheng.dev 分支,dev 已同步)
+终点提交: fae682b(攻击续战索敌 240px)
+本文用于复用、检查、复盘与后续开发。源码目录: AAA钢铁指挥/
+
+------------------------------------------------------------
+一、提交总览(按时间顺序)
+------------------------------------------------------------
+56557c4  设置面板新增背景音乐音量滑块(线性,后被 e9ff80a 重构)
+e9e1413  修复飞机/机场逻辑;地图保存改单文件自声明 + 自动扫描
+40fc34f  Merge PR #10(分支回环合并,无独立最终功能)
+397fe67  Merge PR #11(分支回环合并,无独立最终功能)
+510f2e4  修复海战 AI 登陆死锁/卸载丢兵;版本升至 1.7.3
+53adad3  驱逐舰/碉堡数值;修复驱逐舰出生卡船坞;挤团抽搐
+bc19c9a  修复卡住时移动/攻击指令被静默取消;重试间隔 0.5s
+72593a2  更新帮助界面与战斗机描述,修正过时数值
+0ee19cc  修复坦克贴水边卡死:不可达目标全图最近可行格吸附
+e9ff80a  声音设置:移除 BGM 开关,音量改线性+对数融合映射
+89aabab  选中单位增加细白描边
+48529fa  攻击指令完成后自动接战(150px,后改 240px)
+d650fb7  寻路脱困全面优化:友军绕行/卡死优先级/建筑角防挤死
+fae682b  攻击完成后自动续战索敌范围改为 240px
+
+注意:40fc34f / 397fe67 是分支来回合并。若在合并 diff 里看到
+astar.js/path.js 大段增减,那是与旧版 dev 对比产生;最终代码以
+husheng.dev 的性能优化版(IndexMinHeap + typed array + 通行掩码)为准。
+
+------------------------------------------------------------
+二、逐项技术细节
+------------------------------------------------------------
+
+1. 背景音乐音量滑块(56557c4 → e9ff80a 重构)
+   - 初始(56557c4):
+     * index.html 设置面板新增 #musicVolume range(0~100,默认 60)
+       和 #musicVolLabel。
+     * music.js 新增 musicVolume=0.6,setMusicVolume() 实时写入
+       musicEl.volume,并持久化 localStorage['ra_volume']。
+     * css/style.css 新增 .setVolume 滑块样式。
+   - 最终形态(e9ff80a):
+     * 删除 musicOn/toggleMusic/setMusic 和设置面板开关按钮,
+       滑块滑到 0 即静音。
+     * 拆出 musicVolPct(滑块百分比 0~100)与 musicVolume(实际 0~1)。
+     * 映射公式(感知均匀):
+         x = pct/100
+         volumeFromPct(p) = (x + log10(1 + 9*x)) / 2
+       即线性曲线与对数曲线取中值;ra_volume 仍存滑块百分比,
+       默认显示 60,实际增益约 0.70。
+     * 切歌(selectMusic)、initMusic、playMusic 都统一使用 musicVolume。
+
+2. 飞机/机场逻辑修复(e9e1413)
+   - 出售机场释放停驻飞机:
+     * update.js 抽出公共函数 releaseParkedAircraft(b):
+       遍历 units,凡 u.homeBase===b && u.parked 的飞机改为
+       parked=false,patrol=机场废墟点,order=none,清 _returning/_returnBase。
+     * destroyBuilding 与 build.js sellBuilding 都调用它,
+       解决"出售机场后 F-16/苏-27 永久卡在停驻、凭空消失"。
+   - 母港丢失后转投新机场:
+     * entities.js Unit 新增 _returnBase 字段。
+     * orders.js 右键己方机场时:
+         dest = (u.homeBase && u.homeBase.alive) ? u.homeBase : 点击机场;
+         _returnBase = (dest===homeBase) ? null : dest;
+       homeBase 已死/已出售也能发起返场。
+     * updateAircraft 返场优先使用 _returnBase(且要求 alive 且仍在
+       buildings 列表),到达 60px 内检查新机场停机位(AIRFIELD_CAPACITY),
+       有空位才 parkAircraft。
+     * parkAircraft 入住新机场后: homeBase = b; _returnBase = null,
+       完成重新绑定。
+   - 出击规划(精确打击/分布式攻击):
+     * ui.js 飞机槽位:无雷达、或 radar 但没装 AA 也没装 AG 时
+       disabled,提示"未安装导弹包";面板属性行也显示该提示。
+     * airStartDistributed 统计弹量改为:
+         remaining.aa += u.aa ? (u.aaAmmo||0) : 0;
+         remaining.ag += u.ag ? (u.agAmmo||0) : 0;
+       避免只有雷达没导弹时 NaN。
+     * launchPrecisionStrike 返回 launched;orders.js 在 launched=0
+       时弹"所选飞机没有对应导弹包",不再无声清空任务。
+   - 地图保存与扫描:
+     * map-editor.js 新增 selfDeclareMapContent():
+       地图 JS 自声明,内容为
+         (window.CUSTOM_MAPS=...).push(mapObj)
+         + 把自身文件名写入 window.CUSTOM_MAPS_INDEX(去重)。
+       保存/下载只产生一个 地图名.js,不再额外下载 index.js。
+     * menu.js loadCustomMaps:无清单或清单加载完都调用
+       autoScanStored(done),自动扫描已授权 map 文件夹(IndexedDB
+       保存的 dirHandle);game.js 不再单独调用 autoScanStored。
+     * map/index.js 更新为 ["background.js","demo.js"],删除旧测试地图。
+
+3. 海战 AI 与运输艇卸载(510f2e4)
+   - AI 运输艇装船死锁修复(ai.js updateNavalAI):
+     * 空舱且已给陆地部队下 load 指令时,运输艇主动开往最近岸边
+       (nearestLand),让步兵/坦克能走上船,不再"船停水里、人站岸边
+       互相够不到"。
+     * 新增 _aiLoadWaitT 等待计时:8 秒没装完就取消本次装载,
+       _aiLoadCooldown=8 秒冷却重试,避免永久挂机。
+     * _aiLoadT(等乘客上齐计时)只在实际有人上船后推进。
+   - 卸载保留原对象(update.js unloadTransport):
+     * 不再 new Unit 重建,直接把 cargoUnits 里的对象放回:
+       c.x/c.y 设到最近陆地,清 order/path/vx/vy/target/_boarded,
+       保留升级、模块、护盾、载员、矿车 cargo/mode/oreTarget/refinery。
+     * nearestLand 找不到陆地(深海)时:货物保留在舱内 remain,
+       textPopup"附近没有陆地,N 个单位未卸载",不再整船消失。
+     * AI 运输艇卸不完:置 _aiReturnHome,先返航;回到船坞附近把
+       剩余部队卸回己方岛,再重新装船。
+   - 海战图队伍上限:
+     * maps.js 海战图加 maxTeams:4;getSpawns 超限时取最大已定义
+       出生点(2/3/4),不再回退通用 SPAWN_POINTS(那套坐标在海图上是水)。
+     * menu.js 新增 maxTeamCount(),切图/确认地图/改队伍数时按上限
+       钳制,队伍数按钮只渲染允许值。
+   - 版本号:config.js GAME_VERSION='1.7.3';index.html 脚本缓存参数
+     与游戏内版本角标同步。
+
+4. 驱逐舰/碉堡数值与出生点(53adad3)
+   - 数值:驱逐舰射程 118 → 142(+20%);碉堡伤害 24 → 21(-10%)。
+   - 驱逐舰出生不再卡船坞(build.js spawnUnitNear):
+     * 海军候选格先按"周围水面格数"降序排列。
+     * 对每个候选格按 8 个朝向(NAVAL_SPAWN_FACINGS)创建 probe Unit,
+       用 uBodyBlocked(probe,px,py,ang) 校验船体胶囊整体是否能放下,
+       不再只查中心格。
+     * 常规候选都放不下时,向外圈 r=2..8 逐圈找能整体放下的开阔
+       水面;出生时写入 facing/turnTarget。
+   - 挤团抽搐/“已脱离建筑”循环(update.js):
+     * applyMovement 的 _obsT(0.8s)只在中心格被建筑/障碍埋住时
+       pullOutOfObstacle;胶囊贴边不瞬移,交给旋转脱困。
+     * pullOutOfObstacle 先判 centerBlocked 或 uBodyBlocked;
+       findExitCellFor 优先找胶囊也能放下的格(带朝向),只有中心
+       真被埋住才退回"只保证中心可走"。
+
+5. 卡住时指令不再消失(bc19c9a)
+   - resolveStuckAfterRigid:最后一个航点被同伴卡住时,不再当作
+     "到达"调用 finishMove,而是保留指令并重新排队:
+       move -> queuePath(order.x,order.y)
+       attack -> queuePath(target.x,target.y)
+   - followPath 航点被静态障碍堵住且重寻路失败时,清掉旧路径并
+     重新排队,不保留指向障碍的旧路径干等。
+   - 寻路失败重试间隔 pathRetryReady 从 0.7s 缩到 0.5s。
+   - README 补充版本 1.7.3、海战图最多 4 队、地图保存说明。
+
+6. 帮助界面与文案修正(72593a2)
+   - index.html 帮助:右键功能补"上船/采矿·倒矿",建造快捷键补
+     "船坞 I 键"。
+   - config.js:T62 描述修正为 700 血,并补 T64/T64B/T64BM 升级链;
+     F-16/苏-27 描述由旧测试炸弹包改为当前 A-120c/A-174b 导弹包。
+
+7. 贴水边/不可达目标吸附(0ee19cc)
+   - astar.js AStarPathfinder.findPath:
+     * 起点/终点被占时,不再固定搜 3/5 格,而是按 r 逐圈扩展,
+       用 r*r<=bestD 剪枝,取欧氏距离最近的可行格(全图范围)。
+   - path.js buildFlowField:目标格不可达时同样按全图最近可行格
+     吸附,流场与 A* 行为一致。
+   - 效果:点到远处水中后坦克不再在岸边抖动、指令无法收尾。
+
+8. 声音设置最终形态(e9ff80a) —— 见第 1 节。
+
+9. 选中单位细白描边(89aabab)
+   - render.js drawSel 新增遍历 selected 的白色描边:
+     * roundRectPath 画圆角胶囊,尺寸 hw/hh + 1px 余量(坦克长条、
+       步兵正圆、驱逐舰细长)。
+     * 跟随 u.facing 旋转,并叠加 renderOx/renderOy(起步/刹车俯仰)。
+     * 飞机额外上移 AIR_ALTITUDE,描边画在机身而不是地面投影。
+     * 白色 rgba(255,255,255,0.7),1px 线宽,不改单位贴图管线。
+   - 项目说明.txt 的"选择圈"描述同步。
+
+10. 攻击完成后自动续战(48529fa + fae682b)
+   - updateUnit 的 attack 完成分支(目标死亡/消失)：
+     * 先 findEnemyNear(u, range) 找最近敌人;
+     * 找到则 u._homeX/_homeY=当前位置,order={kind:'attack',auto:true},
+       target=新敌人,path 清空,repathT=0,立即续战;
+     * 找不到才恢复原逻辑:prevOrder / move+x2 / order=none。
+   - auto:true 沿用守家判定:目标逃出 home+射程×2.2 会放弃追击,
+     避免无限缠斗。
+   - 索敌范围最初 150px(fae682b 改为 240px),即
+     findEnemyNear(u, 240)。
+   - 同时删除了 pullOutOfObstacle 里的"已脱离建筑"文字提示。
+
+11. 寻路脱困全面优化(d650fb7)——重点
+   A. 友军软障碍绕行(path.js)
+      - queuePath(u,tx,ty,order,detour):_pendingPath 增加 detour 标记。
+      - processPathJobs:detour 任务不参与流场统计;处理时走
+        pathForDetour,否则走原 flow/A* 逻辑。
+      - pathForDetour(u,tx,ty):
+        * 复制通行掩码(passableMaskFor(u).slice());
+        * 把 240px 内友军/同盟单位(非敌人、非飞机)的胶囊 AABB
+          (两圆圆心 ±(colR+4))标为不可通行;
+        * 新建 MapGrid + AStarPathfinder 重算,再 smoothPath;
+        * 不进普通 pathCache,避免单位位置变化导致缓存失效。
+   B. 卡死优先级(update.js)
+      - applyMovement 本地脱困:
+        * 先判 staticBlocked=uBodyBlocked(u,u.x,u.y);
+        * 纯同伴拥堵(!staticBlocked 且 detour 未失败):直接
+          queuePath(...,true),不再左右乱顶;
+        * 静态卡死或 _detourFail(0.5s 内)才走 14/26/40px 侧移;
+        * 真被埋住(中心格 !unitPassable,或胶囊两圆所在格都堵):
+          立即 pullOutOfObstacle;
+        * 仅擦边时用 _edgeStuckT 累计,>=1s 才允许瞬移(第二位),
+          之后旋转脱困,最后再兜底瞬移。
+      - resolveStuckAfterRigid:
+        * 航点卡死(wpStuck)最后航点时重排 detour 路径;
+        * 位移不足且纯同伴拥堵时直接排 detour 并 return;
+        * 静态卡死/绕行失败才侧移。
+   C. 瞬移出口两遍搜索(update.js findExitCellFor)
+      - 第一遍(pass=0):要求出口格无友军占用(hasUnitOverlapAt);
+      - 第二遍(pass=1):放宽到静态可通行即可,墙角被围死也能瞬移出;
+      - 第一遍若已有"中心可走"兜底就直接用,不瞬移到友军身上。
+   D. 防挤入建筑角(update.js)
+      - separateAll:每个分离推力方向先探测 4px,若 uBodyBlocked
+        (朝向建筑/水面)就剔除该方向分量,避免友军把人压进墙角。
+      - resolveRigid:先按权重分别尝试双方位移;若双方都放不下,
+        让能动的单位吃下整段穿透量(pen),避免"墙角单位动不了、
+        挤它的单位也动不了"的双钉死。
+   E. 验证
+      - node --check 全部通过;
+      - Node 情景测试 8 项全过(见第三节)。
+
+12. 攻击续战范围 240px(fae682b)——见第 10 节。
+
+------------------------------------------------------------
+三、验证与回归测试(Node)
+------------------------------------------------------------
+- node --check:astar.js / path.js / update.js 全部通过。
+- Node 情景测试(8 项,均 PASS):
+  1) A* 开放地图寻路
+  2) A* 带缺口墙(路径必须经过缺口)
+  3) A* 不可达终点吸附到最近可行格
+  4) 攻击完成后 150/240px 内自动续战(80px 目标会被接战)
+  5) 堵车通道:4 辆友军堵缺口,攻击单位绕行到达且 order 保持 attack
+  6) 埋墙单位瞬移脱困
+  7) 建筑角 3 辆坦克围顶:目标能脱出
+- 复现结论备忘:
+  * "攻击指令消失"的真实原因不是 order 被清,而是友军堵路+脱困
+    循环导致单位停半路;
+  * 建筑角卡死 = 分离力压向建筑 + 刚性碰撞双钉死 + 出口被友军占用。
+
+------------------------------------------------------------
+四、涉及文件清单
+------------------------------------------------------------
+AAA钢铁指挥/index.html            帮助/设置/缓存参数
+AAA钢铁指挥/css/style.css          音量滑块样式
+AAA钢铁指挥/js/ai.js               海战 AI 装船/返航
+AAA钢铁指挥/js/astar.js            不可达吸附
+AAA钢铁指挥/js/build.js            出售机场释放飞机;海军出生校验
+AAA钢铁指挥/js/config.js           数值/版本/描述
+AAA钢铁指挥/js/entities.js         _returnBase 字段
+AAA钢铁指挥/js/game.js             启动流程
+AAA钢铁指挥/js/maps.js             海战图 maxTeams/出生点
+AAA钢铁指挥/js/menu.js             队伍上限钳制;地图扫描
+AAA钢铁指挥/js/music.js            音量滑块/映射
+AAA钢铁指挥/js/orders.js           飞机返场/精确打击提示
+AAA钢铁指挥/js/path.js             寻路缓存/流场/detour 绕行
+AAA钢铁指挥/js/render.js           选中描边
+AAA钢铁指挥/js/ui.js               空军面板/弹量统计
+AAA钢铁指挥/js/update.js           海战卸载/AI 返航/脱困/攻击续战/碰撞
+AAA钢铁指挥/map-editor.js          单文件地图自声明
+AAA钢铁指挥/map/index.js           地图清单
+README.md / 项目说明.txt            文档同步
+
+------------------------------------------------------------
+五、后续开发注意事项
+------------------------------------------------------------
+1. 音量映射是"线性+对数取中值"经验公式,若觉得低区/高区仍不均,
+   可改 volumeFromPct 权重(如 0.6 线性 + 0.4 对数),不要改滑块存值。
+2. pathForDetour 有 1 秒冷却(_detourT),大团战 100+ 单位同时卡住时
+   每个单位最多 1 秒重排一次,仍可控;若卡顿,可把 240px 缩小或
+   只对 attack/move 指令启用。
+3. findExitCellFor 第二遍会瞬移到"中心格可走但可能贴近友军"的格,
+   是最后手段;正常路径下第一遍无友军占用优先,不会频繁瞬移。
+4. 攻击续战索敌 240px 是全局常量,想做成"单位档案可配置"时可挪到
+   config.js 或单位 def 上。
+5. 飞机逻辑是独立体系(updateAircraft/planMission),地面寻路脱困的
+   改动不会自动套用到飞机;后续若飞机也出现卡顿,需单独排查。
+
+------------------------------------------------------------
+六、与既有经验文档的衔接(可补充要点)
+------------------------------------------------------------
+配套经验文档:
+  《飞机与机场修改经验.txt》——飞机/机场/出击规划/模块
+  《坦克与步兵战车修改经验.txt》——坦克/炮塔/弹丸/卡死兜底
+
+1. 版本号同步规则(两个经验文档共同的坑):
+   - config.js GAME_VERSION +1 后,index.html 所有 <script src=...?v=xx> 与
+     map-editor.html 的缓存参数必须一起 +1,否则浏览器缓存旧代码。
+   - 本次 510f2e4 已把版本升到 1.7.3;后续任何可见功能改动照此执行。
+
+2. 飞机冒烟测试坑(飞机经验 §九-15):
+   - 测试返场/目标死亡返场时,homeBase 必须是真的 Building 对象且 push 进
+     buildings[];用假对象会让 buildings.includes(b) 判 false,把 _returning
+     重置,断言假失败。
+   - e9e1413 之后返场还会优先检查 _returnBase(新机场),测母港丢失时要同时
+     把新机场放进 buildings[]。
+
+3. 任务状态清理(飞机经验 §九-16 / §十一):
+   - parkAircraft 必须清 u._mission 并把 modeAA/modeAG 复位 AIR_MODE_MANUAL,
+     否则精确打击留下的"倾泻"模式会在下次释放时对随机目标倾泻误射。
+   - 该逻辑在 6badf82 之前已存在,本次修复未改动;复盘时不要误认为新加。
+
+4. Esc 优先级(飞机经验 §九-18):
+   - 出击规划(planeMission)进行中按 Esc 应先 airCancelMission,再处理暂停/
+     取消放置/退出出售;新增 UI 流程时保持这个顺序。
+
+5. 坦克经验 §七(卡死兜底)已过时,以本文第四节 d650fb7 为准:
+   - pullOutOfObstacle 现在同时判中心格与胶囊,findExitCellFor 两遍搜索,
+     擦边静态卡死要 _edgeStuckT>=1s 才允许瞬移;
+   - 友军堵路不再只靠左右脱困,而是 pathForDetour 把友军当软障碍重算路径
+     (这是寻路层改动,坦克经验文档里"不改 astar/path"的说法只适用于当时)。
+
+6. 编码坑(坦克经验 §八):
+   - 改 UTF-8 中文文件别用 PowerShell Get-Content/Set-Content 默认编码;
+     用 Node fs.readFileSync/replace/writeFileSync 或编辑器,避免中文乱码。
+
+7. 涉及面广的全局规则先确认意图(飞机经验 §九-5):
+   - 类似"索敌范围 240px""卡死先重排"这类全局改动会同时影响玩家/AI/海陆空,
+     改前先说明影响面。

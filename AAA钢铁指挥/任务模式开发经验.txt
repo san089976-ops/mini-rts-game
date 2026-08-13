@@ -1,0 +1,142 @@
+========================================================================
+《钢铁指挥》任务模式 —— 操作流程与开发经验
+（右侧任务面板 / 波次防守 / 动态加载 / 玩家自制任务）
+========================================================================
+
+本文件记录任务模式从"入口 → 选任务 → 开打 → 胜负"的完整操作流程，
+以及实现时踩过的坑和沉淀的开发经验。改任务模式代码前先通读。
+
+------------------------------------------------------------------------
+一、一句话概述
+------------------------------------------------------------------------
+任务模式 = 地图文件(任务/ 文件夹) + 波次防守逻辑(js/missions.js)：
+  主菜单「任务模式」→ 右侧面板列出 任务/ 文件夹里所有任务 → 选一个「开始任务」
+  → 进入防守战：玩家守基地，敌军按 waves 定时分批进攻，
+  建筑全灭=失败；波次全出且敌军全灭=胜利。
+
+------------------------------------------------------------------------
+二、操作流程(玩家视角)
+------------------------------------------------------------------------
+1. 打开 index.html，主菜单点「任务模式」（landing 页的 modeBtn → openMissionPanel()）。
+2. 屏幕右侧弹出 #missionPanel（样式完全仿机场 #airPanel，复用 .airRow 等类）：
+   - 顶部工具按钮:「刷新」「扫描任务文件夹」「返回」
+   - 列表每张任务卡:名称 + 波次数 + 简介 + 开局资金 + 「开始任务」按钮
+3. 点「开始任务」→ 面板与主菜单隐藏 → setupGame() 开局（地图/单位/建筑/资金按任务地图数据）。
+4. 游戏内：
+   - 玩家是盟军(组0,蓝)，无建造厂；按任务地图预置建筑与单位。
+   - 敌军是苏军(组1,红)，ai:false(不发展经济)，由 updateMission 定时出波。
+   - 每波出现时敌出生点弹字「第 N 波 敌军来袭!」。
+   - 敌军每 2 秒重新指派最近玩家建筑/单位为攻击目标(missionAssignTarget)。
+5. 胜负：
+   - 玩家所有建筑被摧毁 → 失败(你输了/基地建筑已被全部摧毁)。
+   - 所有波次已出 且 敌军单位全灭 → 胜利。
+6. 结算页可「重新开始」或「返回主菜单」。
+
+------------------------------------------------------------------------
+三、代码结构(改哪里)
+------------------------------------------------------------------------
+  任务/          任务地图文件夹(和 map/ 平级,独立于地图浏览)
+  任务/index.js  任务地图索引: window.MISSION_MAPS_INDEX=["测试任务.js"];
+  任务/*.js      每个任务地图(自定义地图格式 + 可选 money/desc/waves)
+  js/missions.js 全部任务逻辑:加载/面板/开始/出波/胜负
+  index.html      #missionPanel 结构 + <script src="js/missions.js"> (在 menu.js 之后)
+  css/style.css   #missionPanel/.mpTools/.mpTool 样式
+  js/map.js      placeMapEntities(地图预置建筑/单位) 任务地图复用 custom:'edited' 管线
+  js/maps.js     currentMap() 里加了"任务地图识别"(window.MISSION_MAPS 兜底查找)
+  js/game.js     setupGame():任务模式跳过 ensureTeamCommands(不自动补建造厂)
+  js/update.js   胜负判定加 gameSetup.mode!=='mission' 守卫;每帧调 updateMission(dt)
+
+------------------------------------------------------------------------
+四、任务地图格式(任务/ 里的 .js)
+------------------------------------------------------------------------
+每个任务 = 一个自包含 JS 文件,往 window.MISSION_MAPS 里 push 一个对象:
+   (window.MISSION_MAPS=window.MISSION_MAPS||[]).push({
+     id, name, width, height, custom:'edited',
+     terrain:[[...]], ores:[],            // 与地图编辑器保存格式一致
+     buildings:[{def,team,tx,ty}],        // team 0=玩家预置建筑
+     units:[{type,team,x,y}],             // x/y 为格子坐标(玩家预置单位)
+     spawns:[[px,py],[ex,ey]],            // [0]=玩家基地 [1]=敌军出生点
+     // ↓↓↓ 任务专用(可选)↓↓↓
+     money: 3000,                         // 玩家开局资金(缺省 3000)
+     desc: '任务简介文字',
+     waves: [                             // 波次数组(缺省用 MISSION_DEFAULT_WAVES 兜底)
+       { at:8,   units:[{type:'tank', branch:0, count:4}] },   // T54
+       { at:60,  units:[{type:'tank', branch:1, count:5}] },   // T54B
+       { at:115, units:[{type:'tank', branch:2, count:6}] },   // T55AM
+     ],
+     playerFaction:'allies', enemyFaction:'soviet',  // 可选,默认盟军vs苏军
+   });
+
+waves 字段说明:
+  at   = 开局后第几秒出这波(秒)。
+  units 每项: type=单位类型(如 tank/t90/exo), branch=T54分支(0=T54/1=T54B/2=T55AM,
+          只有 type:'tank' 且敌军苏军时有意义,会套 t54Branch 属性+贴图), count=数量。
+
+出波坐标:从 spawns[1](敌军出生点)格子中心附近展开(横排4个,多行错开),避免重叠。
+
+------------------------------------------------------------------------
+五、动态加载 / 刷新 / 扫描(玩家自制任务的关键)
+------------------------------------------------------------------------
+1. 打开面板 openMissionPanel():若任务还没加载过,先 loadMissionMaps 再渲染。
+   loadMissionMaps 读 任务/index.js 列出的文件名,逐个 <script src="任务/xx.js"> 注入,
+   文件执行后往 window.MISSION_MAPS push(同 loadCustomMaps 的套路,只是数组/文件夹不同)。
+2. 「刷新」refreshMissionMaps():重新注入一次 任务/index.js(可能被更新),
+   再强制重载(先清空 window.MISSION_MAPS 再去重加载),避免重复 push 出重复任务。
+3. 「扫描任务文件夹」scanMissionFolder():File System Access API(showDirectoryPicker,
+   仅 Chrome/Edge 可用),遍历所选文件夹的 .js(排除 index.js),逐个 eval 读取,
+   收集到 window.MISSION_MAPS 并写回 任务/index.js。用于"丢新文件后一键接入"。
+4. 玩家自制任务的标准流程(无需代码):
+   a. 打开 map-editor.html,画地形/摆建筑/放单位/设出生点,保存时把目标文件夹选成
+      "任务" 文件夹 —— 编辑器保存会自动写该文件夹的 index.js。
+   b. 回游戏主菜单 → 任务模式 → 「扫描任务文件夹」(或「刷新」)。
+   c. 没写 waves 的地图也能玩(用默认兜底波次:苏军 T54/T54B/T55AM 3波递增)。
+      想自定义波次,手改该地图 .js 加上 waves 字段即可(格式见第四节)。
+   注意:地图编辑器保存的对象没有 waves/money/desc,需要自定义波次时手动往文件里加。
+
+------------------------------------------------------------------------
+六、运行逻辑(updateMission 每帧,由 update.js 调用)
+------------------------------------------------------------------------
+  调用条件: gameSetup.mode==='mission' && !gameOver (update.js 末尾)。
+  1. 出波: while(nextWave < waves.length && time >= waves[nextWave].at)
+           逐个生成 Unit(type, enemyTeam, 出生点偏移),若 uu.branch 则套 t54Branch 属性
+           (maxHp/hp/speed/shield/_def 按分支),然后 missionAssignTarget 下攻击指令。
+  2. 重指派: 每 2 秒(ms.retargetT)给所有存活敌军重找最近玩家建筑/单位下 orderAttack,
+             防止目标被打掉后敌军原地发呆。
+  3. 胜负:   玩家建筑全灭→lose;波次全出 && 敌军全灭→win(弹 overlay 结算)。
+  敌军 ai:false 不参与电脑经济逻辑(frame() 只对 gameTeams[t].ai 调 updateAI)。
+
+------------------------------------------------------------------------
+七、踩坑与经验(真实事故)
+------------------------------------------------------------------------
+1. ★"敌军无建筑导致开局秒判胜利":遭遇战胜负判定是"摧毁全部敌方建筑"。
+   任务模式敌军没有任何建筑,若不守卫会立即判胜。必须在 update.js 的胜负判定加
+   gameSetup.mode!=='mission',任务模式改走 updateMission 的波次判定。
+2. ★"ensureTeamCommands 偷偷补建造厂":setupGame 的兜底逻辑会给没有建造厂的队伍
+   自动补一个 command。任务模式玩家按设计无建造厂(只能用兵营产兵+初始单位),必须
+   在 setupGame 里改成 if(gameSetup.mode!=='mission') ensureTeamCommands()。
+3. ★地图文件夹加载的脚本会重复 push:loadCustomMaps/loadMissionMaps 用 <script> 注入,
+   每次刷新重新注入同一个文件会重复执行。刷新时先 window.MISSION_MAPS=[] 清空再加载。
+4. ★getSpawns/currentMap 认不出任务地图:genTerrain 用 getSpawns→currentMap 清出生点,
+   而 currentMap 原本只查 window.CUSTOM_MAPS。任务地图在 window.MISSION_MAPS,需在
+   currentMap() 里加 MISSION_MAPS 兜底查找,否则出生点清空用的是默认坐标。
+5. 出波坐标要错开:同波多辆坦克全挤在一个格子上会互相弹开/卡死。按
+   (i%4)*0.7 格横向错开、每 4 辆换一行(0.75 格)排成小方阵。
+6. 敌军要"持续攻击":单次 orderAttack 的目标被打掉后单位会变 idle。靠每 2 秒
+   missionAssignTarget 重新指派,才不会变成站桩。
+7. 波次单位套分支属性必须自己搬:new Unit('tank',...) 默认是基础 T54;
+   要 T54B/T55AM 得手动设 u.t54Branch 并按 t54Branch(u) 覆盖 maxHp/hp/speed/shield/_def
+   (贴图/旋转由 turretKeys/unitRotOff 读 t54Branch 自动切换,不用自己管)。
+8. 扫描文件夹用 File System Access(showDirectoryPicker),打包成 exe(Electron)后不可用;
+   但"编辑器存进 任务/ 文件夹 + 刷新"这条路径不依赖它,始终可用。
+9. 版本号:每次改完 js 记得 config.js GAME_VERSION +1、index.html 所有 ?v= 同步 +1、
+   map-editor.html 也 +1,否则浏览器缓存旧代码。
+
+------------------------------------------------------------------------
+八、验证(无测试框架)
+------------------------------------------------------------------------
+  - node --check js/*.js 逐个语法检查。
+  - Node 拼接全部 js + 任务地图文件 + DOM/canvas stub 冒烟测试:
+    任务地图加载、startMission 生成的 gameSetup/gameTeams、出波数量与分支属性、
+    胜利(守完+敌全灭)/失败(建筑全灭)、自制地图无 waves 时兜底波次生效。
+  - 浏览器实测:任务模式→面板列任务→开始→三波进攻→结算,以及刷新/扫描按钮。
+========================================================================

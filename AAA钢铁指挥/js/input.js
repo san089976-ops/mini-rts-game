@@ -161,6 +161,11 @@ function setupInput(){
     else if(act==='agUp') massUpgrade(selected, u=>startAGUpgrade(u), (selected[0]?airAGName(selected[0]):'空对地导弹')+'安装');
     else if(act==='radarUp') massUpgrade(selected, u=>startRadarUpgrade(u), '雷达火控安装');
     else if(act==='coatUp') massUpgrade(selected, u=>startCoatUpgrade(u), '涂层更新安装');
+    else if(act==='hpSel'){ const u=selected[0]; if(u && u.hardpoints){ u.hpSel=parseInt(btn.dataset.def,10); updatePanel(); } }
+    else if(act==='hpSelCancel'){ const u=selected[0]; if(u && u.hardpoints){ u.hpSel=null; updatePanel(); } }
+    else if(act==='hpUp'){ const u=selected[0]; const parts=(btn.dataset.def||'').split(':'); if(u && parts.length===2){ if(startHardpointUpgrade(u, parseInt(parts[0]), parts[1])) u.hpSel=null; } }
+    else if(act==='gbuRelease'){ const u=selected[0]; if(u && u.hardpoints){ if(u.bombing){ u.bombing=false; textPopup(u.x,u.y-20,'停止投弹','#ffd0d0'); } else if(u.gbu && u.gbuAmmo>0){ u.bombing=true; u.bombCd=0; textPopup(u.x,u.y-20,'开始投弹 (剩 '+u.gbuAmmo+')','#8aff8a'); } updatePanel(); } }
+    else if(act==='gbuCount'){ const u=selected[0]; if(u && u.hardpoints){ u.bombReleaseCount=(u.bombReleaseCount||1)===1?2:1; textPopup(u.x,u.y-20,'每次释放 '+u.bombReleaseCount+' 颗','#ffe27a'); updatePanel(); } }
     else if(act==='modeAA'){ const u=selected[0]; if(u && u.radar && u.aa){ u.modeAA=(u.modeAA+1)%3; textPopup(u.x,u.y-20,'1号位 '+airAAName(u)+': '+AIR_MODE_NAME[u.modeAA],'#8aff8a'); updatePanel(); } }
     else if(act==='modeAG'){ const u=selected[0]; if(u && u.radar && u.ag){ u.modeAG=(u.modeAG+1)%3; textPopup(u.x,u.y-20,'2号位 '+airAGName(u)+': '+AIR_MODE_NAME[u.modeAG],'#8aff8a'); updatePanel(); } }
     else if(act==='rarmUp') massUpgrade(selected, u=>startRarmUpgrade(u), '反应装甲安装');
@@ -172,6 +177,9 @@ function setupInput(){
     else if(act==='apsToggle'){ const u=selected[0]; if(u && u.aps){ u.apsOn=!u.apsOn; textPopup(u.x,u.y-20, u.apsOn?'自主防御 开启':'自主防御 关闭', u.apsOn?'#8aff8a':'#ffd0d0'); updatePanel(); } }
     else if(act==='release'){ if(selBuilding) releaseGarrison(selBuilding); }
     else if(act==='releaseAir'){ if(selBuilding) releaseAircraft(selBuilding); }
+    else if(act==='chopperRise') massUpgrade(selected, u=>u.chopper?chopperRise(u):false, '直升机起飞');
+    else if(act==='chopperLand') massUpgrade(selected, u=>u.chopper?chopperLand(u):false, '直升机降落');
+    else if(act==='releaseDrone') massUpgrade(selected, u=>u.type==='abramsx'?releaseDrone(u):false, '释放无人机');
     else if(act==='unload'){ const t=selected.find(u=>isCarrier(u)); if(t) manualUnload(t); }
     else if(act==='selectSameType') selectSameType();
     else if(act==='selAllSameBld') selectAllSameBlds();

@@ -114,7 +114,9 @@ function refreshAIStats(team){
 function updateAI(dt, team){
   const st=aiState[team];
   if(!st) return;
-  refreshAIStats(team);
+  // 统计 0.05 秒刷新一次,避免每帧全量扫描建筑/单位
+  st._refreshT = (st._refreshT||0) - dt;
+  if(st._refreshT <= 0){ refreshAIStats(team); st._refreshT = 0.05; }
   const myBase = st.myBase;
   if(myBase){ st.lastBaseX=myBase.x; st.lastBaseY=myBase.y; }
   if(gameOver) return;
@@ -225,6 +227,30 @@ function updateAI(dt, team){
     }
   }
 
+  // === 三级工厂:第二次升级(中等/残酷,后期)解锁 T14/艾布拉姆X ===
+  if(time>140 && st.diff!=='easy'){
+    const fac2 = buildings.find(b=>b.team===team && b.defName==='factory' && b.alive && !b.constructing && b.upgradeLvl===1 && !b.upgrading);
+    if(fac2 && credits[team]>=FACTORY_UPGRADE_COST2) startUpgrade(fac2);
+  }
+  // 三级坦克:艾布拉姆X(盟军)/ T14(苏军),需三级工厂(中等/残酷)
+  if(time>170 && st.diff!=='easy'){
+    const t2 = unitFactionOf(team)==='allies' ? 'abramsx' : 't14';
+    let t2Fac=null, bestQ2=1e9;
+    for(const b of buildings){
+      if(b.team===team && b.defName==='factory' && b.alive && !b.constructing && b.upgradeLvl>=2 && !b.upgrading){
+        if(b.queue.length<bestQ2){ bestQ2=b.queue.length; t2Fac=b; }
+      }
+    }
+    if(t2Fac && bestQ2<st.queueDepth && canTrain(team,t2)){
+      const cur=(st.unitCounts[team] ? (st.unitCounts[team][t2]||0) : 0)+(st.queuedCounts[t2]||0);
+      if(cur < (st.diff==='brutal'?2:1) && credits[team]>=defs[t2].cost){
+        credits[team]-=defs[t2].cost;
+        t2Fac.queue.push({type:t2,progress:0});
+        st.queuedCounts[t2]=(st.queuedCounts[t2]||0)+1;
+      }
+    }
+  }
+
   // === 新型步兵战车/主战坦克(升级工厂后,中等/残酷) ===
   if(time>80 && st.diff!=='easy'){
     const ifv = unitFactionOf(team)==='allies' ? 'bradley' : 'b11';
@@ -314,7 +340,7 @@ function updateNavalAI(team, st, enemyBase, dt){
   // 1) 装船:待命的空运输艇接收未登陆的地面战斗单位
   if(st.combat.length>=minCombat){
     for(const tr of transports){
-      if(tr.cargoUnits.length>0 || tr._aiSail) continue;
+      if(tr.cargoUnits.length>0 || tr._aiSail || (tr._aiLoadCooldown||0)>0) continue;
       const need = tr.capacity - usedCapacity(tr);
       if(need<=0) continue;
       const riders = units.filter(u=>u.team===team && u.hp>0 && !u.naval && u.type!=='harvester' &&
@@ -325,12 +351,41 @@ function updateNavalAI(team, st, enemyBase, dt){
         r.target=null; r.order={kind:'load', transport:tr}; r.path=null;
         loaded+=transportCost(r);
       }
-      if(loaded>0){ tr._aiTransport=true; tr._aiLoadT=0; }
+      if(loaded>0){ tr._aiTransport=true; tr._aiLoadT=0; tr._aiLoadWaitT=0; }
+    }
+  }
+  // 1.5) 空舱等船:把运输艇开到最近的岸边格,让陆地单位能走上船;
+  //      否则步兵目标格是水,寻路失败后会一直被挡在岸边,永久上不了船。
+  for(const tr of transports){
+    if(tr._aiLoadCooldown>0) tr._aiLoadCooldown-=dt;
+    if(tr.cargoUnits.length>0 || tr._aiSail) continue;
+    const waiting = units.some(u=>u.team===team && u.order.kind==='load' && u.order.transport===tr);
+    if(!waiting) continue;
+    tr._aiLoadWaitT=(tr._aiLoadWaitT||0)+dt;
+    const beach=nearestLand(tr.x, tr.y);
+    if(beach){
+      if(dist(tr,beach)<=TILE*1.2){
+        tr.order={kind:'none'}; tr.path=null;   // 已到岸边:停船等人
+      } else if(tr.order.kind!=='move' || tr.order.x!==beach.x || tr.order.y!==beach.y){
+        tr.order={kind:'move', x:beach.x, y:beach.y};
+        tr.path=pathFor(tr,tr.x,tr.y,beach.x,beach.y); tr.pathIdx=0; tr.repathT=1;
+      }
+    }
+    if(tr._aiLoadWaitT>8){
+      // 兜底:岸边被堵/乘客过不来,取消本次装载并冷却后再试,避免永久挂机
+      tr._aiLoadWaitT=0; tr._aiLoadCooldown=8;
+      tr.order={kind:'none'}; tr.path=null;
+      for(const u of units){
+        if(u.team===team && u.order.kind==='load' && u.order.transport===tr){
+          u.order={kind:'none'}; u.path=null; u.pathIdx=0;
+        }
+      }
     }
   }
   // 2) 航行 + 登陆
   for(const tr of transports){
     if(tr.cargoUnits.length>0 && !tr._aiSail){
+      tr._aiLoadWaitT=0;   // 已有人上船,空舱等待计时作废
       // 等已分配的乘客上齐或超时再出发,避免把小队拆散
       tr._aiLoadT=(tr._aiLoadT||0)+dt;
       const waiting = units.some(u=>u.team===team && u.order.kind==='load' && u.order.transport===tr);
@@ -344,17 +399,21 @@ function updateNavalAI(team, st, enemyBase, dt){
       }
       if(dist(tr,enemyBase)<=TILE*8){
         unloadTransport(tr, {x:tr.x, y:tr.y});
-        tr._aiSail=true;   // 卸完立即返航,避免在敌岛岸边重新接客
+        if(tr.cargoUnits.length>0) tr._aiReturnHome=true;   // 附近没陆地卸不完:先返航,别在敌岛岸边空转
       }
-    } else if(tr._aiSail && tr.cargoUnits.length===0){
-      // 卸完返航,回船坞再接下一批
+    } else if(tr._aiSail && (tr.cargoUnits.length===0 || tr._aiReturnHome)){
+      // 卸完返航,或附近没陆地先返航;回到船坞后把剩余部队卸回己方岛再重新装船
       const home = buildings.find(b=>b.team===team && b.defName==='dock' && b.alive);
       if(home){
         if(tr.order.kind!=='move' || tr.order.x!==home.x || tr.order.y!==home.y){
           tr.order={kind:'move', x:home.x, y:home.y};
           tr.path=pathFor(tr,tr.x,tr.y,home.x,home.y); tr.pathIdx=0; tr.repathT=1;
         }
-        if(dist(tr,home)<=TILE*6){ tr._aiSail=false; tr.order={kind:'none'}; tr.path=null; }
+        if(dist(tr,home)<=TILE*6){
+          if(tr.cargoUnits.length) unloadTransport(tr, {x:tr.x, y:tr.y});   // 剩余部队卸回己方岛
+          tr._aiReturnHome=false; tr._aiSail=false; tr._aiLoadT=0; tr._aiLoadWaitT=0;
+          tr.order={kind:'none'}; tr.path=null;
+        }
       }
     }
   }

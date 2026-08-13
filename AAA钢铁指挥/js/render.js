@@ -613,7 +613,7 @@ function drawBuilding(b){
   }
   // 战车工厂/兵营/建造厂升级进度
   if(b.upgrading){
-    const uTime = b.defName==='command' ? COMMAND_UPGRADE_TIME : (b.defName==='barracks' ? BARRAX_UPGRADE_TIME : FACTORY_UPGRADE_TIME);
+    const uTime = b.defName==='command' ? COMMAND_UPGRADE_TIME : (b.defName==='barracks' ? BARRAX_UPGRADE_TIME : (b.defName==='factory' ? (b.upgradeLvl===0?FACTORY_UPGRADE_TIME:FACTORY_UPGRADE_TIME2) : FACTORY_UPGRADE_TIME));
     ctx.fillStyle='rgba(255,226,122,.14)'; ctx.fillRect(x+2,y+2,w-4,h-4);
     const pct=clamp(b.upgradeProg/uTime,0,1);
     ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(x+4,y+5,w-8,7);
@@ -750,7 +750,9 @@ function unitPhotoImg(u){
   if(t==='harvester' || t==='destroyer' || t==='transport') return imgs[t+'_field'];
   if(t==='mcv' || t==='airfield_car') return imgs[t+'_field'];
   if(t==='puma') return imgs['puma_body'];
-  if(t==='f16' || t==='su35') return imgs[t+'_field'];   // 战斗机
+  if(t==='f16' || t==='su35' || t==='f15') return imgs[t+'_field'];   // 战斗机
+  if(t==='littlebird' || t==='uh60' || t==='mi17') return imgs[t+'_body'];   // 运输直升机(机身照片)
+  if(t==='drone') return imgs['drone'];                  // 弹簧刀无人机
   if(t==='infantry') return (unitFactionOf(u.team)==='soviet') ? imgs['infantry_soviet_field'] : imgs['infantry_allies_field'];
   if(t==='exo' || t==='magnet') return imgs[t+'_field'];
   return null;
@@ -1006,6 +1008,52 @@ function drawHullTurretUnit(u, body, tur, rotOff, sc, tip){
     ctx.restore();
   }
 }
+// 运输直升机(小鸟/UH-60/米17):机身照片 + 旋翼照片(旋翼绕自身贴图正中心顺时针旋转,枢轴 rotorPivotFor 在机身上可调)。
+// 落地:旋翼停转(缓慢减速),本体贴地;升空:旋翼全速 + 半透明模糊圆盘 + 悬停起伏,本体抬到 CHOPPER_ALTITUDE。
+// 阴影(升空=飞机椭圆投影 / 落地=机身剪影)由 drawUnit 的通用阴影逻辑按 u.fly 自动处理。
+function drawChopper(u, pImg){
+  const airborne = !u.landed;
+  const spinF = clamp((u.spin||0)/ROTOR_FULL_SPEED, 0, 1);   // 旋翼转速归一化(0停转/1全速)
+  const alt = airborne ? CHOPPER_ALTITUDE : 0;
+  const bob = airborne ? Math.sin(time*7 + (u.uid||0)*1.7)*1.6 : 0;   // 升空悬停轻微起伏
+  const pivot = rotorPivotFor(u);        // 按机型的旋翼枢轴
+  const rotorSc = rotorScaleFor(u);      // 按机型的旋翼缩放
+  ctx.save();
+  ctx.translate(0, -alt + bob);
+  ctx.rotate(u.facing);
+  ctx.rotate(SPRITE_ROT[u.type] || Math.PI/2);
+  const fus = imgs[u.type+'_body'];
+  const rImg = imgs[u.type+'_rotor'];
+  if(fus && fus.width){
+    const sc = unitSpriteScale(u);
+    const s = (u.r*2.9*1.8*sc)/Math.max(fus.width, fus.height);
+    const dw = fus.width*s, dh = fus.height*s;
+    // 机身
+    ctx.drawImage(bakedTone(fus), -dw/2, -dh/2, dw, dh);
+    // 旋翼(画在机身之上)
+    if(rImg && rImg.width){
+      const rs = (u.r*2.9*1.8*sc*rotorSc)/Math.max(rImg.width, rImg.height);
+      const rw = rImg.width*rs, rh = rImg.height*rs;
+      ctx.save();
+      ctx.translate(pivot.x, pivot.y);   // 旋翼枢轴(机身上位置,可调)
+      // 旋转模糊圆盘:旋翼转起来后在半透明盘面(降速时随转速收拢)
+      if(spinF > 0.06){
+        const rr = Math.max(rw, rh)*0.55*spinF;
+        const g = ctx.createRadialGradient(0,0,Math.max(1,rr*0.12), 0,0,rr);
+        g.addColorStop(0, 'rgba(210,230,255,'+(0.20*spinF)+')');
+        g.addColorStop(0.7,'rgba(210,230,255,'+(0.12*spinF)+')');
+        g.addColorStop(1, 'rgba(210,230,255,0)');
+        ctx.fillStyle=g;
+        ctx.beginPath(); ctx.arc(0,0,rr,0,Math.PI*2); ctx.fill();
+      }
+      // 绕贴图自身中心顺时针旋转(旋翼角度由 updateChopper 累计)
+      ctx.rotate(-(u.rotorAng||0));
+      ctx.drawImage(bakedTone(rImg), -rw/2, -rh/2, rw, rh);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
 function drawUnit(u){
   if(u.parked) return;   // 停驻在机场内的飞机不渲染(占停机位,释放后才出现)
   const d=u.def;
@@ -1036,7 +1084,10 @@ function drawUnit(u){
   // 车体渲染偏移(起步/刹车俯仰 + 开火后坐力):阴影/选中圈保持接地,车体位移
   if(u.renderOx || u.renderOy) ctx.translate(u.renderOx, u.renderOy);
   const turK = turretKeys(u);
-  if(u.fly){
+  if(u.chopper){
+    // ===== 小鸟直升机:机身+旋翼(旋翼绕自身中心顺时针旋转,枢轴在机身可调) =====
+    drawChopper(u, pImg);
+  } else if(u.fly){
     // ===== 战斗机(照片机头朝上,SPRITE_ROT 对齐):本体向上偏移悬停,投影画在地面 =====
     if(pImg && pImg.width){
       const sc=unitSpriteScale(u);
@@ -1045,7 +1096,7 @@ function drawUnit(u){
       ctx.save();
       ctx.translate(0, -AIR_ALTITUDE);
       ctx.rotate(u.facing);
-      drawAircraftFlame(dh, u.x);   // 尾焰:画在机身下面(先画,被机身盖住根部)
+      if(u.type!=='drone') drawAircraftFlame(dh, u.x);   // 无人机无尾焰
       drawUnitImg(u, pImg);
       ctx.restore();
     }
@@ -1850,6 +1901,7 @@ function drawMissiles(){
     else if(m.spriteType==='r37m'){ img=imgs['r37m_field']; len=R37M_SPRITE_LEN; up=true; }
     else if(m.spriteType==='kh29'){ img=imgs['kh29_field']; len=KH29_SPRITE_LEN; up=true; }
     else if(m.spriteType==='spike'){ img=imgs['spike_missile']; len=SPIKE_MISSILE_LEN; up=false; }
+    else if(m.spriteType==='gbu31'){ img=imgs['tow_missile']; len=18; up=false; }   // GBU-31 垂直炸弹(借用 TOW 贴图,rotate(m.ang) 朝下)
     else { img=imgs['tow_missile']; len=TOW_MISSILE_LEN; up=false; }
     if(!img || !img.width) continue;
     // 等比缩放:横向贴图按宽、机头朝上贴图按高对齐到目标长度
@@ -2027,19 +2079,39 @@ function drawSel(){
     if(rAG){ ctx.beginPath(); ctx.arc(u.x,u.y,rAG,0,Math.PI*2); ctx.stroke(); }
     ctx.setLineDash([]);
   }
-  // 自主防御反应圈:选中装有 APS 且开启的艾布拉姆时,显示 270px 反导圈
+  // 自主防御反应圈:选中装有 APS 且开启的坦克时,显示 270px 反导圈
   for(const u of selected){
-    if((u.type==='abrams' || u.type==='t72') && u.aps && u.apsOn){
+    if((u.type==='abrams' || u.type==='t72' || u.type==='abramsx' || u.type==='t14') && u.aps && u.apsOn){
       ctx.strokeStyle='rgba(140,220,255,.22)'; ctx.lineWidth=1.5; ctx.setLineDash([6,5]);
       ctx.beginPath(); ctx.arc(u.x,u.y,APS_RANGE,0,Math.PI*2); ctx.stroke();
       ctx.setLineDash([]);
     }
   }
+  // 选中描边:细白线贴着碰撞箱轮廓(跟随车体渲染偏移,飞机抬到机身高度的描边)
+  for(const u of selected){
+    if(u.hp<=0) continue;
+    const hw = u.hw || u.r || 10;
+    const hh = u.hh || u.r || 10;
+    ctx.save();
+    ctx.translate(u.x + (u.renderOx||0), u.y + (u.renderOy||0));
+    if(u.fly) ctx.translate(0, -AIR_ALTITUDE);
+    ctx.rotate(u.facing);
+    ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=1;
+    roundRectPath(-hw-1, -hh-1, hw*2+2, hh*2+2, hh+1);
+    ctx.stroke();
+    ctx.restore();
+  }
   // 选中单位的移动点 + 从单位到目标点的连线(陆/海单位都显示;不再画选中圆圈)
   for(const u of selected){
-    if(u.fly){
-      // 战斗机:右键移动=改盘旋中心,选中期间持续显示 飞机→盘旋中心 的绿色虚线 + 准星
-      if(u.patrol){
+    if(u.fly || u.chopper){
+      if(u.chopper && u.dest){
+        // 小鸟直升机:右键移动=飞到目标点上空悬停,选中期间显示 直升机→目标点 绿色虚线 + 准星
+        ctx.strokeStyle='rgba(140,255,180,.45)'; ctx.lineWidth=1.5; ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(u.dest.x,u.dest.y); ctx.stroke();
+        ctx.setLineDash([]);
+        drawMoveMarker(u.dest.x, u.dest.y);
+      } else if(u.patrol){
+        // 战斗机:右键移动=改盘旋中心,选中期间持续显示 飞机→盘旋中心 的绿色虚线 + 准星
         ctx.strokeStyle='rgba(140,255,180,.45)'; ctx.lineWidth=1.5; ctx.setLineDash([4,4]);
         ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(u.patrol.x,u.patrol.y); ctx.stroke();
         ctx.setLineDash([]);

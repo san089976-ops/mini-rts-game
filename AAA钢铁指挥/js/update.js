@@ -66,6 +66,7 @@ function update(dt){
   for(const b of buildings){ updateBuilding(b, dt, teamPower); }
   // 弹体
   for(const p of projectiles){
+    if(p.target && p.target.fly){ p.dead = true; continue; }   // 目标升空(直升机)→ 地面弹丸落空
     const d=Math.hypot(p.tx-p.x,p.ty-p.y);
     if(p.accel) p.speed = Math.min(p.maxSpeed||p.speed, p.speed + p.accel*dt);   // 先加速后匀速
     const step=p.speed*dt;
@@ -164,22 +165,28 @@ function applyDamage(ent, dmg, attacker, proj){
       effects.push(new Effect(ent.x,ent.y,'explode',ent.r*2.4));
       for(let i=0;i<5;i++){ const sm=new Effect(ent.x+rnd(-8,8),ent.y+rnd(-8,8),'smoke',rnd(4,9)); sm.life=1.1; sm.maxLife=1.1; effects.push(sm); }
     }
+    // 弹簧刀无人机被击落:原地自爆(1800 火炮范围伤),先于死亡清理执行
+    if(ent.type==='drone') droneDetonate(ent, null);
   }
 }
+// 机场被摧毁/出售时释放停驻飞机,让它们在废墟上空继续盘旋
+function releaseParkedAircraft(b){
+  if(!b) return;
+  for(const u of units){
+    if(u.hp>0 && u.fly && u.homeBase===b && u.parked){
+      u.parked=false;
+      u.patrol={x:b.x, y:b.y};
+      u.order={kind:'none'}; u.path=null; u._returning=false; u._returnBase=null;
+    }
+  }
+}
+
 function destroyBuilding(ent){
   if(!ent.alive) return;
   ent.alive=false;
   markBlocked(ent,false);
   // 机场被摧毁:停驻的战斗机自动释放(失去母港,在机场残骸上空盘旋;无法再返场)
-  if(ent.defName==='airfield'){
-    for(const u of units){
-      if(u.hp>0 && u.fly && u.homeBase===ent && u.parked){
-        u.parked=false;
-        u.patrol={x:ent.x, y:ent.y};
-        u.order={kind:'none'}; u.path=null; u._returning=false;
-      }
-    }
-  }
+  if(ent.defName==='airfield') releaseParkedAircraft(ent);
   shake=Math.max(shake, Math.min(7, ent.w*ent.h*0.7));
   effects.push(new Effect(ent.x,ent.y,'explode',Math.max(ent.w,ent.h)*TILE*0.55));
   for(let i=0;i<8;i++){ const sm=new Effect(ent.x+rnd(-ent.w*TILE/2,ent.w*TILE/2),ent.y+rnd(-ent.h*TILE/2,ent.h*TILE/2),'smoke',rnd(6,12)); sm.life=1.4; sm.maxLife=1.4; effects.push(sm); }
@@ -202,12 +209,15 @@ function updateBuilding(b, dt, teamPower){
       effects.push(new Effect(b.x,b.y,'ring',26));
     }
   }
-  // 战车工厂升级
+  // 战车工厂升级(两次:Lv0→Lv1 高级坦克,Lv1→Lv2 三级坦克;耗时按当前等级取)
   if(b.defName==='factory' && b.upgrading && !b.constructing){
+    const uTime = b.upgradeLvl===0 ? FACTORY_UPGRADE_TIME : FACTORY_UPGRADE_TIME2;
     b.upgradeProg += dt*(shortPower?0.5:1);
-    if(b.upgradeProg >= FACTORY_UPGRADE_TIME){
-      b.upgrading=false; b.upgraded=true; b.upgradeProg=0;
-      textPopup(b.x,b.y-10,b.def.name+' 升级完成','#8aff8a');
+    if(b.upgradeProg >= uTime){
+      b.upgrading=false; b.upgradeProg=0;
+      b.upgradeLvl++;
+      b.upgraded = b.upgradeLvl>=1;
+      textPopup(b.x,b.y-10,b.def.name+' 升级至 Lv'+b.upgradeLvl,'#8aff8a');
       effects.push(new Effect(b.x,b.y,'ring',26));
     }
   }
@@ -239,6 +249,7 @@ function updateBuilding(b, dt, teamPower){
       if(u){ 
         b.queue.shift(); textPopup(u.x,u.y-6,getUnitDefs(unitFactionOf(b.team))[item.type].name,'#8aff8a');
         if(isAircraft(u)) parkAircraft(u, b);          // 飞机:直接停驻进机场(不设集结点)
+        else if(u.chopper){ u.homeBase=b; chopperSpawn(u, b); }   // 直升机:升起飞出,不占停机位
         else if(b.rally) moveToRally(u,b.rally);
       }
       else { b.spawnWait+=dt; }
@@ -336,12 +347,27 @@ function updateUnit(u, dt){
   u.fireT-=dt;
   if(u._lineT>0) u._lineT-=dt;   // 攻击指示红线倒计时
   u.wantVx=0; u.wantVy=0;   // 每帧重置期望速度,由下方指令逻辑重新计算
+  if(u.chopper){ updateChopper(u, dt); return; }   // 小鸟直升机:独立升降/悬停逻辑
+  if(u.type==='drone'){ updateDrone(u, dt); return; }   // 弹簧刀无人机:悬浮/撞击自爆
   if(u.fly){ updateAircraft(u, dt); return; }   // 空军单位走独立逻辑(停驻/盘旋/返场)
   if(isTurretUnit(u)) u._turretAiming = false;   // 独立炮塔载具每帧重置:本轮是否在索敌开火(独立转炮塔)
   u._standFire = false;                          // 每帧重置:是否"战斗中钉住不动"(射程内原地射击)
   // 反应装甲护盾回血:按各单位当前等级的护盾上限/回血速度恢复(T84BM 模块 / T62线 / T80线 / T90M)
   if(u.rarm && u.shield<T84BM_SHIELD){
     u.shield = Math.min(T84BM_SHIELD, u.shield + T84BM_SHIELD_REGEN*dt);
+  }
+  // T14 反应装甲护盾(300 回15)
+  if(u.type==='t14' && u.shield<T14_SHIELD){
+    u.shield = Math.min(T14_SHIELD, u.shield + T14_SHIELD_REGEN*dt);
+  }
+  // 艾布拉姆X:无人机填装(释放后每 DRONE_RELOAD 秒补 1 发)
+  if(u.type==='abramsx' && u.droneAmmo<1){
+    u.droneReload = Math.max(0, u.droneReload - dt);
+    if(u.droneReload<=0){
+      u.droneAmmo = 1; u.droneReload = 0;
+      textPopup(u.x,u.y-20,'无人机 填装完成','#8aff8a');
+      updatePanel();
+    }
   }
   // T62 升级链护盾(T64B 150 回5 / T64BM 200 回10)
   if(u.type==='t62' && u.upgradeLvl>0){
@@ -613,7 +639,10 @@ function updateUnit(u, dt){
       u.order={kind:'none'};
     } else {
       const d=dist(u,t);
-      if(usedCapacity(t) >= t.capacity){
+      if(t.chopper && !t.landed){
+        u.order={kind:'none'}; u.path=null;   // 直升机起飞了,取消登机
+        textPopup(u.x,u.y-18,'直升机已起飞,无法登机','#ffb0b0');
+      } else if(usedCapacity(t) >= t.capacity){
         u.wantVx=0; u.wantVy=0;
       } else if(d<=t.r+u.r+10){
         u._boarded=true; u.boardTo=t;
@@ -706,10 +735,18 @@ function updateUnit(u, dt){
     }
     if(!at || at.hp<=0){
       u.target=null;
-      if(u.prevOrder){ u.order=u.prevOrder; u.prevOrder=null; }
-      else if(u.order.x2){ u.order={kind:'move',x:u.order.x,y:u.order.y,x2:true}; }
-      else u.order={kind:'none'};
-      u._homeX=undefined;
+      // 完成攻击指令后自动接战:240px 内找最近敌人继续攻击,找不到才恢复原指令/待机
+      const next=findEnemyNear(u, 240);
+      if(next){
+        u._homeX=u.x; u._homeY=u.y;
+        u.target=next; u.order={kind:'attack', auto:true};
+        u.path=null; u.pathIdx=0; u.repathT=0;
+      } else {
+        if(u.prevOrder){ u.order=u.prevOrder; u.prevOrder=null; }
+        else if(u.order.x2){ u.order={kind:'move',x:u.order.x,y:u.order.y,x2:true}; }
+        else u.order={kind:'none'};
+        u._homeX=undefined;
+      }
     }
   } else if(u.order.kind==='none'){
     // 空闲单位主动防御:敌人进入感知范围就自动开火迎战。
@@ -759,6 +796,7 @@ function parkAircraft(u, b){
   u.path = null; u.pathIdx = 0;
   u.target = null;
   u._returning = false;
+  if(u._returnBase){ u.homeBase = b; u._returnBase = null; }   // 母港丢失后转投新机场
   if(u._mission){
     // 任务完成返场:复位被任务切走的"倾泻"模式,清空任务
     u.modeAA = AIR_MODE_MANUAL; u.modeAG = AIR_MODE_MANUAL;
@@ -770,8 +808,9 @@ function parkAircraft(u, b){
   u.patrol = null;
   u.x = b.x; u.y = b.y;
   u.vx = 0; u.vy = 0; u.wantVx = 0; u.wantVy = 0;
-  if(u.aa) u.aaAmmo = AA_AMMO;   // 入住重新装弹(A-120c)
-  if(u.ag) u.agAmmo = AG_AMMO;   // A-174b
+  if(u.hardpoints) f15RecalcAmmo(u);   // F-15:按挂点补满聚合弹药
+  else { if(u.aa) u.aaAmmo = AA_AMMO; if(u.ag) u.agAmmo = AG_AMMO; }   // F16/苏35:入住重新装弹
+  u.bombing = false; u.bombCd = 0;     // 停驻取消投弹
   effects.push(new Effect(b.x, b.y-10, 'ring', 16));
 }
 // 释放全部停驻的战斗机:在机场周围散开,围绕机场上空盘旋
@@ -788,8 +827,9 @@ function releaseAircraft(b){
     u.order = {kind:'none'};
     u.path = null; u.pathIdx = 0;
     u._returning = false;
-    if(u.aa) u.aaAmmo = AA_AMMO;   // 出击满弹(双保险,入住时已补)
-    if(u.ag) u.agAmmo = AG_AMMO;
+    if(u.hardpoints) f15RecalcAmmo(u);   // F-15:出击满弹(双保险,入住时已补)
+    else { if(u.aa) u.aaAmmo = AA_AMMO; if(u.ag) u.agAmmo = AG_AMMO; }
+    u.bombing = false; u.bombCd = 0;     // 释放时取消投弹
   });
   textPopup(b.x, b.y-24, '释放战斗机 '+parked.length+' 架','#8aff8a');
   updatePanel();
@@ -903,19 +943,41 @@ function updateAircraft(u, dt){
       updatePanel();
     }
   }
+  // F-15 挂载点安装进度(完成后按挂点重算聚合弹药)
+  if(u.hardpoints){
+    let dirty = false;
+    for(const hp of u.hardpoints){
+      if(hp && hp.upgrading){
+        hp.prog += dt;
+        if(hp.prog >= (hp.kind==='gbu'?GBU31_UPGRADE_TIME:(hp.kind==='aa'?AA_UPGRADE_TIME:AG_UPGRADE_TIME))){
+          hp.upgrading = false; hp.prog = 0;
+          textPopup(u.x, u.y-20, (hp.kind==='gbu'?'GBU-31':(hp.kind==='aa'?airAAName(u):airAGName(u)))+' 挂载完成','#8aff8a');
+          effects.push(new Effect(u.x, u.y, 'ring', 20));
+          dirty = true;
+        }
+      }
+    }
+    if(dirty){ f15RecalcAmmo(u); updatePanel(); }
+  }
   if(u.aa) u.aaCd = Math.max(0, u.aaCd - dt);
   if(u.ag) u.agCd = Math.max(0, u.agCd - dt);
   if(u.parked){ u.wantVx=0; u.wantVy=0; return; }   // 停驻:不动
   // 返回机场入住(手动右键机场 / 任一弹舱打空自动返场)
   if(u._returning){
-    const b = u.homeBase;
+    const home = u.homeBase;
+    const b = (u._returnBase && u._returnBase.alive && buildings.includes(u._returnBase)) ? u._returnBase : home;
     if(!b || !b.alive || !buildings.includes(b)){
-      u._returning = false;   // 机场没了:继续盘旋
+      u._returning = false; u._returnBase = null;   // 机场没了:继续盘旋
     } else {
       const d = Math.hypot(b.x-u.x, b.y-u.y);
       if(d <= 60){
-        parkAircraft(u, b);
-        updatePanel();
+        if(u._returnBase && airfieldUsedSlots(b) >= AIRFIELD_CAPACITY){
+          u._returning = false; u._returnBase = null;   // 新机场停机位满,继续盘旋
+          if(!u.patrol) u.patrol = {x:b.x, y:b.y};
+        } else {
+          parkAircraft(u, b);
+          updatePanel();
+        }
       } else {
         u.turnTarget = Math.atan2(b.y-u.y, b.x-u.x);
         const w = seekVelocity(u, b.x, b.y);
@@ -926,6 +988,21 @@ function updateAircraft(u, dt){
   }
   // 出击规划任务:精确打击 / 分布式攻击(接管本机行动,完成后返场)
   if(u._mission){ updatePlaneMission(u, dt); return; }
+  // F-15 GBU-31 连续投弹:按 0.8s 间隔在当前位置垂直投弹,直到全部投完;投弹不打断飞行
+  if(u.bombing && u.gbu && u.gbuAmmo>0 && !u._returning){
+    u.bombCd -= dt;
+    if(u.bombCd <= 0){
+      u.bombCd = GBU31_DROP_CD;
+      const n = Math.min(u.bombReleaseCount||1, u.gbuAmmo);
+      for(let i=0;i<n;i++) dropGBU31(u);
+      u.gbuAmmo -= n;
+      if(u.gbuAmmo<=0){
+        u.bombing = false;
+        textPopup(u.x, u.y-20, 'GBU-31 已全部投放','#ffd24a');
+      }
+      updatePanel();
+    }
+  }
   // 雷达火控的自动分配/倾泻模式(不依赖右键指令,独立探测)
   if(u.radar){ updatePlaneRadarWeapon(u, dt, 'aa'); updatePlaneRadarWeapon(u, dt, 'ag'); }
   // 手动攻击(右键指令):A-120c 只打飞机 / A-174b 只打地面
@@ -976,12 +1053,158 @@ function updateAircraft(u, dt){
     u.wantVx = 0; u.wantVy = 0;
   }
 }
+/* ============ 小鸟直升机(盟军运输直升机:机身+旋翼,落地/升空双模式) ============ */
+// 升空瞬间:瞄准本机的空对地导弹/反坦克导弹自动自爆,地面弹丸落空
+function onChopperAirborne(u){
+  for(const m of missiles){
+    if(m.dead || m.target !== u) continue;
+    const isAA = (m.spriteType==='a120c' || m.spriteType==='r37m');
+    if(m.air && isAA) continue;                 // 空对空导弹照常追击
+    explodeATGM(m, m.x, m.y, null);             // 空对地/地面反坦克导弹:升空即自爆
+  }
+  for(const p of projectiles){ if(p.target === u) p.dead = true; }   // 地面弹丸落空
+}
+function updateChopper(u, dt){
+  // 1) 旋翼转速:降落减速 / 起飞加速(rising 时仍在地面)/ 飞行保持全速
+  if(u.landing){
+    u.spin = Math.max(0, u.spin - ROTOR_SPIN_DECEL*dt);
+    if(u.spin <= 0){
+      u.landing = false; u.landed = true;
+      textPopup(u.x, u.y-20, '直升机 已降落','#8aff8a');
+      updatePanel();
+    }
+  } else if((u.rising || !u.landed) && u.spin < ROTOR_FULL_SPEED){
+    u.spin = Math.min(ROTOR_FULL_SPEED, u.spin + ROTOR_SPIN_ACCEL*dt);
+  }
+  u.rotorAng = (u.rotorAng||0) + u.spin*dt;   // 旋翼累计转角(渲染取负即顺时针)
+  // 2) 旋翼加速到全速 → 升空(先转起来才升起)
+  if(u.rising && u.spin >= ROTOR_FULL_SPEED){
+    u.rising = false; u.landed = false;
+    u.fly = true;
+    onChopperAirborne(u);
+    textPopup(u.x, u.y-20, '直升机 升空','#8aff8a');
+    updatePanel();
+  }
+  u.fly = !u.landed;   // 落地=地面单位(可被地面打),升空=飞行单位(只被空对空打)
+  if(u.landed){ u.wantVx=0; u.wantVy=0; u.vx=0; u.vy=0; return; }
+  // 3) 升空后:飞向目标点悬停
+  if(u.dest){
+    const d = Math.hypot(u.dest.x - u.x, u.dest.y - u.y);
+    if(d <= 14){ u.dest = null; u.wantVx=0; u.wantVy=0; }
+    else {
+      u.turnTarget = Math.atan2(u.dest.y-u.y, u.dest.x-u.x);
+      const w = seekVelocity(u, u.dest.x, u.dest.y);
+      u.wantVx = w.x; u.wantVy = w.y;
+    }
+  } else { u.wantVx=0; u.wantVy=0; }
+}
+// 起飞:落地状态下触发(按钮/机场生产/右键移动),旋翼先加速到全速再升空
+function chopperRise(u){
+  if(!u || !u.chopper || u.hp<=0) return false;
+  if(!u.landed || u.rising) return false;
+  u.rising = true; u.landing = false;
+  textPopup(u.x, u.y-20, '直升机 起飞中','#ffe27a');
+  updatePanel();
+  return true;
+}
+// 降落:只能落在可通行的地面(水面/树林/建筑占格拒绝)
+function chopperLand(u){
+  if(!u || !u.chopper || u.hp<=0) return false;
+  if(u.landed || u.landing) return false;
+  const tx = Math.floor(u.x/TILE), ty = Math.floor(u.y/TILE);
+  if(!canChopperLandAt(tx,ty)){ textPopup(u.x,u.y-20,'此处无法降落(需可通行地面)','#ff8080'); return false; }
+  u.landing = true; u.rising = false; u.dest = null;
+  textPopup(u.x, u.y-20, '直升机 降落中','#ffe27a');
+  updatePanel();
+  return true;
+}
+function canChopperLandAt(tx, ty){
+  if(tx<0 || ty<0 || tx>=MAP_W || ty>=MAP_H) return false;
+  if(structBlocked[tx][ty]) return false;
+  const t = terrain[tx][ty];
+  return t !== 'water' && t !== 'tree';
+}
+// 机场生产直升机:设母港 + 自动起飞(去集结点或机场上空)
+function chopperSpawn(u, b){
+  u.homeBase = b;
+  u.dest = b.rally ? {x:b.rally.x, y:b.rally.y} : {x:b.x, y:b.y};
+  chopperRise(u);
+}
+/* ============ 弹簧刀无人机(艾布拉姆X释放:悬浮待命 / 右键撞击自爆) ============ */
+// 每帧:有攻击目标就直线飞向目标,进入接触距离即自爆;无目标则悬停(可右键移动改悬停点)
+function updateDrone(u, dt){
+  const at = u.target;
+  if(at && (at.hp===undefined || at.hp<=0 || at.alive===false)) u.target = null;
+  if(u.target && u.target.hp>0){
+    const t = u.target;
+    const tR = (t instanceof Unit) ? (t.r||8) : (Math.max(t.w,t.h)*TILE/2);
+    if(dist(u,t) <= (u.r||8) + tR + DRONE_CONTACT_R){
+      droneDetonate(u, t);
+      return;
+    }
+    u.turnTarget = Math.atan2(t.y-u.y, t.x-u.x);
+    const w = seekVelocity(u, t.x, t.y);
+    u.wantVx = w.x; u.wantVy = w.y;
+    return;
+  }
+  if(u.dest){
+    const d = Math.hypot(u.dest.x-u.x, u.dest.y-u.y);
+    if(d <= 12){ u.dest = null; u.wantVx=0; u.wantVy=0; }
+    else {
+      u.turnTarget = Math.atan2(u.dest.y-u.y, u.dest.x-u.x);
+      const w = seekVelocity(u, u.dest.x, u.dest.y);
+      u.wantVx = w.x; u.wantVy = w.y;
+    }
+    return;
+  }
+  u.wantVx = 0; u.wantVy = 0;
+}
+// 自爆:撞击目标(primary 吃满伤)+ 半径 DRONE_AOE_RADIUS 内敌方单位/建筑各吃 DRONE_DAMAGE。
+// 弹丸类型为火炮(按护甲修正);范围伤跳过飞行单位(与反坦克导弹 AOE 同规则),primary 不受限。
+function droneDetonate(u, primary){
+  if(!u || u.hp===undefined) return;
+  if(u.hp>0) u.hp = 0;   // 自爆即死亡(被击落也走这里:死亡时原地炸)
+  shake = Math.max(shake, 5);
+  effects.push(new Effect(u.x,u.y,'explode',44));
+  for(let i=0;i<10;i++){ const sm=new Effect(u.x+rnd(-16,16), u.y+rnd(-16,16), 'smoke', rnd(6,12)); sm.life=1.4; sm.maxLife=1.4; effects.push(sm); }
+  if(primary && primary.hp!==undefined && primary.hp>0){
+    applyDamage(primary, DRONE_DAMAGE, u, 'cannon');
+  }
+  for(const v of units){
+    if(v===u || v===primary || v.hp<=0 || v.fly || !isEnemy(u.team, v.team)) continue;
+    if(dist(v,{x:u.x,y:u.y}) <= DRONE_AOE_RADIUS) applyDamage(v, DRONE_DAMAGE, u, 'cannon');
+  }
+  for(const b of buildings){
+    if(!b.alive || b===primary) continue;
+    if(dist(b,{x:u.x,y:u.y}) <= DRONE_AOE_RADIUS) applyDamage(b, DRONE_DAMAGE, u, 'cannon');
+  }
+}
+// 艾布拉姆X 释放无人机:在坦克旁生成一架悬浮无人机,扣 1 发并开始填装
+function releaseDrone(u){
+  if(!u || u.type!=='abramsx' || u.hp<=0) return false;
+  if(u.droneAmmo<=0){
+    textPopup(u.x,u.y-20,'无人机 填装中 ('+Math.ceil(u.droneReload)+'s)','#ff8080');
+    return false;
+  }
+  const ang = rnd(0, Math.PI*2);
+  const x = u.x + Math.cos(ang)*(u.r+22), y = u.y + Math.sin(ang)*(u.r+22);
+  const dr = new Unit('drone', u.team, x, y);
+  dr.order = {kind:'none'};
+  units.push(dr);
+  u.droneAmmo = 0;
+  u.droneReload = DRONE_RELOAD;
+  textPopup(u.x, u.y-22, '释放 弹簧刀无人机','#8aff8a');
+  effects.push(new Effect(dr.x, dr.y, 'ring', 16));
+  updatePanel();
+  return true;
+}
 /* ============ 出击规划任务(精确打击 / 分布式攻击;F16,可移植到苏35) ============ */
 function updatePlaneMission(u, dt){
   if(u._mission.kind==='precision') updatePrecisionMission(u, dt);
   else updateDistributedMission(u, dt);
 }
-// 精确打击:只打任务目标,对应弹舱(敌机→空对空 / 地面→空对地)打空或目标死亡即强制返场
+// 精确打击:只打任务目标,对应弹舱(敌机→空对空 / 地面→空对地)打空或目标死亡即强制返场;
+// 地面目标空对地耗尽且装有 GBU-31 时,自动切换为垂直炸弹投掷
 function updatePrecisionMission(u, dt){
   const t = u._mission.target;
   if(!t || t.hp<=0 || (t.alive===false)){
@@ -990,19 +1213,42 @@ function updatePrecisionMission(u, dt){
     return;
   }
   const isAA = !!t.fly;
-  const ammo = isAA ? u.aaAmmo : u.agAmmo;
-  if(ammo<=0){
-    // 对应弹舱打空:返场(另一弹舱余弹随机会去,不打错误目标)
+  if(isAA){
+    // 空对空:只用 A-120c/R-37m
+    if(u.aaAmmo<=0){
+      u._mission = null; u.target = null;
+      u._returning = true; u.order = {kind:'none'}; u.path = null;
+      return;
+    }
+    u.target = t;
+    const r = airMissileEffRange(u, AA_RANGE, t);
+    if(dist(u,t) <= r && u.aaCd<=0){
+      launchAirMissile(u, t, 'aa');
+      u.aaAmmo--; u.aaCd = AIR_MISSILE_CD;
+      if(u.aaAmmo<=0) planeNeedRefuel(u);
+    }
+  } else if(u.ag && u.agAmmo>0){
+    // 地面目标:优先空对地导弹
+    u.target = t;
+    const r = airMissileEffRange(u, AG_RANGE, t);
+    if(dist(u,t) <= r && u.agCd<=0){
+      launchAirMissile(u, t, 'ag');
+      u.agAmmo--; u.agCd = AIR_MISSILE_CD;
+      if(u.agAmmo<=0) planeNeedRefuel(u);
+    }
+  } else if(u.gbu && u.gbuAmmo>0){
+    // 地面目标:空对地耗尽 → 切换 GBU-31 垂直炸弹(飞近投放)
+    u.target = t;
+    u.bombCd = Math.max(0, u.bombCd - dt);
+    if(dist(u,t) <= GBU31_DROP_RANGE && u.bombCd<=0){
+      dropGBU31(u);
+      u.gbuAmmo--; u.bombCd = GBU31_DROP_CD;
+    }
+  } else {
+    // 地面目标且无任何对地武器:返场
     u._mission = null; u.target = null;
     u._returning = true; u.order = {kind:'none'}; u.path = null;
     return;
-  }
-  u.target = t;
-  const r = airMissileEffRange(u, isAA?AA_RANGE:AG_RANGE, t);
-  const cd = isAA ? u.aaCd : u.agCd;
-  if(dist(u,t) <= r && cd<=0){
-    launchAirMissile(u, t, isAA?'aa':'ag');
-    if(isAA){ u.aaAmmo--; u.aaCd = AIR_MISSILE_CD; } else { u.agAmmo--; u.agCd = AIR_MISSILE_CD; }
   }
   u.turnTarget = Math.atan2(t.y-u.y, t.x-u.x);
   const w = seekVelocity(u, t.x, t.y);
@@ -1015,6 +1261,22 @@ function updateDistributedMission(u, dt){
     const job = jobs[0];
     const t = job.target;
     if(!t || t.hp<=0 || (t.alive===false)){ jobs.shift(); u.target=null; continue; }
+    if(job.type==='gbu'){
+      // GBU-31 垂直炸弹:飞近目标后投放,每 0.8s 投一颗,打满或目标死亡跳下一个
+      const ammo = u.gbuAmmo;
+      if(job.fired >= job.count || ammo<=0){ jobs.shift(); u.target=null; continue; }
+      u.target = t;
+      u.bombCd = Math.max(0, u.bombCd - dt);
+      if(dist(u,t) <= GBU31_DROP_RANGE && u.bombCd<=0){
+        dropGBU31(u);
+        u.gbuAmmo--; u.bombCd = GBU31_DROP_CD;
+        job.fired++;
+      }
+      u.turnTarget = Math.atan2(t.y-u.y, t.x-u.x);
+      const w = seekVelocity(u, t.x, t.y);
+      u.wantVx = w.x; u.wantVy = w.y;
+      return;
+    }
     const ammo = job.type==='aa' ? u.aaAmmo : u.agAmmo;
     if(job.fired >= job.count || ammo<=0){ jobs.shift(); u.target=null; continue; }
     u.target = t;
@@ -1040,7 +1302,7 @@ function launchPrecisionStrike(uids, target){
   for(const u of units){
     if(!uids.includes(u.uid)) continue;
     if(!u.fly || !u.parked || u.hp<=0 || !u.radar) continue;
-    if(!(isAA ? u.aa : u.ag)) continue;
+    if(isAA ? !u.aa : !(u.ag||u.gbu)) continue;
     u.parked = false;
     u.patrol = u.homeBase ? {x:u.homeBase.x, y:u.homeBase.y} : {x:u.x, y:u.y};
     u.order = {kind:'none'}; u.path = null; u.pathIdx = 0;
@@ -1052,6 +1314,7 @@ function launchPrecisionStrike(uids, target){
   }
   if(launched) textPopup(target.x, target.y-22, '精确打击 '+launched+' 架 锁定目标','#ffb0b0');
   updatePanel();
+  return launched;
 }
 // 分布式攻击:把玩家右键分配结果 round-robin 分到各架(按每架武器弹量封顶),分到任务的才出动
 function launchDistributed(uids, assignments){
@@ -1068,9 +1331,11 @@ function launchDistributed(uids, assignments){
     let tried = 0;
     while(tried < planes.length){
       const u = planes[pi % planes.length]; pi++; tried++;
-      if(!(a.type==='aa' ? u.aa : u.ag)) continue;
+      if(a.type==='aa' && !u.aa) continue;
+      if(a.type==='ag' && !u.ag) continue;
+      if(a.type==='gbu' && !u.gbu) continue;
       const used = u._mission.jobs.filter(j=>j.type===a.type).reduce((s,j)=>s+j.count, 0);
-      const ammo = a.type==='aa' ? u.aaAmmo : u.agAmmo;
+      const ammo = a.type==='aa' ? u.aaAmmo : (a.type==='ag' ? u.agAmmo : u.gbuAmmo);
       if(used >= ammo) continue;
       let job = u._mission.jobs.find(j=>j.target===a.target && j.type===a.type);
       if(job) job.count++;
@@ -1092,6 +1357,7 @@ function launchDistributed(uids, assignments){
 // 做法:侧向/后方滑出找不重叠空位,绕开挡路同伴。不做旋转(非静态障碍卡死)。
 function resolveStuckAfterRigid(u, dt){
   if(u.hp<=0) return;
+  if((u._detourT||0) > 0) u._detourT -= dt;
   if(u._rotInPlace){ u._srT=0; u._srRef=null; return; }   // 正在原地转向,不算卡死
   const wantSpeed = Math.hypot(u.wantVx, u.wantVy);
   const hasIntent = u.order && (u.order.kind==='move'||u.order.kind==='attack') && wantSpeed>12;
@@ -1116,11 +1382,15 @@ function resolveStuckAfterRigid(u, dt){
     // 跳过当前被同伴占据的航点,向下一航点进发
     u.pathIdx++;
     if(u.path && u.pathIdx>=u.path.length){
-      if(u.order.kind==='move'){ finishMove(u); return; }
-      // 攻击指令不清除,只清路径并继续走下面的横向滑出,
-      // 同时记失败时间做寻路退避,避免在原地反复算 A* 转圈
+      // 最后一个航点卡住不代表到达:保留指令并重新排队,
+      // 避免单位明明还离目标很远却被当作"走完了"直接取消移动
       u.path=null; u.wantVx=0; u.wantVy=0;
       u._lastPathFail = time;
+      if(u.order.kind==='move' && u.order.x!==undefined){
+        queuePath(u, u.order.x, u.order.y, u.order, true);
+      } else if(u.target && u.target.hp>0){
+        queuePath(u, u.target.x, u.target.y, u.order, true);
+      }
     } else {
       return;
     }
@@ -1129,6 +1399,17 @@ function resolveStuckAfterRigid(u, dt){
   // 卡死:沿垂直于前进方向(左右)或向后,逐档距离找不重叠空位。
   // 改为"小幅位移 + 逃生速度"平滑滑出,不再瞬间瞬移(避免抽搐/漂浮)。
   const fx = u.wantVx/wantSpeed, fy = u.wantVy/wantSpeed;
+  const staticBlocked = uBodyBlocked(u, u.x, u.y);
+  const detourFailed = u._detourFail!==undefined && (time - u._detourFail) < 0.5;
+  if(!staticBlocked && !detourFailed){
+    // 纯同伴拥堵:直接重排绕行,不再左右试;绕行失败才退回侧向脱困
+    if((u._detourT||0) <= 0){
+      u._detourT = 1.0;
+      if(u.order.kind==='move' && u.order.x!==undefined) queuePath(u, u.order.x, u.order.y, u.order, true);
+      else if(u.target && u.target.hp>0) queuePath(u, u.target.x, u.target.y, u.order, true);
+    }
+    return;
+  }
   const dirs = [[-fy,fx],[fy,-fx],[-fx,-fy]];
   for(const [dx,dy] of dirs){
     for(const dist of [14, 26, 40]){
@@ -1194,10 +1475,11 @@ function arbitrateFlow(){
       const dv=flowDir(v); if(!dv) continue;
       if(du.x*dv.x + du.y*dv.y > 0.2) continue;   // 同向,不冲突
       if(dist(u,v) > 110) continue;
-      const csU=u.circles(), csV=v.circles();
+      const csU=frameCircles(u), csV=frameCircles(v);
       let near=false;
       for(const A of csU) for(const B of csV){
-        if(Math.hypot(A.x-B.x, A.y-B.y) < A.r+B.r+48){ near=true; break; }
+        const dx=A.x-B.x, dy=A.y-B.y, min=A.r+B.r+48;
+        if(dx*dx+dy*dy < min*min){ near=true; break; }
       }
       if(!near) continue;
       if(flowPriority(v) > flowPriority(u)){
@@ -1227,6 +1509,22 @@ function arbitrateFlow(){
     }
   }
 }
+// 每单位每帧胶囊缓存:位置/朝向未变时不重复算 cos/sin
+function frameCircles(u){
+  let c = u._frameCircles;
+  if(c && c._x===u.x && c._y===u.y && c._f===u.facing) return c;
+  const colR = u.colR, off = u.colOff || 0;
+  if(!c) c = u._frameCircles = [{x:0,y:0,r:0},{x:0,y:0,r:0}];
+  c._x = u.x; c._y = u.y; c._f = u.facing;
+  c[0].x = u.x; c[0].y = u.y; c[0].r = colR;
+  if(off <= 0){ c.length = 1; return c; }
+  const fx = Math.cos(u.facing), fy = Math.sin(u.facing);
+  if(c.length < 2) c.push({x:0,y:0,r:0});
+  c[1].x = u.x - fx*off; c[1].y = u.y - fy*off; c[1].r = colR;
+  c.length = 2;
+  return c;
+}
+
 function separateAll(){
   // 局部防挤压(软):按"双圆胶囊"碰撞圆两两距离检测计算排斥力,不直接改坐标
   // 两辆坦克(或单位)靠近重叠时,按圆的重叠量产生平滑推力,互相推开:
@@ -1236,24 +1534,28 @@ function separateAll(){
     u.sepVx=0; u.sepVy=0;
     if(u.fly) continue;   // 飞机在空中,不与地面单位互相推挤
     const cand=gridCollect(u.x, u.y, Math.max(u.hw,u.hh)*2 + 16);
-    const csU = u.circles();
+    const csU = frameCircles(u);
     for(let c=0;c<cand.length;c++){
       const j=cand[c];
       if(j===i) continue;
       const v=units[j];
       if(v.hp<=0 || v.fly || isEnemy(u.team,v.team)) continue;   // 敌人在战斗中不做分离;飞机不参与地面推挤
-      const csV = v.circles();
+      const csV = frameCircles(v);
       // 双圆 × 双圆:车头/车尾圆之间两两做距离检测
       for(let a=0;a<csU.length;a++) for(let b=0;b<csV.length;b++){
         const A=csU[a], B=csV[b];
         const dx=A.x-B.x, dy=A.y-B.y;
-        const d=Math.hypot(dx,dy)||0.0001;
         const min=A.r+B.r;
-        if(d>=min) continue;
+        const d2=dx*dx+dy*dy;
+        if(d2 >= min*min) continue;
+        const d=Math.sqrt(d2)||0.0001;
         const over=(min-d)/min;             // 0(刚接触)~1(完全重叠)
         const str=over*over*SEPARATE_STRENGTH;   // 二次衰减:越近推力越强
-        u.sepVx += (dx/d)*str;              // 沿两圆心连线把 u 推开
-        u.sepVy += (dy/d)*str;
+        const ux=dx/d, uy=dy/d;
+        // 朝建筑/水面方向的推力剔除:直接往障碍推会把单位压进墙角
+        if(uBodyBlocked(u, u.x+ux*4, u.y+uy*4)) continue;
+        u.sepVx += ux*str;
+        u.sepVy += uy*str;
       }
     }
   }
@@ -1261,13 +1563,14 @@ function separateAll(){
 /* ============ 刚性碰撞(双圆胶囊):重叠的位置修正 ============ */
 // 双圆胶囊 vs 双圆胶囊:两两(车头/车尾)圆检测,取穿透最深的圆对,沿其圆心连线推开
 function capsuleOverlap(u,v){
-  const csA=u.circles(), csB=v.circles();
+  const csA=frameCircles(u), csB=frameCircles(v);
   let deepest=null, deepPen=0;
   for(const A of csA) for(const B of csB){
     const dx=B.x-A.x, dy=B.y-A.y;
-    const d=Math.hypot(dx,dy)||0.0001;
     const min=A.r+B.r;
-    if(d<min){
+    const d2=dx*dx+dy*dy;
+    if(d2 < min*min){
+      const d=Math.sqrt(d2)||0.0001;
       const pen=min-d;
       if(pen>deepPen){ deepPen=pen; deepest={x:dx/d, y:dy/d}; }
     }
@@ -1291,9 +1594,10 @@ function hasUnitOverlapAt(u, x, y){
   for(let c=0;c<cand.length;c++){
     const v=units[cand[c]];
     if(v===u || v.hp<=0 || v.fly) continue;
-    const csB=v.circles();
+    const csB=frameCircles(v);
     for(const A of csA) for(const B of csB){
-      if(Math.hypot(A.x-B.x,A.y-B.y) < A.r+B.r) return true;
+      const dx=A.x-B.x, dy=A.y-B.y, min=A.r+B.r;
+      if(dx*dx+dy*dy < min*min) return true;
     }
   }
   return false;
@@ -1325,8 +1629,15 @@ function resolveRigid(){
         const uIdle=u.order.kind==='none', vIdle=v.order.kind==='none';
         const wu = uIdle&&!vIdle ? 0.35 : (!uIdle&&vIdle ? 0.65 : 0.5);
         const wv = 1-wu;
-        if(tryMoveTo(u, u.x-px*wu, u.y-py*wu)){ u.x-=px*wu; u.y-=py*wu; moved=true; }
-        if(tryMoveTo(v, v.x+px*wv, v.y+py*wv)){ v.x+=px*wv; v.y+=py*wv; moved=true; }
+        const uMoved = tryMoveTo(u, u.x-px*wu, u.y-py*wu);
+        const vMoved = tryMoveTo(v, v.x+px*wv, v.y+py*wv);
+        if(uMoved){ u.x-=px*wu; u.y-=py*wu; moved=true; }
+        if(vMoved){ v.x+=px*wv; v.y+=py*wv; moved=true; }
+        // 单侧被建筑/水面卡死:让能动的单位吃下整段穿透,避免墙角双双钉死
+        if(!uMoved && !vMoved){
+          if(tryMoveTo(v, v.x+px, v.y+py)){ v.x+=px; v.y+=py; moved=true; }
+          else if(tryMoveTo(u, u.x-px, u.y-py)){ u.x-=px; u.y-=py; moved=true; }
+        }
       }
     }
     if(!moved) break;
@@ -1389,6 +1700,7 @@ function applyMovement(u, dt){
   u._obsT = (u._obsT||0) + dt;
   if(u._obsT > 0.8){
     u._obsT = 0;
+    // 只有中心格真被建筑/障碍埋住才拉出;仅胶囊贴边不瞬移,避免挤成一团时反复传送抽搐
     if(!unitPassable(u, Math.floor(u.x/TILE), Math.floor(u.y/TILE))) pullOutOfObstacle(u);
   }
   // 战斗中且目标在射程内(_standFire):钉住不动,只负责转向瞄准与开火。
@@ -1486,25 +1798,50 @@ function applyMovement(u, dt){
   const wantSpeed=wm;
   if(wantSpeed>12 && m<wantSpeed*0.25 && !u.fly){ u.stuckT=(u.stuckT||0)+dt; }   // 飞机悬空无静态障碍,不参与卡住脱困
   else u.stuckT=0;
+  if(u.stuckT>0 && uBodyBlocked(u, u.x, u.y)) u._edgeStuckT = (u._edgeStuckT||0) + dt;   // 擦边静态卡死累计时长
+  else u._edgeStuckT = 0;
   if(u.stuckT>0.5){
     u.stuckT=0;
     const wm2=Math.max(1,wm);
     const fx=wx/wm2, fy=wy/wm2;
     const dirs=[[-fy,fx],[fy,-fx],[-fx,-fy]];   // 左,右,后
+    const staticBlocked = uBodyBlocked(u, u.x, u.y);
+    const detourFailed = u._detourFail!==undefined && (time - u._detourFail) < 0.5;
     let escaped=false;
-    for(let di=0; di<dirs.length; di++){
-      const nx=u.x+dirs[di][0]*8, ny=u.y+dirs[di][1]*8;
-      if(!inBounds(nx,ny) || uBodyBlocked(u,nx,ny)) continue;
-      if(!hasUnitOverlapAt(u,nx,ny)){
-        u.x += dirs[di][0]*3; u.y += dirs[di][1]*3;   // 小幅位移,避免瞬移抽搐
-        u.vx=dirs[di][0]*sp*0.5; u.vy=dirs[di][1]*sp*0.5;
-        u._escapeT = 0.4; u._escapeAng = Math.atan2(dirs[di][1], dirs[di][0]);   // 逃生速度平滑滑出
-        u._yieldT = 0.3 + Math.random()*0.4;
-        escaped=true;
-        break;
+    if(!staticBlocked && !detourFailed){
+      // 纯同伴拥堵:直接重排绕行,不再左右乱顶;绕行失败才退回侧向脱困
+      if((u._detourT||0) <= 0){
+        u._detourT = 1.0;
+        if(u.order.kind==='move' && u.order.x!==undefined) queuePath(u, u.order.x, u.order.y, u.order, true);
+        else if(u.target && u.target.hp>0) queuePath(u, u.target.x, u.target.y, u.order, true);
+      }
+    } else {
+      for(let di=0; di<dirs.length && !escaped; di++){
+        for(const dist of [14, 26, 40]){
+          const nx=u.x+dirs[di][0]*dist, ny=u.y+dirs[di][1]*dist;
+          if(!inBounds(nx,ny) || uBodyBlocked(u,nx,ny)) continue;
+          if(!hasUnitOverlapAt(u,nx,ny)){
+            u.x += dirs[di][0]*4; u.y += dirs[di][1]*4;   // 小幅位移,避免瞬移抽搐
+            u.vx=dirs[di][0]*sp*0.5; u.vy=dirs[di][1]*sp*0.5;
+            u._escapeT = 0.4; u._escapeAng = Math.atan2(dirs[di][1], dirs[di][0]);   // 逃生速度平滑滑出
+            u._yieldT = 0.3 + Math.random()*0.4;
+            escaped=true;
+            break;
+          }
+        }
       }
     }
-    if(!escaped && uBodyBlocked(u, u.x, u.y)){
+    if(!escaped && staticBlocked){
+      // 真被埋住:中心格不可走或胶囊两圆都被静态障碍压住 -> 直接瞬移脱困(秒解)
+      const centerBlocked = !unitPassable(u, Math.floor(u.x/TILE), Math.floor(u.y/TILE));
+      const csNow = u.circlesAt(u.x, u.y, u.facing);
+      let capBlocked = 0;
+      for(const c of csNow) if(uCellBlocked(u, Math.floor(c.x/TILE), Math.floor(c.y/TILE))) capBlocked++;
+      const trulyBuried = centerBlocked || capBlocked >= csNow.length;
+      if(trulyBuried || (u._edgeStuckT||0) >= 1.0){
+        // 被埋住立即瞬移;只是擦到障碍边缘则侧移无效后卡满 1 秒才瞬移(第二位),避免正常擦墙闪跳
+        if(pullOutOfObstacle(u)) escaped = true;
+      }
       // 旋转脱困:仅当被地形/水域/建筑等"静态障碍"真正卡住时才触发
       // (纯被同伴挤压交给分离系统,避免两辆坦克原地转圈)
       const wantAng = Math.atan2(fy, fx);   // fx/fy = 归一化期望方向
@@ -1725,13 +2062,13 @@ function fireAt(u,target){
 }
 // pathfinding retry backoff: avoid per-frame A* spin when stuck
 function pathRetryReady(u){
-  return u._lastPathFail===undefined || (time - u._lastPathFail) > 0.7;
+  return u._lastPathFail===undefined || (time - u._lastPathFail) > 0.5;
 }
 function followPathToEntity(u, target, dt){
   if((!u.path || u.pathIdx>=u.path.length) && !u._pendingPath){
     u.repathT-=dt;
     if((u.repathT<=0 || !u.path) && pathRetryReady(u)){
-      u.repathT=0.7;
+      u.repathT=0.5;
       queuePath(u, target.x, target.y, u.order);
     }
   }
@@ -1741,7 +2078,7 @@ function followPathToEntity(u, target, dt){
   const chaseD = Math.max(24, u.r + 12);
   if((!u.path || u.pathIdx>=u.path.length) && !u._pendingPath && u.target && u.target.hp>0 && dist(u,u.target)>chaseD && pathRetryReady(u)){
     queuePath(u, target.x, target.y, u.order);
-    u.repathT = 0.7;
+    u.repathT = 0.5;
   }
 }
 function followPath(u,dt){
@@ -1752,7 +2089,12 @@ function followPath(u,dt){
     if(uCellBlocked(u,Math.floor(wp.x/TILE),Math.floor(wp.y/TILE))){
       if(u.order.kind==='move' && u.order.x!==undefined){
         u.repathT-=dt;
-        if(u.repathT<=0){ u.repathT=0.5; const p=pathFor(u,u.x,u.y,u.order.x,u.order.y); if(p){u.path=p;u.pathIdx=0;} }
+        if(u.repathT<=0){
+          u.repathT=0.5;
+          const p=pathFor(u,u.x,u.y,u.order.x,u.order.y);
+          if(p){ u.path=p; u.pathIdx=0; }
+          else { u.path=null; u.pathIdx=0; u._lastPathFail=time; queuePath(u,u.order.x,u.order.y,u.order); }   // 重寻路失败也重排队,不保留指向障碍的旧路径干等
+        }
       } else {
         u.pathIdx++;
       }
@@ -2024,6 +2366,7 @@ function doBoard(u){
   const t=u.boardTo;
   u._boarded=false; u.boardTo=null;
   if(!t || t.hp<=0 || !units.includes(t)){ u.order={kind:'none'}; return; }
+  if(t.chopper && !t.landed){ u.order={kind:'none'}; return; }   // 直升机已起飞,不能上机
   if(transportCost(u) > (t.capacity - usedCapacity(t))){ u.order={kind:'none'}; return; }  // 已满,停在原地
   // 从场上移除,进入运输艇舱内(保留对象引用以便卸载时恢复属性)
   t.cargoUnits.push(u);
@@ -2049,27 +2392,31 @@ function unloadTransport(t, at){
   const atPt = at || t.unloadAt || {x:t.x, y:t.y};
   const pts=formationTargets(atPt.x, atPt.y, t.cargoUnits);
   const out=[];
+  const remain=[];   // 附近没有陆地卸不出去的部队,留在舱里下次再卸
   for(let i=0;i<t.cargoUnits.length;i++){
     const c=t.cargoUnits[i];
     const pt=(pts && pts[Math.min(i,pts.length-1)]) || {x:t.x,y:t.y};
     const np=nearestLand(pt.x, pt.y);
-    if(np){
-      const u=new Unit(c.type, t.team, np.x, np.y);
-      if(t._aiTransport) u._aiUnloaded = true;   // 标记:AI 运输艇卸载的部队,抢滩后不再重新装船
-      u.hp=Math.min(u.maxHp, c.hp);
-      if(u.type==='harvester'){
-        u.cargo = c.cargo||0;
-        if(c.mode==='return' && c.refinery){ u.mode='return'; u.refinery=c.refinery; u.order={kind:'return'}; u.path=null; }
-        else { u.mode='mine'; u.oreTarget=c.oreTarget||null; u.order={kind:'mine'}; u.path=null; }
-      }
-      if(c.shield>0) u.shield=c.shield;
-      out.push(u);
-      effects.push(new Effect(u.x,u.y,'ring',18));
+    if(!np){ remain.push(c); continue; }
+    // 放回原对象:升级/模块/载员等状态原样保留,不重建
+    c.x=np.x; c.y=np.y;
+    c.order={kind:'none'}; c.path=null; c.pathIdx=0; c.repathT=0;
+    c.wantVx=0; c.wantVy=0; c.vx=0; c.vy=0;
+    c.target=null; c._boarded=false; c.boardTo=null;
+    c._pendingPath=null; c._inPathQueue=false;
+    if(t._aiTransport) c._aiUnloaded = true;   // 标记:AI 运输艇卸载的部队,抢滩后不再重新装船
+    if(c.type==='harvester'){
+      // 原对象已保留 cargo/mode/oreTarget/refinery,只需恢复指令
+      if(c.mode==='return' && c.refinery) c.order={kind:'return'};
+      else { c.mode='mine'; c.order={kind:'mine'}; }
     }
+    out.push(c);
+    effects.push(new Effect(c.x,c.y,'ring',18));
   }
-  t.cargoUnits=[];
+  t.cargoUnits = remain;
   if(out.length) units.push(...out);
-  textPopup(t.x,t.y-18,'已卸载 '+out.length+' 个单位','#8aff8a');
+  if(remain.length) textPopup(t.x,t.y-18,'附近没有陆地,'+remain.length+' 个单位未卸载','#ffb0b0');
+  else if(out.length) textPopup(t.x,t.y-18,'已卸载 '+out.length+' 个单位','#8aff8a');
   updatePanel();
   return out.length;
 }
@@ -2082,6 +2429,12 @@ function manualUnload(t){
 function updateMissiles(dt){
   for(const m of missiles){
     if(m.dead) continue;
+    // GBU-31 垂直炸弹(F-15):原地下落,计时结束落地爆炸(不追踪/不可拦截)
+    if(m.spriteType==='gbu31'){
+      m.gbuFall = (m.gbuFall||0) + dt;
+      if(m.gbuFall >= GBU31_FALL_TIME) gbuExplode(m, m.x, m.y, null);
+      continue;
+    }
     // 空军导弹(A-120c/A-174b):不可被红外干扰/APS反导,不被任何目标挡弹,
     // 直线追踪目标,命中爆炸(AOE),超射程自爆,目标死亡自爆
     if(m.air){
@@ -2090,6 +2443,8 @@ function updateMissiles(dt){
         explodeATGM(m, m.x, m.y, null);
         continue;
       }
+      // 空对地导弹(A-174b/Kh-29)锁定的小鸟直升机升空 → 在升起那一刻自动爆炸
+      if(t.fly && m.spriteType!=='a120c' && m.spriteType!=='r37m'){ explodeATGM(m, m.x, m.y, null); continue; }
       const want=Math.atan2(t.y-m.y, t.x-m.x);
       let dd=want-m.ang;
       dd=((dd+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
@@ -2132,6 +2487,8 @@ function updateMissiles(dt){
       explodeATGM(m, m.x, m.y, null);
       continue;
     }
+    // 目标升空(小鸟直升机)→ 反坦克导弹失去地面目标,自动爆炸
+    if(t.fly){ explodeATGM(m, m.x, m.y, null); continue; }
     // 稍微转弯:朝向目标当前方向(限转角速度)
     const want=Math.atan2(t.y-m.y, t.x-m.x);
     let d=want-m.ang;
@@ -2203,6 +2560,34 @@ function launchAirMissile(u, target, kind){
   effects.push(new Effect(x,y,'ring',14));
   for(let i=0;i<3;i++){ const sm=new Effect(x+rnd(-3,3), y+rnd(-3,3), 'smoke', rnd(3,6)); sm.life=0.5; sm.maxLife=0.5; effects.push(sm); }
   textPopup(u.x, u.y-22, (isAA?airAAName(u):airAGName(u))+' 发射','#ffd24a');
+}
+// F-15 投放 GBU-31 垂直炸弹:从飞机当前位置垂直下落,GBU31_FALL_TIME 后落地爆炸(火炮伤害)
+function dropGBU31(u){
+  const x=u.x, y=u.y;
+  const m=new Missile(x, y, {x:x, y:y}, u.team, u, 'gbu31');
+  m.ang = Math.PI/2;          // 垂直朝下(屏幕上方向向下为正)
+  m.gbuFall = 0;              // 下落计时(不追踪,垂直落地)
+  m.maxRange = 99999;
+  m.damage = GBU31_DAMAGE;
+  m.explodeR = GBU31_AOE;
+  m.speed = 0;
+  missiles.push(m);
+  effects.push(new Effect(x,y,'ring',12));
+}
+// GBU-31 落地爆炸:火炮属性伤害(按护甲修正),范围内敌方单位/建筑各吃满伤,跳过飞机与友军
+function gbuExplode(m, ex, ey, primary){
+  m.dead=true;
+  shake=Math.max(shake,4);
+  effects.push(new Effect(ex,ey,'explode',30));
+  for(let i=0;i<8;i++){ const sm=new Effect(ex+rnd(-14,14), ey+rnd(-14,14), 'smoke', rnd(5,10)); sm.life=1.3; sm.maxLife=1.3; effects.push(sm); }
+  for(const u of units){
+    if(u.hp<=0 || u.fly || u===m.attacker || !isEnemy(m.team, u.team)) continue;
+    if(dist(u,{x:ex,y:ey}) <= m.explodeR) applyDamage(u, m.damage, m.attacker, 'cannon');
+  }
+  for(const b of buildings){
+    if(!b.alive || b===primary) continue;
+    if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, m.damage, m.attacker, 'cannon');
+  }
 }
 // 爆炸:目标(或挡路者)吃单体满伤,范围内其它单位/建筑吃范围伤害(范围不大)
 function explodeATGM(m, ex, ey, primary){
@@ -2306,28 +2691,38 @@ function explodeIntercept(x, y){
 // 注意:这只是脱困机制(与既有 stuck-escape 同理),不修改 astar/path 寻路本身。
 function pullOutOfObstacle(u){
   const cxc=Math.floor(u.x/TILE), cyc=Math.floor(u.y/TILE);
-  if(unitPassable(u,cxc,cyc)) return false;   // 中心格可通行就不动
-  const ex=findExitCellFor(u);
+  const centerBlocked = !unitPassable(u,cxc,cyc);
+  if(!centerBlocked && !uBodyBlocked(u,u.x,u.y)) return false;   // 中心和胶囊都正常就不动
+  const ex=findExitCellFor(u, centerBlocked);
   if(!ex) return false;
   u.x=ex.x; u.y=ex.y;
   u.vx=0; u.vy=0; u._escapeT=0; u._escapeAng=0;
-  u.facing=u.turnTarget=Math.atan2(ex.y-u.y, ex.x-u.x);   // 朝外
+  u.facing=u.turnTarget=ex.facing!==undefined ? ex.facing : Math.atan2(ex.y-u.y, ex.x-u.x);   // 朝外
   u.path=null; u.pathIdx=0; u.repathT=0.2;
-  textPopup(u.x,u.y-20,'已脱离建筑','#9fc0ac');
   return true;
 }
 // 以单位中心格为起点,逐圈向外找第一个可通行格(含当前格 r=0)
-function findExitCellFor(u){
+function findExitCellFor(u, allowPlainFallback){
   const cxc=Math.floor(u.x/TILE), cyc=Math.floor(u.y/TILE);
-  for(let r=0;r<=8;r++){
-    for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
-      if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
-      const nx=cxc+dx, ny=cyc+dy;
-      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H) continue;
-      if(unitPassable(u,nx,ny)){
-        return { x:nx*TILE+TILE/2, y:ny*TILE+TILE/2 };
+  let fallback=null;
+  for(let pass=0; pass<2; pass++){
+    for(let r=0;r<=8;r++){
+      for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+        if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
+        const nx=cxc+dx, ny=cyc+dy;
+        if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H) continue;
+        if(!unitPassable(u,nx,ny)) continue;
+        const px=nx*TILE+TILE/2, py=ny*TILE+TILE/2;
+        if(pass===0 && hasUnitOverlapAt(u, px, py)) continue;   // 第一遍优先无友军占用
+        const ang=Math.atan2(py-u.y, px-u.x);
+        if(!uBodyBlocked(u,px,py,ang)) return { x:px, y:py, facing:ang };   // 优先找船体胶囊也能放下的格
+        // 只有中心真被埋住时才退回"只保证中心可走"的旧兜底;
+        // 中心可走但胶囊压住时,宁可保持原位等旋转脱困,也不要瞬移后又卡住循环
+        if(allowPlainFallback && !fallback && (r>0 || !unitPassable(u,cxc,cyc))) fallback={ x:px, y:py };
       }
     }
+    // 第一遍已有"中心可走"兜底就直接用,不瞬移到友军身上;第二遍才放宽占用过滤
+    if(fallback) break;
   }
-  return null;
+  return fallback;
 }

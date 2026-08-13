@@ -140,12 +140,11 @@ window.addEventListener('load', async ()=>{
     new Promise(r=>setTimeout(r,15000)),
   ]);
   if(loadOv) loadOv.style.display='none';
-  initMusic();               // 背景音乐(4 首循环,可在设置里关)
+  initMusic();               // 背景音乐(4 首循环,设置里可调音量,0=静音)
   resize();
   window.addEventListener('resize',resize);
   setupInput();
   buildMenu(true);         // 生成菜单:地图/队伍/预览(内部会生成地图)
   loadCustomMaps(()=>buildMenu(true));   // 加载 map/index.js 列出的自制地图后刷新地图列表
-  autoScanStored();                       // 若有已保存的 map 文件夹句柄,自动扫描刷新(尽力而为)
   requestAnimationFrame(frame);
 });

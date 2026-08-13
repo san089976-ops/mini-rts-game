@@ -13,6 +13,7 @@ const MAPS = [
     clusters:0, waterProb:0, treeProb:0, ore:0, clearW:6, clearH:5,
     width:80, height:56, custom:'naval',
     islands:[[20,15],[60,15],[20,41],[60,41]],
+    maxTeams:4,   // 只定义 2~4 队出生点,菜单按此上限钳制,避免 5~8 队出生在海里
     spawns:{
       2:[[20,15],[60,41]],
       3:[[20,15],[60,15],[20,41]],
@@ -38,7 +39,12 @@ function currentMap(){
 function getSpawns(n){
   const m = currentMap();
   if(m && m.custom==='edited' && Array.isArray(m.spawns) && m.spawns.length) return m.spawns;
-  if(m && m.spawns && m.spawns[n]) return m.spawns[n];
+  if(m && m.spawns){
+    if(m.spawns[n]) return m.spawns[n];
+    // 内置地图只定义了部分队伍数(如海战图 2~4):超限时取最大已定义出生点,不回退通用陆地坐标
+    const keys=Object.keys(m.spawns).map(Number).filter(k=>k>=2 && k<=8).sort((a,b)=>b-a);
+    if(keys.length) return m.spawns[keys[0]];
+  }
   return SPAWN_POINTS[n] || SPAWN_POINTS[2];
 }
 

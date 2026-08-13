@@ -97,7 +97,7 @@ function placeMapEntities(m){
   }
   for(const uu of (m.units||[])){
     if(!uu) continue;
-    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1,f16:1,su35:1,t84bm:1,t72:1,t62:1,t80:1,merkava:1};
+    const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1,f16:1,su35:1,f15:1,t84bm:1,t72:1,t62:1,t80:1,merkava:1,littlebird:1,abramsx:1,t14:1,drone:1,uh60:1,mi17:1};
     if(!KNOWN[uu.type]) continue;
     const team = (uu.team===undefined || uu.team===null) ? -1 : uu.team;
     if(team>=0 && team>=gameTeams.length) continue;

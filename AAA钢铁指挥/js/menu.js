@@ -17,13 +17,19 @@ let menuState = {
 let customMapsLoaded = false;
 
 /* ============ 队伍数:内置地图可选 2~8;自制地图由出生点数决定(固定) ============ */
+// 内置地图的队伍数上限:海战图等只定义部分出生点时按 maxTeams 钳制,避免出生在海里
+function maxTeamCount(){
+  const m=currentMap();
+  const max = m && m.maxTeams ? (m.maxTeams|0) : 8;
+  return Math.max(2, Math.min(8, max));
+}
 function teamCount(){
   const m=currentMap();
   if(m && m.custom==='edited' && Array.isArray(m.spawns)){
     const c = m.spawns.length;
     return (c>=2 && c<=8) ? c : 2;
   }
-  return Math.max(2, Math.min(8, (menuState.compCount||0)+1));
+  return Math.max(2, Math.min(maxTeamCount(), (menuState.compCount||0)+1));
 }
 function isCustomMap(){ const m=currentMap(); return !!(m && m.custom==='edited'); }
 /* 让每队各占一个出生点(不可重复);空位自动补剩余点 */
@@ -56,7 +62,11 @@ function initSpawnIdx(){
 function loadCustomMaps(done){
   window.CUSTOM_MAPS = window.CUSTOM_MAPS || [];
   const idx = window.CUSTOM_MAPS_INDEX || [];
-  if(!idx.length){ customMapsLoaded=true; if(done) done(); return; }
+  if(!idx.length){
+    customMapsLoaded = true;
+    autoScanStored(done);   // 无清单时也尝试从已授权 map 文件夹发现自声明地图
+    return;
+  }
   let remaining = idx.length;
   for(const name of idx){
     const start = window.CUSTOM_MAPS.length;
@@ -64,9 +74,9 @@ function loadCustomMaps(done){
     s.src='map/'+name;
     s.onload=()=>{
       for(let i=start;i<window.CUSTOM_MAPS.length;i++){ const m=window.CUSTOM_MAPS[i]; if(m && !m._file) m._file=name; }
-      remaining--; if(remaining<=0){ customMapsLoaded=true; if(done) done(); }
+      remaining--; if(remaining<=0){ customMapsLoaded=true; autoScanStored(done); }
     };
-    s.onerror=()=>{ remaining--; if(remaining<=0){ customMapsLoaded=true; if(done) done(); } };
+    s.onerror=()=>{ remaining--; if(remaining<=0){ customMapsLoaded=true; autoScanStored(done); } };
     document.head.appendChild(s);
   }
 }
@@ -75,7 +85,7 @@ function loadCustomMaps(done){
 function enterSkirmish(){
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('menu').classList.remove('hidden');
-  buildMenu(true);
+  if(done) done(); else buildMenu(true);
 }
 function comingSoon(){
   document.getElementById('soonOv').classList.add('show');
@@ -126,10 +136,11 @@ function buildGameSetup(){
 
 function selectMap(i){
   menuState.mapChoice = {kind:'builtin', idx:i};
+  menuState.compCount = Math.max(1, Math.min(maxTeamCount()-1, menuState.compCount||0));   // 切图时按新地图上限钳制
   buildMenu(true);
 }
 function setCompCount(n){
-  menuState.compCount=n;   // n=电脑数量(总队伍=n+1,最大8)
+  menuState.compCount=Math.max(1, Math.min(maxTeamCount()-1, n));   // n=电脑数量(总队伍=n+1,按当前地图上限钳制)
   menuState.spawnTarget=Math.min(menuState.spawnTarget, Math.max(0,n));
   initSpawnIdx();
   buildMenu(true);
@@ -259,6 +270,9 @@ function confirmMapChoice(){
   if(!pendingMapChoice) return;
   menuState.mapChoice = pendingMapChoice;
   pendingMapChoice=null;
+  if(menuState.mapChoice.kind==='builtin'){
+    menuState.compCount = Math.max(1, Math.min(maxTeamCount()-1, menuState.compCount||0));   // 确认选择内置地图后同样钳制
+  }
   closeMapBrowser();
   buildMenu(true);
 }
@@ -320,9 +334,9 @@ async function scanMapFolder(){
   }catch(e){ if(e && e.name!=='AbortError') setMenuStatus('扫描失败: '+e.message); }
 }
 // 启动时若有已保存的文件夹句柄,自动扫描刷新(不用手动重新连接;无用户手势时可能被浏览器拒,失败则保留 index.js 的列表)
-async function autoScanStored(){
+async function autoScanStored(done){
   const h=await idbGet('dirHandle');
-  if(!h) return;
+  if(!h){ if(done) done(); else buildMenu(true); return; }
   mapDirHandle=h;
   try{
     if(h.queryPermission && (await h.queryPermission({mode:'read'}))!=='granted'){
@@ -455,7 +469,9 @@ function renderTeamRows(){
     const cnt=document.createElement('div');
     cnt.className='trow cntrow';
     let cntHtml='<span class="tname">队伍数</span>';
+    const maxT=maxTeamCount();
     [2,3,4,5,6,7,8].forEach(nn=>{
+      if(nn>maxT) return;   // 海战图等只显示地图允许的队伍数
       cntHtml+='<button class="facBtn'+(menuState.compCount===nn-1?' sel':'')+'" onclick="setCompCount('+(nn-1)+')">'+nn+'</button>';
     });
     cnt.innerHTML=cntHtml;

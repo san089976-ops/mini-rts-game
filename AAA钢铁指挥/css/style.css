@@ -277,6 +277,7 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 .setBox h2 { text-align:center; color:#ffe27a; letter-spacing:6px; font-size:22px; }
 .setBox .setLabel { text-align:center; color:#9fd0b0; font-size:13px; letter-spacing:3px; margin-top:-4px; }
 .setBox .trackRow { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.setBox .setVolume { width:100%; margin:4px 0 14px; accent-color:#7ac88a; cursor:pointer; }
 .setBox .setRow {
   padding:12px 16px; font-size:15px; letter-spacing:2px;
   background:linear-gradient(#2c3c32,#1a241e); color:#d8f0e0;

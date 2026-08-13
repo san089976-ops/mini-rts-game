@@ -9,8 +9,11 @@ let pathCache = new Map();
 const pathJobs = [];
 const FLOW_CACHE_MAX = 128;    // 流场缓存上限(每个流场≈全图一次 Dijkstra,扩容后多目标共享更充分)
 const MOVE_FLOW_MIN = 6;       // 移动指令批量共享流场阈值:同一目的地格 ≥6 个单位时才预建流场
-const MOVE_FLOW_BUILD_BUDGET = 2;  // 预建流场的帧内子预算(ms):只分一半给建场,主循环寻路预算不受挤压
+const ATTACK_FLOW_MIN = 4;     // 攻击指令批量共享流场阈值:同一目标格 ≥4 个单位时才预建流场
+const FLOW_BUILD_BUDGET_MS = 2;  // 预建流场的帧内子预算(ms):只分一半给建场,主循环寻路预算不受挤压
 let flowCache = new Map();
+const passableCache = new Map();
+const gridPool = new Map();
 
 function moveProfileOf(u){
   if(!u) return 'x';
@@ -30,18 +33,22 @@ function invalidatePathCache(){
   mapVersion++;
   pathCache.clear();
   flowCache.clear();
+  passableCache.clear();
+  gridPool.clear();
 }
 
 function resetPathCache(){
   mapVersion = 0;
   pathCache.clear();
   flowCache.clear();
+  passableCache.clear();
+  gridPool.clear();
   pathJobs.length = 0;
 }
 
-function queuePath(u, tx, ty, order){
+function queuePath(u, tx, ty, order, detour){
   if(!u || !order) return;
-  u._pendingPath = { tx:tx, ty:ty, order:order };
+  u._pendingPath = { tx:tx, ty:ty, order:order, detour:!!detour };
   if(!u._inPathQueue){
     u._inPathQueue = true;
     pathJobs.push(u);
@@ -51,19 +58,23 @@ function queuePath(u, tx, ty, order){
 function processPathJobs(){
   if(!pathJobs.length) return;
   const start = performance.now();
-  // ① 移动指令批量共享流场:单次遍历待处理任务,同一目的地格计数到 MOVE_FLOW_MIN
-  //    时当场用该单位建一次全图流场进 flowCache(同目的地批量微基准提速约 6.5x)。
-  //    建场受 MOVE_FLOW_BUILD_BUDGET 子预算限制:只分一半帧预算给建场,
-  //    保证队形类(目的地分散)批次不会因建场挤占主循环 A* 预算。
+  // ① 移动/攻击批量共享流场:统计同一目的地格的请求数,达到阈值才预建全图流场。
+  //    移动达到 MOVE_FLOW_MIN、攻击达到 ATTACK_FLOW_MIN;未达阈值时攻击回退 A*,
+  //    避免单单位追击也整图跑 Dijkstra。
   const moveCount = new Map();
+  const attackCount = new Map();
   for(const u of pathJobs){
     const req = u && u._pendingPath;
-    if(!u || u.hp<=0 || !req || u.order!==req.order || u.order.kind!=='move' || u.fly) continue;
-    const k = flowKey(u, req.tx, req.ty);
-    const n = (moveCount.get(k)||0) + 1;
-    moveCount.set(k, n);
-    if(n === MOVE_FLOW_MIN && !flowCache.has(k) && performance.now()-start < MOVE_FLOW_BUILD_BUDGET){
-      const f = buildFlowField(u, req.tx, req.ty);
+    if(!u || u.hp<=0 || !req || req.detour || u.order!==req.order) continue;
+    let tx, ty, counts, min;
+    if(u.order.kind==='move' && !u.fly){ tx=req.tx; ty=req.ty; counts=moveCount; min=MOVE_FLOW_MIN; }
+    else if(u.order.kind==='attack' && u.target && u.target.hp>0){ tx=u.target.x; ty=u.target.y; counts=attackCount; min=ATTACK_FLOW_MIN; }
+    else continue;
+    const k = flowKey(u, tx, ty);
+    const n = (counts.get(k)||0) + 1;
+    counts.set(k, n);
+    if(n === min && !flowCache.has(k) && performance.now()-start < FLOW_BUILD_BUDGET_MS){
+      const f = buildFlowField(u, tx, ty);
       if(f){
         if(flowCache.size >= FLOW_CACHE_MAX) flowCache.delete(flowCache.keys().next().value);
         flowCache.set(k, f);
@@ -90,7 +101,7 @@ function processPathJobs(){
       // 空军:不跑 A*,直接直线飞向目标
       u._pendingPath = null;
       u._inPathQueue = false;
-      u.path = [{x:tx, y:ty}]; u.pathIdx = 0; u.repathT = 0.7;
+      u.path = [{x:tx, y:ty}]; u.pathIdx = 0; u.repathT = 0.5;
       i++;
       continue;
     }
@@ -108,17 +119,22 @@ function processPathJobs(){
       i++;
       continue;
     }
-    // 攻击:流场路径(共享);移动:目的地已有流场则提取+补精确终点,否则回退 A*
-    const p = u.order.kind==='attack' ? flowPathFor(u, tx, ty)
-              : (moveFlowPath(u, tx, ty) || pathFor(u, u.x, u.y, tx, ty));
+    // 脱困绕行:把附近友军当软障碍重排;普通寻路/流场逻辑不变
+    const p = req.detour
+              ? pathForDetour(u, tx, ty)
+              : (u.order.kind==='attack'
+                  ? (flowPathFromCached(u, tx, ty) || pathFor(u, u.x, u.y, tx, ty))
+                  : (moveFlowPath(u, tx, ty) || pathFor(u, u.x, u.y, tx, ty)));
     u._pendingPath = null;
     u._inPathQueue = false;
-    u.repathT = 0.7;
+    u.repathT = 0.5;
     if(p){
       u.path = p; u.pathIdx = 0;
+      if(req.detour) u._detourFail = undefined;
     } else {
       u.path = null; u.pathIdx = 0;
       u._lastPathFail = time;
+      if(req.detour) u._detourFail = time;
     }
     i++;
     if(performance.now() - start >= PATH_JOB_BUDGET_MS) break;
@@ -167,19 +183,44 @@ function pathFor(u, sx, sy, tx, ty){
 // clearance: how many extra cells a unit needs around its center (2x1 tanks, etc.)
 function clearanceOf(u){ return Math.max(0, Math.ceil((u.colR||0)/TILE) - 1); }
 
-function passableFor(u){
-  const base = u ? ((cx,cy)=>unitPassable(u,cx,cy)) : ((cx,cy)=>!cellBlocked(cx,cy));
+function passableProfileKey(u){ return moveProfileOf(u) + ':' + mapVersion; }
+
+function buildPassableMask(u){
+  const cols = MAP_W, rows = MAP_H, n = cols*rows;
   const clearR = u ? clearanceOf(u) : 0;
-  return (clearR>0) ? (function(x,y){
-    if(!base(x,y)) return false;
-    for(let dx=-clearR;dx<=clearR;dx++) for(let dy=-clearR;dy<=clearR;dy++){
-      const nx=x+dx, ny=y+dy;
-      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H) return false;
-      if(!base(nx,ny)) return false;
+  const base = u ? ((cx,cy)=>unitPassable(u,cx,cy)) : ((cx,cy)=>!cellBlocked(cx,cy));
+  const mask = new Uint8Array(n);
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      if(!base(x,y)) continue;
+      let ok = true;
+      if(clearR > 0){
+        for(let dx=-clearR;dx<=clearR && ok;dx++) for(let dy=-clearR;dy<=clearR && ok;dy++){
+          const nx=x+dx, ny=y+dy;
+          if(nx<0||ny<0||nx>=cols||ny>=rows || !base(nx,ny)) ok=false;
+        }
+      }
+      if(ok) mask[y*cols + x] = 1;
     }
-    return true;
-  }) : base;
+  }
+  return mask;
 }
+
+// 每个移动档案 + mapVersion 只构建一次通行掩码,A*/流场/平滑共用
+function passableProfile(u){
+  const k = passableProfileKey(u);
+  let p = passableCache.get(k);
+  if(!p){
+    const mask = buildPassableMask(u);
+    const fn = (x,y)=> x>=0 && y>=0 && x<MAP_W && y<MAP_H && mask[y*MAP_W + x]===1;
+    p = { mask:mask, fn:fn };
+    passableCache.set(k, p);
+  }
+  return p;
+}
+
+function passableMaskFor(u){ return passableProfile(u).mask; }
+function passableFor(u){ return passableProfile(u).fn; }
 
 function flowKey(u, tx, ty){
   return moveProfileOf(u) + ':' + mapVersion + ':' + ((tx/TILE)|0) + ':' + ((ty/TILE)|0);
@@ -192,9 +233,16 @@ function buildFlowField(u, tx, ty){
   let gx = txg, gy = tyg;
   if(!passable(gx,gy)){
     let alt=null;
-    for(let r=0; r<6 && !alt; r++) for(let dy=-r; dy<=r && !alt; dy++) for(let dx=-r; dx<=r; dx++){
-      const nx=txg+dx, ny=tyg+dy;
-      if(passable(nx,ny)){ alt=[nx,ny]; break; }
+    let bestD=1e9;
+    for(let r=0; r<=Math.max(cols,rows) && r*r<=bestD; r++){
+      for(let dy=-r; dy<=r; dy++) for(let dx=-r; dx<=r; dx++){
+        if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
+        const nx=txg+dx, ny=tyg+dy;
+        if(passable(nx,ny)){
+          const d=dx*dx+dy*dy;
+          if(d<bestD){ bestD=d; alt=[nx,ny]; }
+        }
+      }
     }
     if(!alt) return null;
     gx=alt[0]; gy=alt[1];
@@ -271,16 +319,66 @@ function flowPathFor(u, tx, ty){
   return flowPathFromField(u, field, u.x, u.y);
 }
 
+// 只从已有流场缓存提取路径,不触发整图重建;未达批量阈值的攻击指令走 A* 回退
+function flowPathFromCached(u, tx, ty){
+  const k = flowKey(u, tx, ty);
+  const field = flowCache.get(k);
+  if(!field) return null;
+  return flowPathFromField(u, field, u.x, u.y);
+}
+
+// 按移动档案复用无状态的 MapGrid + AStarPathfinder,只更新通行掩码
+function astarFor(u){
+  const key = moveProfileOf(u);
+  let entry = gridPool.get(key);
+  if(!entry){
+    const grid = new MapGrid(MAP_W, MAP_H, null);
+    const astar = new AStarPathfinder(grid, { allowDiagonal:true });
+    entry = { grid:grid, astar:astar };
+    gridPool.set(key, entry);
+  }
+  entry.grid.mask = passableMaskFor(u);
+  return entry.astar;
+}
+
 function findPathAStar(sx,sy,tx,ty,u){
-  const passable = passableFor(u);
-  const grid = new MapGrid(MAP_W, MAP_H, passable);
-  const astar = new AStarPathfinder(grid, { allowDiagonal:true });
+  const astar = astarFor(u);
   const gp = astar.findPath(Math.floor(sx/TILE), Math.floor(sy/TILE),
                             Math.floor(tx/TILE), Math.floor(ty/TILE));
   if(!gp) return null;
   const pts = gridToPixels(gp);
   if(pts.length>1) pts.shift();
-  return smoothPath(pts, passable);
+  return smoothPath(pts, passableFor(u));
+}
+
+// 脱困绕行:把附近友军/同盟单位当软障碍临时标记,重算一条绕开人群的路径。
+// 只有卡住重排时才调用(不进普通 pathCache,不参与流场统计),避免每帧全图重算。
+function pathForDetour(u, tx, ty){
+  const cols = MAP_W, rows = MAP_H;
+  const mask = passableMaskFor(u).slice();
+  const R = 240;
+  for(const v of units){
+    if(v===u || v.hp<=0 || v.fly || !isEnemy(u.team, v.team)) continue;
+    if(Math.abs(v.x-u.x) > R || Math.abs(v.y-u.y) > R) continue;
+    const fx = Math.cos(v.facing), fy = Math.sin(v.facing);
+    const off = v.colOff || 0, r = (v.colR||v.r||10) + 4;
+    const c1x = v.x, c1y = v.y, c2x = v.x - fx*off, c2y = v.y - fy*off;
+    const x0 = Math.max(0, Math.floor((Math.min(c1x,c2x)-r)/TILE));
+    const x1 = Math.min(cols-1, Math.floor((Math.max(c1x,c2x)+r)/TILE));
+    const y0 = Math.max(0, Math.floor((Math.min(c1y,c2y)-r)/TILE));
+    const y1 = Math.min(rows-1, Math.floor((Math.max(c1y,c2y)+r)/TILE));
+    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) mask[y*cols+x] = 0;
+  }
+  const fn = (x,y)=> x>=0 && y>=0 && x<MAP_W && y<MAP_H && mask[y*MAP_W+x]===1;
+  const grid = new MapGrid(cols, rows, null);
+  grid.mask = mask;
+  const astar = new AStarPathfinder(grid, {});
+  const gp = astar.findPath(Math.floor(u.x/TILE), Math.floor(u.y/TILE),
+                            Math.floor(tx/TILE), Math.floor(ty/TILE));
+  if(!gp) return null;
+  const pts = gridToPixels(gp);
+  if(pts.length>1) pts.shift();
+  return smoothPath(pts, fn);
 }
 
 // Compress the A* waypoint staircase into long straight segments when line is clear.
