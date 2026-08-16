@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>钢铁指挥</title>
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=216">
 </head>
 <body>
 <div id="wrap">
@@ -34,12 +34,28 @@
     <h3 id="airPanelTitle">机场部队</h3>
     <div id="airPanelList"></div>
   </div>
+  <div id="missionPanel" class="hidden">
+    <div class="mpBox">
+      <h2>任务模式</h2>
+      <p class="msub">选择任务地图开始防守任务</p>
+      <div class="mpTools">
+        <button onclick="refreshMissionMaps()">刷新</button>
+        <button onclick="scanMissionFolder()">扫描任务文件夹</button>
+        <button onclick="closeMissionPanel()">返回</button>
+      </div>
+      <label class="mpLabel" for="missionSelect">选择任务地图</label>
+      <select id="missionSelect" onchange="onMissionSelect(this.value)"></select>
+      <div id="missionInfo"></div>
+      <div class="mpStatus" id="missionStatus"></div>
+      <div class="ovbtns"><button id="missionStartBtn" onclick="startSelectedMission()">开始任务</button></div>
+    </div>
+  </div>
   <div id="landing">
     <div class="landBox">
       <h1>钢铁指挥</h1>
       <p class="msub">选择游戏模式</p>
       <button class="modeBtn" onclick="enterSkirmish()">遭遇战</button>
-      <button class="modeBtn" onclick="comingSoon()">任务模式</button>
+      <button class="modeBtn" onclick="openMissionPanel()">任务模式</button>
       <button class="modeBtn" onclick="comingSoon()">挑战模式</button>
       <div class="landBtns">
         <button id="helpBtn" onclick="openHelp()">帮助</button>
@@ -150,6 +166,10 @@
       </div>
       <div class="setLabel">音量 <span id="musicVolLabel">60</span></div>
       <input id="musicVolume" class="setVolume" type="range" min="0" max="100" value="60" oninput="setMusicVolume(this.value)">
+      <div class="setOption">
+        <span>高特效渲染</span>
+        <button id="highEffectsToggle" class="setToggle" type="button" onclick="toggleHighEffects()" aria-pressed="true">开启</button>
+      </div>
       <button class="setClose" onclick="closeSettings()">关闭</button>
     </div>
   </div>
@@ -176,23 +196,25 @@
     </div>
   </div>
 </div>
-<script src="map/index.js?v=191"></script>
-<script src="js/config.js?v=191"></script>
-<script src="js/state.js?v=191"></script>
-<script src="js/maps.js?v=191"></script>
-<script src="js/entities.js?v=191"></script>
-  <script src="js/map.js?v=191"></script>
-  <script src="js/astar.js?v=191"></script>
-  <script src="js/path.js?v=191"></script>
-  <script src="js/build.js?v=191"></script>
-  <script src="js/orders.js?v=191"></script>
-  <script src="js/ai.js?v=191"></script>
-  <script src="js/ui.js?v=191"></script>
-  <script src="js/input.js?v=191"></script>
-  <script src="js/update.js?v=191"></script>
-  <script src="js/render.js?v=191"></script>
-  <script src="js/menu.js?v=191"></script>
-  <script src="js/music.js?v=191"></script>
-  <script src="js/game.js?v=191"></script>
+<script src="map/index.js?v=216"></script>
+<script src="任务文件夹/index.js?v=216"></script>
+<script src="js/config.js?v=216"></script>
+<script src="js/state.js?v=216"></script>
+<script src="js/maps.js?v=216"></script>
+<script src="js/entities.js?v=216"></script>
+<script src="js/map.js?v=216"></script>
+<script src="js/astar.js?v=216"></script>
+<script src="js/path.js?v=216"></script>
+<script src="js/build.js?v=216"></script>
+<script src="js/orders.js?v=216"></script>
+<script src="js/ai.js?v=216"></script>
+<script src="js/ui.js?v=216"></script>
+<script src="js/input.js?v=216"></script>
+<script src="js/update.js?v=216"></script>
+<script src="js/render.js?v=216"></script>
+<script src="js/menu.js?v=216"></script>
+<script src="js/missions.js?v=216"></script>
+<script src="js/music.js?v=216"></script>
+<script src="js/game.js?v=216"></script>
 </body>
 </html>

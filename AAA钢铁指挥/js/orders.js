@@ -217,7 +217,7 @@ function giveOrder(ctrl){
       } else if(planeMission.remaining[type] > 0){
         planeMission.remaining[type]--;
         planeMission.assignments.push({target:tgt, type:type});
-        textPopup(tgt.x, tgt.y-20, '分配 '+(type==='aa'?'空对空':type==='ag'?'空对地':'GBU-31')+' 1 '+(type==='gbu'?'颗':'发')+' → 剩余 对空 '+planeMission.remaining.aa+' / 对地 '+planeMission.remaining.ag+(planeMission.remaining.gbu!==undefined?(' / 炸弹 '+planeMission.remaining.gbu):''), '#ffe27a');
+        textPopup(tgt.x, tgt.y-20, '分配 '+(type==='aa'?'空对空':type==='ag'?'空对地':'垂直炸弹')+' 1 '+(type==='gbu'?'颗':'发')+' → 剩余 对空 '+planeMission.remaining.aa+' / 对地 '+planeMission.remaining.ag+(planeMission.remaining.gbu!==undefined?(' / 炸弹 '+planeMission.remaining.gbu):''), '#ffe27a');
       } else {
         textPopup(tgt.x, tgt.y-20, (type==='aa'?'空对空':type==='ag'?'空对地':'垂直炸弹')+'已全部分配完','#ff8080');
       }
@@ -252,14 +252,18 @@ function giveOrder(ctrl){
   }
   if(!list.length && !selBuilding) return;
   const enemy = entityAt(mw.x, mw.y);
-  // 战斗机:右键己方机场 -> 返回入住(回到生产它的机场占停机位;直升机/无人机不受此影响)
+  // 战斗机:右键己方机场/航母 -> 返回入住(回到生产它的母港占停机位;直升机/无人机不受此影响)
   const planeList = list.filter(u=>u.fly && !u.chopper && u.type!=='drone');
-  if(planeList.length && enemy && enemy instanceof Building && enemy.alive && enemy.defName==='airfield' && enemy.team===TEAM_A){
+  const isOwnAirBase = (enemy && enemy.team===TEAM_A && (
+    (enemy instanceof Building && enemy.alive && enemy.defName==='airfield') ||
+    (enemy instanceof Unit && enemy.hp>0 && isCarrierShip(enemy))
+  ));
+  if(planeList.length && isOwnAirBase){
     let returned=0;
     for(const u of planeList){
-      // 母港还在则回原机场;母港被摧毁/出售则改投当前点击的新机场
-      const dest = (u.homeBase && u.homeBase.alive) ? u.homeBase : enemy;
-      if(dest && dest.alive && dest.defName==='airfield' && dest.team===TEAM_A){
+      // 母港还在则回原机场;母港被摧毁/出售则改投当前点击的新母港
+      const dest = (u.homeBase && airBaseAlive(u.homeBase)) ? u.homeBase : enemy;
+      if(airBaseAlive(dest) && dest.team===TEAM_A){
         u._returnBase = (dest===u.homeBase) ? null : dest;
         u._returning = true;
         u._mission = null;             // 打断进行中的规划任务

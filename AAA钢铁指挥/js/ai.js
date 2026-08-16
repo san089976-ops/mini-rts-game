@@ -191,6 +191,24 @@ function updateAI(dt, team){
   if(st.built.refinery && !aiHas(team,'refinery') && credits[team]>300) aiPlaceBuilding(team,'refinery');
   if(st.built.turret && aiCount(team,'turret')<2 && credits[team]>250) aiPlaceBuilding(team,'turret');
 
+  // === 残酷难度:抢占中立经济建筑(银行/油田/诈骗园区),只进驻不交战 ===
+  if(st.diff==='brutal'){
+    st._econGrabT = (st._econGrabT||0) - dt;
+    if(st._econGrabT <= 0){
+      st._econGrabT = rnd(2.5, 5);   // 节流,避免每帧全图扫描
+      const econ = buildings.find(b=>b.team<0 && b.alive &&
+        (b.def.incomePerSec||b.def.incomePerUnit) && garrisonUnitCount(b)===0);
+      if(econ){
+        // 找空闲步兵进驻(未被安排其他任务;多个经济建筑会逐步各派1名)
+        const inf = units.find(u=>u.team===team && u.hp>0 && u.type==='infantry'
+          && u.order.kind==='none' && canGarrisonBuild(econ, team, u.type));
+        if(inf){
+          inf.target=null; inf.order={kind:'garrison', target:econ}; inf.path=null;
+        }
+      }
+    }
+  }
+
   // === 训练 ===
   for(const b of buildings){
     if(b.team!==team||!b.alive||b.constructing) continue;
@@ -232,47 +250,57 @@ function updateAI(dt, team){
     const fac2 = buildings.find(b=>b.team===team && b.defName==='factory' && b.alive && !b.constructing && b.upgradeLvl===1 && !b.upgrading);
     if(fac2 && credits[team]>=FACTORY_UPGRADE_COST2) startUpgrade(fac2);
   }
-  // 三级坦克:艾布拉姆X(盟军)/ T14(苏军),需三级工厂(中等/残酷)
+  // 三级坦克(usa=艾布拉姆X / soviet=T14;欧洲/以色列无三级),需三级工厂(中等/残酷)
   if(time>170 && st.diff!=='easy'){
-    const t2 = unitFactionOf(team)==='allies' ? 'abramsx' : 't14';
-    let t2Fac=null, bestQ2=1e9;
-    for(const b of buildings){
-      if(b.team===team && b.defName==='factory' && b.alive && !b.constructing && b.upgradeLvl>=2 && !b.upgrading){
-        if(b.queue.length<bestQ2){ bestQ2=b.queue.length; t2Fac=b; }
+    const t2 = tier3UnitsFor(unitFactionOf(team))[0];
+    if(t2){
+      let t2Fac=null, bestQ2=1e9;
+      for(const b of buildings){
+        if(b.team===team && b.defName==='factory' && b.alive && !b.constructing && b.upgradeLvl>=2 && !b.upgrading){
+          if(b.queue.length<bestQ2){ bestQ2=b.queue.length; t2Fac=b; }
+        }
       }
-    }
-    if(t2Fac && bestQ2<st.queueDepth && canTrain(team,t2)){
-      const cur=(st.unitCounts[team] ? (st.unitCounts[team][t2]||0) : 0)+(st.queuedCounts[t2]||0);
-      if(cur < (st.diff==='brutal'?2:1) && credits[team]>=defs[t2].cost){
-        credits[team]-=defs[t2].cost;
-        t2Fac.queue.push({type:t2,progress:0});
-        st.queuedCounts[t2]=(st.queuedCounts[t2]||0)+1;
+      if(t2Fac && bestQ2<st.queueDepth && canTrain(team,t2)){
+        const cur=(st.unitCounts[team] ? (st.unitCounts[team][t2]||0) : 0)+(st.queuedCounts[t2]||0);
+        if(cur < (st.diff==='brutal'?2:1) && credits[team]>=defs[t2].cost){
+          credits[team]-=defs[t2].cost;
+          t2Fac.queue.push({type:t2,progress:0});
+          st.queuedCounts[t2]=(st.queuedCounts[t2]||0)+1;
+        }
       }
     }
   }
 
-  // === 新型步兵战车/主战坦克(升级工厂后,中等/残酷) ===
+  // === 新型步兵战车/主战坦克(升级工厂后,中等/残酷;按阵营选型) ===
   if(time>80 && st.diff!=='easy'){
-    const ifv = unitFactionOf(team)==='allies' ? 'bradley' : 'b11';
-    const ifvCur=(st.unitCounts[team] ? (st.unitCounts[team][ifv]||0) : 0)+(st.queuedCounts[ifv]||0);
-    if(upFac && ifvCur<2 && upFac.queue.length<st.queueDepth && canTrain(team, ifv)){
-      credits[team]-=defs[ifv].cost;
-      upFac.queue.push({type:ifv,progress:0});
-      st.queuedCounts[ifv]=(st.queuedCounts[ifv]||0)+1;
-    }
-    if(unitFactionOf(team)==='allies'){
-      const pumaCur=(st.unitCounts[team] ? (st.unitCounts[team]['puma']||0) : 0)+(st.queuedCounts['puma']||0);
-      if(upFac && pumaCur<2 && upFac.queue.length<st.queueDepth && canTrain(team,'puma')){
-        credits[team]-=defs['puma'].cost;
-        upFac.queue.push({type:'puma',progress:0});
-        st.queuedCounts['puma']=(st.queuedCounts['puma']||0)+1;
+    const fac=unitFactionOf(team);
+    const ifv = fac==='usa' ? 'bradley' : (fac==='europe' ? 'puma' : (fac==='soviet' ? 'b11' : (fac==='israel' ? 'namer' : null)));
+    if(ifv && defs[ifv]){
+      const ifvCur=(st.unitCounts[team] ? (st.unitCounts[team][ifv]||0) : 0)+(st.queuedCounts[ifv]||0);
+      if(upFac && ifvCur<2 && upFac.queue.length<st.queueDepth && canTrain(team, ifv)){
+        credits[team]-=defs[ifv].cost;
+        upFac.queue.push({type:ifv,progress:0});
+        st.queuedCounts[ifv]=(st.queuedCounts[ifv]||0)+1;
       }
-      const mbt='leopard';
+    }
+    // 欧洲额外造一辆挑战者(第二主战,区别于豹2);其它阵营不额外
+    if(fac==='europe'){
+      const mbt='challenger';
       const mbtCur=(st.unitCounts[team] ? (st.unitCounts[team][mbt]||0) : 0)+(st.queuedCounts[mbt]||0);
       if(upFac && mbtCur<2 && upFac.queue.length<st.queueDepth && canTrain(team, mbt)){
         credits[team]-=defs[mbt].cost;
         upFac.queue.push({type:mbt,progress:0});
         st.queuedCounts[mbt]=(st.queuedCounts[mbt]||0)+1;
+      }
+      // 豹1A5/酋长(欧洲 Lv1 工厂即可生产的次选主战):各造 1~2 辆
+      for(const t of ['leopard1a5','chieftain']){
+        if(!defs[t]) continue;
+        const tCur=(st.unitCounts[team] ? (st.unitCounts[team][t]||0) : 0)+(st.queuedCounts[t]||0);
+        if(upFac && tCur<2 && upFac.queue.length<st.queueDepth && canTrain(team, t)){
+          credits[team]-=defs[t].cost;
+          upFac.queue.push({type:t,progress:0});
+          st.queuedCounts[t]=(st.queuedCounts[t]||0)+1;
+        }
       }
     }
   }
@@ -344,12 +372,12 @@ function updateNavalAI(team, st, enemyBase, dt){
       const need = tr.capacity - usedCapacity(tr);
       if(need<=0) continue;
       const riders = units.filter(u=>u.team===team && u.hp>0 && !u.naval && u.type!=='harvester' &&
-        transportCost(u)>0 && !u._aiUnloaded && u.order.kind!=='load');
+        transportCostIn(tr,u)>0 && !u._aiUnloaded && u.order.kind!=='load');
       let loaded=0;
       for(const r of riders){
         if(loaded>=need) break;
         r.target=null; r.order={kind:'load', transport:tr}; r.path=null;
-        loaded+=transportCost(r);
+        loaded+=transportCostIn(tr,r);
       }
       if(loaded>0){ tr._aiTransport=true; tr._aiLoadT=0; tr._aiLoadWaitT=0; }
     }

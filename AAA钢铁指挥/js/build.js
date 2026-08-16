@@ -10,7 +10,7 @@ function canTrain(team, type){
   const d = getUnitDefs(unitFactionOf(team))[type];
   if(!d || d.cost > credits[team]) return false;
   // 高级单位:必须由已升级(1级)的战车工厂生产(升级 1→2 期间仍可生产)
-  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm' || type==='t72' || type==='t62' || type==='t80' || type==='merkava'){
+  if(type==='abrams' || type==='t90' || type==='mcv' || type==='bradley' || type==='b11' || type==='marder' || type==='leclerc' || type==='leopard' || type==='challenger' || type==='puma' || type==='t84bm' || type==='t72' || type==='t80' || type==='merkava' || type==='namer'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='factory' && b.upgradeLvl>=1);
   }
   // 三级工厂专属坦克(艾布拉姆X=盟军 / T14=苏军):必须由二次升级(2级)的战车工厂生产
@@ -21,10 +21,21 @@ function canTrain(team, type){
   if(type==='airfield_car'){
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='command' && b.upgraded && !b.upgrading);
   }
-  // 战斗机:必须由对应阵营的机场生产,且停机位未满
-  if(type==='f16' || type==='su35' || type==='f15'){
-    return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='airfield' &&
-      AIR_FACTION[type]===unitFactionOf(team) && airfieldUsedSlots(b) < AIRFIELD_CAPACITY);
+  // 航母(福特/库兹涅佐夫):必须由已升级(2级)的船坞生产,且阵营对应
+  if(isCarrierShipType(type)){
+    if(!getUnitDefs(unitFactionOf(team))[type]) return false;   // 该阵营没有此航母
+    return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='dock' && b.upgraded && !b.upgrading);
+  }
+  // 战斗机:必须由对应阵营的机场/航母生产,且停机位未满(F18 只能由航母生产)
+  if(type==='f16' || type==='su35' || type==='f15' || type==='f18' || type==='su35h'){
+    const d = getUnitDefs(unitFactionOf(team))[type];
+    if(!(d && d.carrierOnly)){   // carrierOnly(如 F18)机场不可生产
+      const af = buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='airfield' &&
+        airFactionOK(type, unitFactionOf(team)) && airfieldUsedSlots(b) < AIRFIELD_CAPACITY);
+      if(af) return true;
+    }
+    // 也可由对应阵营的航母生产(航母.train 含该型且停机位未满)
+    return units.some(c => isCarrierShip(c) && c.team===team && c.hp>0 && c.def.train && c.def.train.includes(type) && airfieldUsedSlots(c) < airBaseCapacity(c));
   }
   // 运输直升机(小鸟/UH-60/米17):由己方机场生产,不占战斗机停机位
   if(CHOPPER_TYPES.indexOf(type)!==-1){
@@ -32,12 +43,19 @@ function canTrain(team, type){
   }
   // 高级步兵:必须由已升级的兵营训练
   if(type==='exo' || type==='magnet'){
+    if(!getUnitDefs(unitFactionOf(team))[type]) return false;   // 该阵营没有此高级步兵
     return buildings.some(b => b.team===team && b.alive && !b.constructing && b.defName==='barracks' && b.upgraded && !b.upgrading);
   }
+  if(!getUnitDefs(unitFactionOf(team))[type]) return false;   // 阵营单位表里没有该单位
   return buildings.some(b => b.team===team && b.alive && !b.constructing && b.def.train && b.def.train.includes(type));
 }
 function advancedTankType(team){
-  return unitFactionOf(team)==='allies' ? 'abrams' : 't90';
+  switch(unitFactionOf(team)){
+    case 'usa': return 'abrams';
+    case 'europe': return 'leopard';
+    case 'israel': return 'merkava';
+    default: return 't90';   // soviet
+  }
 }
 // 累计实体升级/安装投入(用于"本体+投入"总价显示与出售全额返还)
 function addInvested(ent, cost){ ent.invested = (ent.invested||0) + cost; }
@@ -51,7 +69,7 @@ function startUpgrade(b){
   credits[b.team] -= cost;
   addInvested(b, cost);
   b.upgrading = true; b.upgradeProg = 0;
-  textPopup(b.x,b.y-20, b.upgradeLvl===0 ? '战车工厂升级中' : '战车工厂二次升级中','#ffe27a');
+  textPopup(b.x,b.y-20, b.upgradeLvl===0 ? '战车工厂升级中 (Lv1→Lv2)' : '战车工厂升级中 (Lv2→Lv3)','#ffe27a');
   updatePanel();
   return true;
 }
@@ -78,6 +96,20 @@ function startBarracksUpgrade(b){
   addInvested(b, BARRAX_UPGRADE_COST);
   b.upgrading = true; b.upgradeProg = 0;
   textPopup(b.x,b.y-20,'兵营升级中','#ffe27a');
+  updatePanel();
+  return true;
+}
+/* ============ 船坞升级(2级船坞:血量+200,解锁航母生产) ============ */
+function startDockUpgrade(b){
+  if(!b || b.defName!=='dock' || b.constructing || b.upgrading || b.upgraded) return;
+  if(credits[b.team] < DOCK_UPGRADE_COST){
+    textPopup(b.x,b.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[b.team] -= DOCK_UPGRADE_COST;
+  addInvested(b, DOCK_UPGRADE_COST);
+  b.upgrading = true; b.upgradeProg = 0;
+  textPopup(b.x,b.y-20,'船坞升级中','#ffe27a');
   updatePanel();
   return true;
 }
@@ -387,24 +419,57 @@ function airfieldUsedSlots(b){
 function tryTrain(defName){
   const d=getUnitDefs(playerFaction)[defName];
   if(!d) return;
-  // 战斗机:先检查停机位(所有机场都满则提示,不再进入生产建筑查找流程)
+  // 战斗机:停机位检查——各基地(机场/航母)完全独立,互不转移
   if(isAircraftType(defName)){
-    let anyAf=null, hasRoom=false;
+    // 明确选中基地:只在该基地生产;该基地已满就直接拒绝,绝不自动转到其他基地
+    if(selBuilding && selBuilding.team===TEAM_A && selBuilding.alive && !selBuilding.constructing && selBuilding.defName==='airfield'){
+      const cOnly = (getUnitDefs(playerFaction)[defName]||{}).carrierOnly;
+      if(!cOnly && airFactionOK(defName, unitFactionOf(TEAM_A))){
+        if(airfieldUsedSlots(selBuilding) >= AIRFIELD_CAPACITY){
+          textPopup(selBuilding.x,selBuilding.y-20,'停机位已满,无法再生产','#ff8080');
+          return;
+        }
+      }
+    }
+    const selCar = selected.find(c=>isCarrierShip(c) && c.team===TEAM_A && c.hp>0 && c.def.train && c.def.train.includes(defName));
+    if(selCar){
+      if(airfieldUsedSlots(selCar) >= airBaseCapacity(selCar)){
+        textPopup(selCar.x,selCar.y-20,'停机位已满,无法再生产','#ff8080');
+        return;
+      }
+    }
+    // 兜底检查:全图确实没有任何基地有空位时才提示(有选中基地时上面已提前 return)
+    const cOnly = (getUnitDefs(playerFaction)[defName]||{}).carrierOnly;
+    let anySrc=null, hasRoom=false;
     for(const b of buildings){
       if(b.team===TEAM_A && b.alive && !b.constructing && b.defName==='airfield'){
-        if(!anyAf) anyAf=b;
+        if(cOnly) continue;   // 仅航母生产的机型,机场不算空位
+        if(!anySrc) anySrc=b;
         if(airfieldUsedSlots(b) < AIRFIELD_CAPACITY){ hasRoom=true; break; }
       }
     }
-    if(anyAf && !hasRoom){
-      textPopup(anyAf.x,anyAf.y-20,'机场停机位已满 ('+airfieldUsedSlots(anyAf)+'/'+AIRFIELD_CAPACITY+')','#ff8080');
+    if(!hasRoom){
+      for(const c of units){
+        if(isCarrierShip(c) && c.team===TEAM_A && c.hp>0 && c.def.train && c.def.train.includes(defName)){
+          if(!anySrc) anySrc=c;
+          if(airfieldUsedSlots(c) < airBaseCapacity(c)){ hasRoom=true; break; }
+        }
+      }
+    }
+    if(anySrc && !hasRoom){
+      textPopup(anySrc.x,anySrc.y-20,'停机位已满','#ff8080');
       return;
     }
   }
   let bld = null;
-  // 在哪里下订单就在哪里生产:优先排入当前选中的生产建筑(多兵营/多工厂时各自独立)
+  // 在哪里下订单就在哪里生产:优先排入当前选中的生产建筑/航母(多兵营/多工厂时各自独立)
   if(selBuilding && selBuilding.team===TEAM_A && selBuilding.alive && !selBuilding.constructing){
     if(canProduceIn(selBuilding, defName)) bld = selBuilding;
+  }
+  if(!bld){
+    // 选中航母:可直接在其上生产其 train 中的机型
+    const car = selected.find(c=>isCarrierShip(c) && c.team===TEAM_A && c.hp>0 && canProduceIn(c, defName));
+    if(car) bld = car;
   }
   if(!bld) bld = prodBuildingFor(TEAM_A, defName);
   if(!bld){
@@ -420,17 +485,28 @@ function tryTrain(defName){
 // 该建筑能否生产该单位
 function canProduceIn(b, defName){
   if(!b || !b.alive || b.constructing) return false;
-  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm' || defName==='t72' || defName==='t80' || defName==='merkava'){
+  if(defName==='abrams' || defName==='t90' || defName==='mcv' || defName==='bradley' || defName==='b11' || defName==='marder' || defName==='leclerc' || defName==='leopard' || defName==='challenger' || defName==='puma' || defName==='t84bm' || defName==='t72' || defName==='t80' || defName==='merkava' || defName==='namer'){
+    if(!getUnitDefs(unitFactionOf(b.team))[defName]) return false;   // 阵营单位表里没有该坦克
     return b.defName==='factory' && b.upgradeLvl>=1;   // 升级 1→2 期间仍可生产高级单位
   }
   if(defName==='abramsx' || defName==='t14'){
+    if(!getUnitDefs(unitFactionOf(b.team))[defName]) return false;   // 阵营单位表里没有该三级坦克
     return b.defName==='factory' && b.upgradeLvl>=2 && !b.upgrading;
   }
   if(defName==='airfield_car'){
     return b.defName==='command' && b.upgraded && !b.upgrading;
   }
-  if(defName==='f16' || defName==='su35' || defName==='f15'){
-    return b.defName==='airfield' && AIR_FACTION[defName]===unitFactionOf(b.team) && airfieldUsedSlots(b) < AIRFIELD_CAPACITY;
+  if(isCarrierShipType(defName)){
+    if(!getUnitDefs(unitFactionOf(b.team))[defName]) return false;   // 该阵营没有此航母
+    return b.defName==='dock' && b.upgraded && !b.upgrading;   // 航母:2级船坞
+  }
+  if(defName==='f16' || defName==='su35' || defName==='f15' || defName==='f18' || defName==='su35h'){
+    // 机场生产(停机位未满;carrierOnly 机型如 F18 机场不可生产)
+    if(!(getUnitDefs(unitFactionOf(b.team))[defName] || {}).carrierOnly &&
+       b.defName==='airfield' && airFactionOK(defName, unitFactionOf(b.team)) && airfieldUsedSlots(b) < AIRFIELD_CAPACITY) return true;
+    // 航母生产:航母本身是 Unit,可产其 def.train 中的机型(停机位未满)
+    if(isCarrierShip(b) && b.def.train && b.def.train.includes(defName) && airfieldUsedSlots(b) < airBaseCapacity(b)) return true;
+    return false;
   }
   if(CHOPPER_TYPES.indexOf(defName)!==-1){
     return b.defName==='airfield';
@@ -438,11 +514,15 @@ function canProduceIn(b, defName){
   if(defName==='exo' || defName==='magnet'){
     return b.defName==='barracks' && b.upgraded && !b.upgrading;
   }
+  if(!getUnitDefs(unitFactionOf(b.team))[defName]) return false;   // 阵营单位表里没有该单位
   return b.def.train && b.def.train.includes(defName);
 }
-// 查找任意能生产该单位的建筑
+// 查找任意能生产该单位的建筑/航母
 function prodBuildingFor(team, defName){
-  return buildings.find(b=>b.team===team && canProduceIn(b, defName));
+  const b=buildings.find(b=>b.team===team && canProduceIn(b, defName));
+  if(b) return b;
+  // 航母:可生产其 train 中机型的单位(停机位未满)
+  return units.find(c=>isCarrierShip(c) && c.team===team && c.hp>0 && canProduceIn(c, defName));
 }
 function moveToRally(u, rally){
   u.order={kind:'move', x:rally.x, y:rally.y};
@@ -457,6 +537,18 @@ function cancelProduction(b){
   const refund=d?d.cost:0;
   credits[TEAM_A]+=refund;
   textPopup(b.x,b.y-20,'取消 '+(d?d.name:'单位')+' +$'+refund,'#ffe27a');
+  updatePanel();
+  return true;
+}
+// 取消航母上的飞机生产:只取消队列末尾,全额退款
+function cancelCarrierProduction(c){
+  if(!c || !isCarrierShip(c) || c.hp<=0 || c.team!==TEAM_A || !c.queue || !c.queue.length) return false;
+  const it=c.queue.pop();
+  const fac=unitFactionOf(c.team);
+  const d=getUnitDefs(fac)[it.type];
+  const refund=d?d.cost:0;
+  credits[TEAM_A]+=refund;
+  textPopup(c.x,c.y-20,'取消 '+(d?d.name:'单位')+' +$'+refund,'#ffe27a');
   updatePanel();
   return true;
 }
@@ -583,16 +675,16 @@ function startATGMAttach(u){
   updatePanel();
   return true;
 }
-/* ============ 自主防御系统(艾布拉姆 / T72BVM 专属升级包):反 TOW 导弹,自动拦截 ============ */
+/* ============ 自主防御系统(艾布拉姆 / T72BVM / 布拉德利 升级包):反 TOW 导弹,自动拦截 ============ */
 function startAPSUpgrade(u){
   if(!u || APS_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.apsUpgrading || u.aps) return;
   if(u.type==='t72' && u.upgradeLvl<2) return;   // T72 仅 T72BVM 档可装自主防御
-  if(credits[u.team] < APS_COST){
+  if(credits[u.team] < apsCostFor(u)){
     textPopup(u.x,u.y-20,'资金不足','#ff8080');
     return;
   }
-  credits[u.team]-=APS_COST;
-  addInvested(u, APS_COST);
+  credits[u.team]-=apsCostFor(u);
+  addInvested(u, apsCostFor(u));
   u.apsUpgrading=true; u.apsProg=0;
   textPopup(u.x,u.y-20,'自主防御系统 安装中','#ffe27a');
   updatePanel();
@@ -639,32 +731,33 @@ function startCoatUpgrade(u){
   updatePanel();
   return true;
 }
-/* ============ F-15 武器挂载点安装(A-120c / A-174b / GBU-31,每点一份) ============ */
+/* ============ F-15 / F/A-18 / 苏-35 武器挂载点安装(空对空 / 空对地 / 垂直炸弹 / 咆哮者干扰仓,每点一份) ============ */
 function startHardpointUpgrade(u, slotIdx, kind){
-  if(!u || u.type!=='f15' || u.hp<=0 || !u.hardpoints) return;
+  if(!u || !u.hardpoints || u.hp<=0) return;
   if(!(slotIdx>=0 && slotIdx<F15_HP_COUNT)) return;
   const hp = u.hardpoints[slotIdx];
   if(hp) return;                       // 已装或安装中,不可重复挂载
-  if(kind!=='aa' && kind!=='ag' && kind!=='gbu') return;
-  const cost = kind==='gbu' ? GBU31_COST : (kind==='aa' ? AA_COST : AG_COST);
+  if(kind!=='aa' && kind!=='ag' && kind!=='gbu' && kind!=='growler') return;
+  if(kind==='growler' && !isGrowlerUnit(u)) return;   // 咆哮者干扰仓仅 F/A-18 专属
+  const cost = kind==='growler' ? GROWLER_COST : (kind==='gbu' ? GBU31_COST : (kind==='aa' ? AA_COST : AG_COST));
   if(credits[u.team] < cost){ textPopup(u.x,u.y-20,'资金不足','#ff8080'); return; }
   credits[u.team]-=cost;
   addInvested(u, cost);
   u.hardpoints[slotIdx] = {kind:kind, upgrading:true, prog:0};
   u.hpSel = null;   // 安装后退出挂载点选择态
-  textPopup(u.x,u.y-20,(kind==='gbu'?'GBU-31':(kind==='aa'?airAAName(u):airAGName(u)))+' 挂载中','#ffe27a');
+  textPopup(u.x,u.y-20,(kind==='growler'?'咆哮者干扰仓':(kind==='gbu'?airBombName(u):(kind==='aa'?airAAName(u):airAGName(u))))+' 挂载中','#ffe27a');
   updatePanel();
   return true;
 }
-/* ============ T84BM 反应装甲模块:300 盾,每秒恢复 10 ============ */
+/* ============ 反应装甲模块(T84BM 300盾回10 / 布拉德利 150盾回5) ============ */
 function startRarmUpgrade(u){
   if(!u || RARM_TYPES.indexOf(u.type)===-1 || u.hp<=0 || u.rarmUpgrading || u.rarm) return;
-  if(credits[u.team] < RARM_COST){
+  if(credits[u.team] < rarmCostFor(u)){
     textPopup(u.x,u.y-20,'资金不足','#ff8080');
     return;
   }
-  credits[u.team]-=RARM_COST;
-  addInvested(u, RARM_COST);
+  credits[u.team]-=rarmCostFor(u);
+  addInvested(u, rarmCostFor(u));
   u.rarmUpgrading=true; u.rarmProg=0;
   textPopup(u.x,u.y-20,'反应装甲 安装中','#ffe27a');
   updatePanel();
@@ -709,6 +802,20 @@ function startGunUpgrade(u){
   addInvested(u, GUN_COST);
   u.gunUpgrading=true; u.gunUpProg=0;
   textPopup(u.x,u.y-20,'火炮升级 安装中','#ffe27a');
+  updatePanel();
+  return true;
+}
+/* ============ M60A3 升级包(盟军 M60 专属:250金/11秒,血量+270至600 射程+22 伤害+27,换 M60A3 外观) ============ */
+function startM60A3Upgrade(u){
+  if(!u || !isM60A3Unit(u) || u.hp<=0 || u.m60a3Upgrading || u.m60a3) return;
+  if(credits[u.team] < M60A3_COST){
+    textPopup(u.x,u.y-20,'资金不足','#ff8080');
+    return;
+  }
+  credits[u.team]-=M60A3_COST;
+  addInvested(u, M60A3_COST);
+  u.m60a3Upgrading=true; u.m60a3Prog=0;
+  textPopup(u.x,u.y-20,'M60A3 升级包 安装中','#ffe27a');
   updatePanel();
   return true;
 }

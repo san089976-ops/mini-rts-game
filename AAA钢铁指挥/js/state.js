@@ -28,8 +28,9 @@ let researches = {};          // 每队已研发科技: team -> {techId:true}
 let controlGroups = {};       // 数字编队: digit(1-9) -> [units]
 let airSortieSel = new Set(); // 机场出击规划:已勾选的号位飞机 uid 集合(选中机场面板操作)
 let planeMission = null;      // 进行中的出击规划: {mode:'precision'|'distributed', uids:[...], remaining:{aa,ag}, assignments:[{target,type}]}
+let airBatchSel = new Set();  // 右侧飞机栏「选择全部同类」:已批量选中的机型 type 集合(跨航母/机场全图)
 // 队伍配置(游戏开始前由主菜单生成)
-let teamFactions = ['allies','soviet'];   // team -> 'allies'|'soviet'
+let teamFactions = ['usa','soviet'];   // team -> 'usa'|'europe'|'israel'|'soviet'
 let teamGroups = [0,1];                   // team -> 组号 0(A)/1(B)/2(C)/3(D)
 let teamColors = [6,3];                   // team -> TEAM_COLORS 下标
 let gameTeams = [];                       // [{name,faction,group,ai,spawn:[x,y]}]
@@ -42,6 +43,27 @@ let mmRect = null;            // 小地图屏幕矩形(缓存,resize 时刷新)
 const GRID_C = 64;            // 空间网格单元尺寸(像素)
 let GRID_COLS = Math.ceil(W / GRID_C);   // 网格横向单元数(用作 key 乘法,setMapSize 时更新)
 let grid = null;              // 每帧重建的空间网格:cellKey -> [unitIndex]
+
+/* ============ 战场状态统一清理:开新局 / 返回主菜单时清掉全部残留 ============ */
+function resetBattlefield(){
+  units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[];
+  missiles=[]; interceptors=[]; trackMarks=[];
+  selected=[]; selBuilding=null; selectedBlds=[]; placing=null;
+  selling=false;
+  paused=false;
+  keys={};
+  mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false; mouse.middleDown=false;
+  gameOver=null; overTimer=0; time=0;
+  aiState={}; researches={};
+  controlGroups={};
+  airSortieSel=new Set(); planeMission=null; airBatchSel=new Set();
+  powerInfo={}; grid=null;
+  terrainCache=null; mmTerrainCache=null; terrainCacheKey=''; mmTerrainKey='';
+  oreFields=[]; oreGrid=[]; terrain=[]; blocked=[]; structBlocked=[];
+  shake=0; panelT=0; mmRect=null;
+  const pauseOv=document.getElementById && document.getElementById('pauseOv');
+  if(pauseOv) pauseOv.classList.remove('show');
+}
 
 /* ================= 工具 ================= */
 const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);

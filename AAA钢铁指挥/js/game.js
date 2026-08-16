@@ -1,15 +1,12 @@
 "use strict";
 /* ============ game.js: 游戏流程与主循环 ============ */
 function setupGame(){
-  units=[]; buildings=[]; projectiles=[]; effects=[]; texts=[]; selected=[]; selBuilding=null; selectedBlds=[]; placing=null;
-  missiles=[]; interceptors=[];
-  trackMarks=[];
-  paused=false;
-  if(selling) setSelling(false);
-  keys={};
-  mouse.down=false; mouse.dragging=false; mouse.downOnCanvas=false; mouse.mmDown=false; mouse.middleDown=false;
-  document.getElementById('pauseOv').classList.remove('show');
-  gameOver=null; overTimer=0; time=0;
+  resetBattlefield();
+  if(gameSetup && gameSetup.mode === 'mission'){
+    missionState = { nextWave:0, retargetT:1.2 };
+  } else {
+    missionState = null;
+  }
   document.getElementById('overlay').classList.remove('show');
   // 同步队伍数组与资金
   teamFactions = gameTeams.map(t=>t.faction);
@@ -17,9 +14,6 @@ function setupGame(){
   teamColors = gameTeams.map(t=>t.color!==undefined ? t.color : (t.group===0?6:3));
   playerFaction = teamFactions[0];
   credits = gameTeams.map((t,i)=> i===0 ? ((t.startMoney!==undefined ? t.startMoney : 10000)) : 3500);
-  researches = {};
-  for(let i=0;i<gameTeams.length;i++) researches[i] = {};
-  controlGroups = {};   // 每局清空数字编队
   genTerrain();
   resetPathCache();
   // 布置所有队伍:自制地图按保存的数据放建筑/单位;其余地图出生点上方空地生成初始单位
@@ -35,9 +29,12 @@ function setupGame(){
       units.push(new Unit('harvester',i,(bx+2)*TILE+TILE/2,(by-1)*TILE+TILE/2));
     }
   }
-  // 兜底:有出生点但该队没有建造厂时自动补一个
-  ensureTeamCommands();
+  // 兜底:有出生点但该队没有建造厂时自动补一个(任务模式故意不补建造厂)
+  if(gameSetup.mode !== 'mission') ensureTeamCommands();
   initAI();
+  if(gameSetup.mode === 'mission' && typeof setupMissionPlacements === 'function'){
+    setupMissionPlacements(gameSetup.map);
+  }
   updatePanel();
   const [bx0,by0] = gameTeams[0].spawn;
   centerOn(bx0*TILE, by0*TILE);
@@ -47,15 +44,26 @@ function restartGame(){
   setupGame();
 }
 function startGame(){
+  // 遭遇战必须从任务模式的地图和任务状态中脱离后再读取菜单配置。
+  clearMissionMode();
   gameSetup = buildGameSetup();
+  gameSetup.mode = 'skirmish';
   gameTeams = gameSetup.teams;
   document.getElementById('menu').classList.add('hidden');
   setupGame();
 }
 function showMenu(){
+  clearMissionMode();
+  resetBattlefield();
+  genTerrain();   // 回到菜单时按遭遇战当前地图重建尺寸/地形,避免旧任务地图残留
   document.getElementById('overlay').classList.remove('show');
+  document.getElementById('pauseOv').classList.remove('show');
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('landing').classList.remove('hidden');
+  document.getElementById('missionPanel').classList.remove('show');
+  document.getElementById('missionPanel').classList.add('hidden');
+  paused = false;
+  cam.x = 0; cam.y = 0;
 }
 
 /* ================= 主循环 ================= */
@@ -141,6 +149,7 @@ window.addEventListener('load', async ()=>{
   ]);
   if(loadOv) loadOv.style.display='none';
   initMusic();               // 背景音乐(4 首循环,设置里可调音量,0=静音)
+  initHighEffects();
   resize();
   window.addEventListener('resize',resize);
   setupInput();

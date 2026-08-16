@@ -23,6 +23,7 @@ const MAPS = [
 
 // 当前选中的地图(主菜单选择):自制地图(map 文件夹)或内置地图
 function currentMap(){
+  if(gameSetup && gameSetup.mode === 'mission' && gameSetup.map) return gameSetup.map;
   const c = menuState ? menuState.mapChoice : null;
   if(c && c.kind==='custom'){
     const list = window.CUSTOM_MAPS || [];

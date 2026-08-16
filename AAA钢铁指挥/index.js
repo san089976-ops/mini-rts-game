@@ -1,0 +1,1 @@
+window.CUSTOM_MAPS_INDEX=[];

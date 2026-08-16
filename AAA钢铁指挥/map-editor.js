@@ -13,9 +13,9 @@ const EDIT = {
   painting: false,
   dirHandle: null,
 };
-const UNIT_TYPES = ['infantry','tank','harvester','mcv','airfield_car','exo','magnet','abrams','t90','destroyer','transport','bradley','b11','marder','leclerc','leopard','challenger','puma','f16','su35','t84bm','t72','t62','t80','merkava','littlebird','abramsx','t14','drone','uh60','mi17'];
+const UNIT_TYPES = ['infantry','tank','harvester','mcv','airfield_car','exo','magnet','abrams','t90','destroyer','transport','bradley','b11','marder','leclerc','leopard','challenger','puma','leopard1a5','chieftain','namer','f16','su35','f15','f18','su35h','t84bm','t72','t62','t80','merkava','littlebird','abramsx','t14','drone','uh60','mi17','ford','kuznetsov'];
 
-const UNIT_LABEL = { infantry:'步兵', tank:'坦克', harvester:'矿车', mcv:'基地车', airfield_car:'机场建筑车', exo:'外骨骼', magnet:'磁暴', abrams:'艾布拉姆', t90:'T90', destroyer:'驱逐舰', transport:'运输艇', bradley:'布拉德利', b11:'俄制B11', marder:'黄鼠狼', leclerc:'勒克莱尔', leopard:'豹2A4', challenger:'挑战者', puma:'美洲狮', f16:'F-16', su35:'苏-27', t84bm:'T84BM', t72:'T72', t62:'T62', t80:'T80', merkava:'梅卡瓦', littlebird:'小鸟直升机', abramsx:'艾布拉姆X', t14:'T14', drone:'弹簧刀无人机', uh60:'UH-60', mi17:'米17' };
+const UNIT_LABEL = { infantry:'步兵', tank:'坦克', harvester:'矿车', mcv:'基地车', airfield_car:'机场建筑车', exo:'外骨骼', magnet:'磁暴', abrams:'艾布拉姆', t90:'T90', destroyer:'驱逐舰', transport:'运输艇', bradley:'布拉德利', b11:'俄制B11', marder:'黄鼠狼', leclerc:'勒克莱尔', leopard:'豹2A4', challenger:'挑战者', puma:'美洲狮', leopard1a5:'豹1A5', chieftain:'酋长', namer:'雌虎', f16:'F-16', su35:'苏-27', f15:'F-15', f18:'F/A-18', su35h:'苏-35', t84bm:'T84BM', t72:'T72', t62:'T62', t80:'T80', merkava:'梅卡瓦', littlebird:'小鸟直升机', abramsx:'艾布拉姆X', t14:'T14', drone:'弹簧刀无人机', uh60:'UH-60', mi17:'米17', ford:'福特号航母', kuznetsov:'库兹涅佐夫号' };
 let cv, g, ctx, selOverlay;
 
 function $(id){ return document.getElementById(id); }
@@ -58,11 +58,15 @@ function render(){
     const c = m.terrain[x][y];
     drawCell(x,y,c);
   }
-  // 网格线
-  g.strokeStyle='rgba(255,255,255,.08)'; g.lineWidth=1;
+  // 战术地图网格:细网格帮助定位,每4格增加一条主网格。
+  g.strokeStyle='rgba(126,211,213,.10)'; g.lineWidth=1;
   g.beginPath();
   for(let x=0;x<=m.width;x++){ g.moveTo(x*cell+0.5,0); g.lineTo(x*cell+0.5,m.height*cell); }
   for(let y=0;y<=m.height;y++){ g.moveTo(0,y*cell+0.5); g.lineTo(m.width*cell,y*cell+0.5); }
+  g.stroke();
+  g.strokeStyle='rgba(57,215,223,.28)'; g.lineWidth=1.4; g.beginPath();
+  for(let x=0;x<=m.width;x+=4){ g.moveTo(x*cell+0.5,0); g.lineTo(x*cell+0.5,m.height*cell); }
+  for(let y=0;y<=m.height;y+=4){ g.moveTo(0,y*cell+0.5); g.lineTo(m.width*cell,y*cell+0.5); }
   g.stroke();
   // 金矿
   for(const o of m.ores){
@@ -78,10 +82,12 @@ function render(){
     const d=BLD_DEFS[b.def];
     if(!d) continue;
     const px=b.tx*cell, py=b.ty*cell, pw=d.w*cell, ph=d.h*cell;
-    g.fillStyle='rgba(0,0,0,.25)'; g.fillRect(px+2,py+2,pw,ph);
-    g.fillStyle = teamHex(b.team) || d.color;
+    const relation = b.team<0 ? '#b4a77c' : (b.team===0 ? '#39d7df' : '#ef7068');
+    g.fillStyle='rgba(0,0,0,.35)'; g.fillRect(px+3,py+3,pw,ph);
+    g.fillStyle = relation;
     g.fillRect(px,py,pw,ph);
-    g.strokeStyle='rgba(0,0,0,.5)'; g.lineWidth=1; g.strokeRect(px+0.5,py+0.5,pw-1,ph-1);
+    g.strokeStyle=teamHex(b.team)||relation; g.lineWidth=2; g.strokeRect(px+0.5,py+0.5,pw-1,ph-1);
+    g.fillStyle='rgba(5,16,20,.55)'; g.fillRect(px+2,py+2,Math.max(4,pw-4),Math.min(4,ph-4));
     g.fillStyle='#fff'; g.font='bold '+(cell*0.5)+'px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle';
     const label = (d.w>=2&&d.h>=2) ? d.name : (d.name||d.def).charAt(0);
     g.fillText(label, px+pw/2, py+ph/2);
@@ -93,10 +99,11 @@ function render(){
   for(let i=0;i<m.units.length;i++){
     const u=m.units[i];
     const px=(u.x+0.5)*cell, py=(u.y+0.5)*cell;
-    g.fillStyle='rgba(0,0,0,.35)'; g.beginPath(); g.arc(px+1,py+1,cell*0.34,0,Math.PI*2); g.fill();
-    g.fillStyle=teamHex(u.team)||'#4f8ff0';
+    const relation = u.team<0 ? '#b4a77c' : (u.team===0 ? '#39d7df' : '#ef7068');
+    g.fillStyle='rgba(0,0,0,.4)'; g.beginPath(); g.arc(px+2,py+2,cell*0.37,0,Math.PI*2); g.fill();
+    g.fillStyle=relation;
     g.beginPath(); g.arc(px,py,cell*0.34,0,Math.PI*2); g.fill();
-    g.strokeStyle='rgba(0,0,0,.5)'; g.lineWidth=1; g.stroke();
+    g.strokeStyle=teamHex(u.team)||relation; g.lineWidth=2; g.stroke();
     g.fillStyle='#fff'; g.font='bold '+(cell*0.38)+'px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle';
     g.fillText((UNIT_LABEL[u.type]||u.type).charAt(0), px, py);
     g.font='bold '+(cell*0.3)+'px sans-serif';
@@ -106,8 +113,8 @@ function render(){
   for(let i=0;i<m.spawns.length;i++){
     const s=m.spawns[i]; if(!s) continue;
     const px=(s[0]+0.5)*cell, py=(s[1]+0.5)*cell;
-    g.fillStyle='rgba(0,0,0,.5)'; g.beginPath(); g.arc(px+1,py+1,cell*0.45,0,Math.PI*2); g.fill();
-    g.fillStyle=teamHex(i)||'#ffffff';
+    g.fillStyle='rgba(0,0,0,.55)'; g.beginPath(); g.arc(px+2,py+2,cell*0.48,0,Math.PI*2); g.fill();
+    g.fillStyle=teamHex(i)||'#39d7df';
     g.beginPath(); g.arc(px,py,cell*0.45,0,Math.PI*2); g.fill();
     g.strokeStyle='#fff'; g.lineWidth=2; g.stroke();
     g.fillStyle='#000'; g.font='bold '+(cell*0.5)+'px sans-serif'; g.textAlign='center'; g.textBaseline='middle';
@@ -116,7 +123,7 @@ function render(){
   }
   // 选中高亮
   if(EDIT.sel){
-    g.strokeStyle='#ffe27a'; g.lineWidth=2;
+    g.strokeStyle='#f0fffb'; g.lineWidth=2;
     if(EDIT.sel.kind==='building'){
       const b=m.buildings[EDIT.sel.idx]; if(b){ const d=BLD_DEFS[b.def];
         g.strokeRect(b.tx*cell-2, b.ty*cell-2, d.w*cell+4, d.h*cell+4); }
@@ -131,15 +138,15 @@ function render(){
 function drawCell(x,y,c){
   const cell=EDIT.cell*EDIT.zoom, px=x*cell, py=y*cell;
   if(c==='water'){
-    g.fillStyle='#2a5a8a'; g.fillRect(px,py,cell,cell);
-    g.fillStyle='rgba(255,255,255,.10)'; g.fillRect(px,py,cell,cell*0.35);
+    g.fillStyle='#174b63'; g.fillRect(px,py,cell,cell);
+    g.fillStyle='rgba(126,211,213,.14)'; g.fillRect(px,py,cell,cell*0.28);
   } else if(c==='tree'){
-    g.fillStyle='#3f8a4e'; g.fillRect(px,py,cell,cell);
-    g.fillStyle='#4a3018'; g.fillRect(px+cell*0.44,py+cell*0.5,cell*0.12,cell*0.3);
-    g.fillStyle='#2f7a3a'; g.beginPath(); g.arc(px+cell*0.5,py+cell*0.4,cell*0.28,0,Math.PI*2); g.fill();
+    g.fillStyle='#1c3b36'; g.fillRect(px,py,cell,cell);
+    g.fillStyle='#654c3a'; g.fillRect(px+cell*0.44,py+cell*0.5,cell*0.12,cell*0.3);
+    g.fillStyle='#28624f'; g.beginPath(); g.arc(px+cell*0.5,py+cell*0.4,cell*0.28,0,Math.PI*2); g.fill();
   } else {
-    g.fillStyle='#4a9a5a'; g.fillRect(px,py,cell,cell);
-    g.fillStyle='rgba(0,0,0,.05)';
+    g.fillStyle='#26352f'; g.fillRect(px,py,cell,cell);
+    g.fillStyle='rgba(126,211,213,.035)';
     if((x*7+y*13)%4===0) g.fillRect(px,py,cell,cell);
   }
 }

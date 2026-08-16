@@ -22,6 +22,11 @@ class Unit {
     this.naval = !!d.naval;        // 只能在水中航行
     this.amphib = !!d.amphib;      // 陆海两栖
     this.fly = !!d.fly;            // 空军单位:飞越一切地形,移动/碰撞/渲染按飞行处理
+    // 航母(移动机场):海军单位,自带生产队列与停机位,生产战斗机停驻其上
+    if(d.carrierShip){
+      this.queue = [];             // 航母自身的飞机生产队列(与建筑的 queue 同构)
+      this.carrierSlots = d.slots || 0;   // 停机位容量(福特6/库兹涅佐夫4)
+    }
     // 小鸟直升机:机身+旋翼运输直升机,落地/升空双模式(升空才 fly=true,落地可被地面打)
     this.chopper = !!d.chopper;
     if(this.chopper) this.fly = false;   // 默认在地面(升空后 updateChopper 置 true)
@@ -41,10 +46,11 @@ class Unit {
     this.aaAmmo = 0; this.aaCd = 0;                               // A-120c 弹舱/冷却
     this.ag = false; this.agUpgrading = false; this.agProg = 0;   // A-174b 已装/安装中/进度
     this.agAmmo = 0; this.agCd = 0;                               // A-174b 弹舱/冷却
-    // F-15 重型战斗机:4 个武器挂载点,每点可挂 A-120c / A-174b / GBU-31
-    this.hardpoints = (type==='f15') ? [null,null,null,null] : null;  // 每槽 {kind:'aa'|'ag'|'gbu', upgrading, prog}
+    // F-15 / F/A-18 / 苏-35:4 个武器挂载点,每点可挂 A-120c(或R37m) / A-174b(或Kh29) / 垂直炸弹(GBU-31或MK-1000) / 咆哮者干扰仓(F-18专属,被动区域干扰)
+    this.hardpoints = (type==='f15' || type==='f18' || type==='su35h') ? [null,null,null,null] : null;  // 每槽 {kind:'aa'|'ag'|'gbu'|'growler', upgrading, prog}
     this.hpSel = null;                                                // 挂载点 UI 选择态:正在选择武器的槽位(0~3),null=未选择
     this.gbu = false; this.gbuAmmo = 0;                          // GBU31 已装(任一挂点)/总炸弹数
+    this.growler = false;                                          // 咆哮者干扰仓已装(任一挂点,由 f15RecalcAmmo 派生;无弹药,被动光环)
     this.bombing = false;                                         // 正在连续投弹
     this.bombReleaseCount = 1;                                    // 每次投弹颗数(1↔2 切换)
     this.bombCd = 0;                                              // 两颗炸弹之间倒计时
@@ -65,6 +71,8 @@ class Unit {
     // 艾布拉姆专属升级包:TUSK(300盾回15 + 换 M1A2TUSK 外观) / 火炮升级(+15伤+15射程)
     this.tusk = false; this.tuskUpgrading = false; this.tuskProg = 0;
     this.gunUp = false; this.gunUpgrading = false; this.gunUpProg = 0;
+    // M60A3 升级包(盟军 M60 专属:250金/11秒,血量+270至600 射程+22 伤害+27,换 M60A3 外观)
+    this.m60a3 = false; this.m60a3Upgrading = false; this.m60a3Prog = 0;
     this.crushTrees = crushesTrees(type);   // 重型单位可碾倒树林(坦克/两栖登陆艇等)
     // 艾布拉姆X:携带弹簧刀无人机(1 发,释放后每 DRONE_RELOAD 秒填装)
     this.droneAmmo = (d.droneSlots||0) > 0 ? 1 : 0;   // 当前可用无人机数(0/1)
@@ -78,6 +86,7 @@ class Unit {
     this.order = { kind:'none' };
     this.path = null; this.pathIdx = 0; this.repathT = 0;
     this.fireT = 0;
+    this.garrisoned = false;   // 已进驻建筑(从 units 移除,免疫外部攻击)
     // 速度与转向平滑:避免单位贴在一起时抖动/鬼畜
     this.vx = 0; this.vy = 0;              // 当前实际速度(像素/秒)
     this.wantVx = 0; this.wantVy = 0;      // 期望速度(来自寻路/追击)

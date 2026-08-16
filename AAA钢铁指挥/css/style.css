@@ -84,6 +84,10 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 }
 .airRow .airbtn:hover { background:#ffef9a; }
 .airRow .airbtn.disabled { background:#3a423c; color:#9a9a9a; border-color:#2a3430; cursor:default; }
+/* 「选择全部同类」批量选中高亮 */
+.airRow .airbtn.batchOn { background:#2f9a4a; border-color:#5ee07a; color:#fff; }
+.airRow .airbtn.batchOn:hover { background:#3ab85c; }
+.airPlanState.batchBanner { border:1px dashed #5ee07a; background:rgba(47,154,74,.12); padding:4px 6px; border-radius:4px; }
 /* ===== 出击规划(精确打击/分布式攻击) ===== */
 .airPlan { border-top:1px dashed #4a6a5a; margin-top:6px; padding-top:6px; }
 .airPlanTitle { font-size:12px; color:#ffe27a; font-weight:bold; margin-bottom:4px; }
@@ -150,9 +154,11 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 #teamRows { display:flex; flex-direction:column; gap:9px; }
 .trow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .trow .tname { width:54px; color:#9fd0b0; font-size:12px; }
-.facBtn { padding:4px 10px; font-size:12px; background:#2c3c32; color:#d8f0e0; border:1px solid #4a6a5a; border-radius:6px; cursor:pointer; }
+.facBtn { padding:3px 8px; font-size:12px; background:#2c3c32; color:#d8f0e0; border:1px solid #4a6a5a; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+.facBtn .facImg { width:20px; height:20px; border-radius:50%; background-size:cover; background-position:center; background-color:#1a241e; box-shadow:0 0 0 1px rgba(255,255,255,.12); display:inline-block; }
 .facBtn:hover { border-color:#7ac88a; }
 .facBtn.sel { background:#3a7a4a; border-color:#7ac88a; color:#fff; }
+.facBtn.sel .facImg { box-shadow:0 0 0 1px #8aff8a; }
 .allyBtn { padding:4px 10px; font-size:12px; border-radius:6px; cursor:pointer; border:1px solid #5a4a4a; background:#3a2a2a; color:#ffb0a0; }
 .allyBtn.ally { border-color:#4a8a5a; background:#2a4a34; color:#8aff8a; }
 /* 分组 A/B/C/D */
@@ -278,6 +284,18 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 .setBox .setLabel { text-align:center; color:#9fd0b0; font-size:13px; letter-spacing:3px; margin-top:-4px; }
 .setBox .trackRow { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
 .setBox .setVolume { width:100%; margin:4px 0 14px; accent-color:#7ac88a; cursor:pointer; }
+.setOption {
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  color:#cfe8d8; font-size:14px; letter-spacing:2px;
+  padding:10px 0 4px; border-top:1px solid rgba(122,200,138,.22);
+}
+.setToggle {
+  min-width:88px; padding:8px 14px; font-size:13px; letter-spacing:2px;
+  background:linear-gradient(#3a7a4a,#2a5a3a); color:#fff;
+  border:1px solid #7ac88a; border-radius:7px; cursor:pointer;
+}
+.setToggle.off { background:linear-gradient(#3a4240,#262d2b); border-color:#65716b; color:#a7b5ad; }
+.setToggle:hover { border-color:#b5f0c0; }
 .setBox .setRow {
   padding:12px 16px; font-size:15px; letter-spacing:2px;
   background:linear-gradient(#2c3c32,#1a241e); color:#d8f0e0;
@@ -342,6 +360,58 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 }
 #landing #helpBtn:hover, #landing #settingsBtn:hover { border-color:#7ac88a; color:#fff; box-shadow:0 0 14px rgba(120,200,140,.45); }
 #landing .mfoot { color:#6f8f7f; font-size:12px; letter-spacing:1px; margin-top:4px; }
+/* ===== mission panel ===== */
+#missionPanel {
+  position:absolute; inset:0; z-index:75;
+  display:none; align-items:center; justify-content:center;
+  background:rgba(5,10,7,.78);
+}
+#missionPanel.show { display:flex; }
+#missionPanel.hidden { display:none; }
+.mpBox {
+  width:520px; max-width:94%; max-height:86%;
+  background:linear-gradient(#22303a,#141b20);
+  border:2px solid #4a6a5a; border-radius:12px;
+  padding:24px 28px; color:#cfe8d8; font-size:13px;
+  display:flex; flex-direction:column; gap:14px;
+  box-shadow:0 10px 34px rgba(0,0,0,.65);
+  overflow-y:auto;
+}
+.mpBox h2 { text-align:center; color:#ffe27a; letter-spacing:6px; font-size:22px; }
+.mpBox .msub { text-align:center; color:#9fc0ac; font-size:12px; }
+.mpTools { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+.mpTools button {
+  padding:8px 18px; font-size:13px; letter-spacing:2px; cursor:pointer;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a;
+  color:#fff; border-radius:8px;
+}
+.mpTools button:hover { background:linear-gradient(#5ab06a,#3a7a4a); }
+.mpLabel { color:#9fd0b0; font-size:12px; letter-spacing:2px; }
+#missionSelect {
+  width:100%; padding:10px 12px; font-size:14px; cursor:pointer;
+  background:#1c2822; color:#ffe27a;
+  border:2px solid #3a5a4a; border-radius:8px;
+}
+#missionSelect:focus { outline:none; border-color:#7ac88a; }
+#missionInfo {
+  min-height:150px; max-height:300px; overflow-y:auto;
+  border:1px solid #3a5a4a; border-radius:8px;
+  background:rgba(0,0,0,.28); padding:12px 14px;
+  line-height:1.65;
+}
+.mpName { font-size:17px; font-weight:bold; color:#ffe27a; margin-bottom:4px; }
+.mpStat { font-size:12px; color:#9fc0ac; margin-bottom:6px; }
+.mpDesc { font-size:12px; color:#b8d4c4; margin-bottom:8px; }
+.mpWaves { font-size:12px; color:#cfe8d8; }
+.mpStatus { min-height:16px; text-align:center; color:#8aff8a; font-size:12px; }
+.mpEmpty { color:#9fc0ac; font-size:12px; line-height:1.8; text-align:center; padding:18px 10px; }
+.mpBox .ovbtns { justify-content:center; }
+.mpBox #missionStartBtn {
+  width:240px; padding:11px 0; font-size:16px; letter-spacing:4px;
+  background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a;
+  color:#fff; border-radius:10px; cursor:pointer;
+}
+.mpBox #missionStartBtn:hover { background:linear-gradient(#5ab06a,#3a7a4a); box-shadow:0 0 14px rgba(120,220,140,.5); }
 /* ===== 敬请期待弹层 ===== */
 #soonOv {
   position:absolute; inset:0; background:rgba(0,0,0,.62); z-index:90;
@@ -360,3 +430,470 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
   background:linear-gradient(#4a9a5a,#2f6a3f); border:2px solid #7ac88a; color:#fff; border-radius:10px; cursor:pointer;
 }
 .soonBox button:hover { background:linear-gradient(#5ab06a,#3a7a4a); }
+
+/* ===== 现代 RTS 指挥终端视觉层 ===== */
+:root {
+  --ui-ink:#080e12;
+  --ui-deep:#0d151a;
+  --ui-panel:#121d23;
+  --ui-panel-2:#18262d;
+  --ui-panel-3:#20323a;
+  --ui-line:#2d444d;
+  --ui-line-hi:#4d7078;
+  --ui-text:#d9e7e5;
+  --ui-muted:#81969a;
+  --ui-cyan:#7bd5d4;
+  --ui-cyan-strong:#29bac3;
+  --ui-amber:#efbd63;
+  --ui-green:#72d19b;
+  --ui-red:#ed7772;
+  --ui-shadow:0 16px 42px rgba(0,0,0,.48), 0 2px 8px rgba(0,0,0,.36);
+}
+
+html, body {
+  background:var(--ui-ink);
+  color:var(--ui-text);
+  font-family:"Microsoft YaHei", "Noto Sans SC", sans-serif;
+  letter-spacing:.2px;
+}
+button, select, input { font-family:inherit; }
+button { transition:background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
+
+/* 让主界面有战术地图般的细网格，不增加额外 DOM */
+#landing::before, #menu::before, #missionPanel::before, #mapBrowser::before,
+#settingsOv::before, #helpOv::before, #soonOv::before, #overlay::before, #pauseOv::before {
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  opacity:.28;
+  background-image:
+    linear-gradient(rgba(123,213,212,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(123,213,212,.045) 1px, transparent 1px);
+  background-size:32px 32px;
+  mask-image:linear-gradient(to bottom, rgba(0,0,0,.9), transparent 88%);
+}
+
+#loadingOv {
+  background:#080e12;
+  color:var(--ui-text);
+}
+#loadingOv .loadBox {
+  position:relative;
+  width:390px;
+  padding:28px 30px 24px;
+  border:1px solid var(--ui-line-hi);
+  border-left:3px solid var(--ui-cyan-strong);
+  background:rgba(18,29,35,.94);
+  box-shadow:var(--ui-shadow);
+  text-align:left;
+}
+#loadingOv .loadBox::before {
+  content:"SYSTEM INITIALIZING";
+  display:block;
+  color:var(--ui-cyan);
+  font:600 10px/1.2 Consolas, monospace;
+  letter-spacing:2px;
+  margin-bottom:15px;
+}
+#loadingOv h1 {
+  color:var(--ui-text);
+  font-size:34px;
+  letter-spacing:8px;
+  text-shadow:none;
+  margin-bottom:8px;
+}
+#loadingOv .msub { color:var(--ui-muted); letter-spacing:1px; }
+.loadBar { height:8px; border:1px solid var(--ui-line); border-radius:0; background:#091015; margin:20px 0 7px; }
+#loadBarFill { background:var(--ui-cyan-strong); box-shadow:0 0 14px rgba(41,186,195,.65); }
+#loadPct { color:var(--ui-amber); letter-spacing:1px; }
+
+#hud {
+  height:150px;
+  padding:7px 12px 8px;
+  gap:12px;
+  background:linear-gradient(180deg, rgba(19,31,38,.98), rgba(9,15,19,.99));
+  border-top:1px solid var(--ui-line-hi);
+  box-shadow:0 -12px 28px rgba(0,0,0,.22);
+  color:var(--ui-text);
+}
+#stats {
+  min-width:184px;
+  align-self:stretch;
+  padding:10px 11px;
+  border:1px solid var(--ui-line);
+  border-top:2px solid var(--ui-cyan-strong);
+  background:rgba(13,22,27,.76);
+}
+#stats .row { justify-content:space-between; gap:12px; margin-bottom:7px; color:var(--ui-muted); font-size:12px; }
+#stats b { color:var(--ui-amber); font:600 13px Consolas, monospace; }
+#stats #power { color:var(--ui-green); }
+#stats #fps { color:var(--ui-cyan); }
+#hud .sep { width:1px; height:104px; background:var(--ui-line); border-radius:0; }
+#selinfo {
+  width:254px;
+  min-height:104px;
+  padding:8px 10px;
+  border:1px solid var(--ui-line);
+  border-top:2px solid var(--ui-amber);
+  background:rgba(13,22,27,.72);
+  color:var(--ui-text);
+}
+#selinfo .t { color:var(--ui-amber); font-size:13px; letter-spacing:1px; }
+.selimg { width:50px; height:50px; border:1px solid var(--ui-line-hi); border-radius:2px; background:#081014; }
+.statrow { color:var(--ui-muted); }
+.statrow b { color:var(--ui-cyan); }
+.hpbar { height:5px; border:0; border-radius:0; background:#071014; }
+.hpbar i { background:var(--ui-green); }
+.hpbar i.warn { background:var(--ui-amber); }
+.hpbar i.danger { background:var(--ui-red); }
+.udesc { color:var(--ui-muted); }
+#panel { gap:6px; align-content:center; }
+.btn {
+  width:82px;
+  height:72px;
+  border:1px solid var(--ui-line);
+  border-radius:2px;
+  background:linear-gradient(180deg, #1a2a31, #101a20);
+  color:var(--ui-text);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055), 0 2px 5px rgba(0,0,0,.28);
+}
+.btn:hover {
+  background:linear-gradient(180deg, #233b43, #14252c);
+  border-color:var(--ui-cyan-strong);
+  box-shadow:0 0 0 1px rgba(41,186,195,.15), 0 0 16px rgba(41,186,195,.2);
+}
+.btn:active { transform:translateY(1px); }
+.btn.disabled { opacity:.34; filter:saturate(.55); }
+.btn .icon { width:42px; height:40px; border:1px solid var(--ui-line); border-radius:1px; background:#0a1419; color:var(--ui-muted); }
+.btn .iconImg { display:block; width:100%; height:100%; object-fit:contain; }
+.btn .cost { color:var(--ui-amber); font-family:Consolas, monospace; }
+.btn .small { color:var(--ui-muted); }
+.btn .cnt { color:var(--ui-cyan); font-family:Consolas, monospace; }
+.btn .num { color:var(--ui-cyan); background:#081014; border:1px solid var(--ui-line); border-radius:1px; }
+#powerBadge { color:var(--ui-red); font-size:11px; }
+#minimap {
+  right:12px;
+  top:12px;
+  width:224px;
+  height:168px;
+  border:1px solid var(--ui-cyan-strong);
+  background:#071116;
+  box-shadow:0 0 0 1px rgba(57,215,223,.14), 0 8px 22px rgba(0,0,0,.5);
+}
+
+#sellBtn {
+  right:12px;
+  top:188px;
+  width:120px;
+  padding:8px 0;
+  background:#291a1c;
+  color:#f3a39a;
+  border:1px solid #824a4d;
+  border-radius:2px;
+  box-shadow:0 4px 16px rgba(0,0,0,.28);
+}
+#sellBtn:hover { background:#422326; border-color:var(--ui-red); }
+#sellBtn.active { background:#692d31; border-color:#ff8c82; box-shadow:0 0 16px rgba(237,119,114,.32); }
+
+/* 机场与计划面板 */
+#airPanel {
+  right:12px;
+  top:225px;
+  width:248px;
+  max-height:calc(100vh - 460px);
+  padding:12px;
+  background:rgba(13,22,27,.97);
+  border:1px solid var(--ui-line-hi);
+  border-top:2px solid var(--ui-cyan-strong);
+  border-radius:2px;
+  box-shadow:var(--ui-shadow);
+  color:var(--ui-text);
+}
+#airPanel h3 { color:var(--ui-cyan); font-size:13px; letter-spacing:2px; }
+#airPanelList { gap:6px; }
+.airRow { padding:8px 9px; border:1px solid var(--ui-line); border-radius:1px; background:#142129; }
+.airRow .airName { color:var(--ui-amber); }
+.airRow .airTag, .airRow .airStat { color:var(--ui-muted); }
+.airRow .airhp { height:3px; border-radius:0; background:#081014; }
+.airRow .airhp i { background:var(--ui-green); }
+.airRow .airbtn {
+  padding:5px 0;
+  color:#071014;
+  background:var(--ui-cyan);
+  border:1px solid #a6f0ed;
+  border-radius:1px;
+}
+.airRow .airbtn:hover { background:#a6f0ed; }
+.airRow .airbtn.disabled { background:#29363a; color:#718083; border-color:#3a4b50; }
+.airRow .airbtn.batchOn { background:var(--ui-green); border-color:#b0f1ca; }
+.airPlan { border-top:1px dashed var(--ui-line-hi); }
+.airPlanTitle { color:var(--ui-cyan); }
+.airSlot { border:1px solid var(--ui-line); border-radius:1px; background:#0e1a20; color:var(--ui-text); }
+.airSlot:hover { background:#1d333b; }
+.airSlot.sel { background:#176e73; border-color:var(--ui-cyan); color:#fff; }
+.airSlot .slotTip { color:var(--ui-muted); }
+.airPlanState { color:var(--ui-muted); }
+.airPlanState.batchBanner { border-color:var(--ui-green); background:rgba(114,209,155,.1); border-radius:1px; }
+
+/* 胜负与暂停层 */
+#overlay, #pauseOv { background:rgba(4,8,11,.78); backdrop-filter:blur(5px); }
+#overlay h1 { color:var(--ui-amber); font-size:48px; text-shadow:0 3px 18px #000; letter-spacing:5px; }
+#overlay h2 { color:var(--ui-text); font-size:18px; }
+#overlay button, #pauseOv button {
+  padding:11px 36px;
+  font-size:16px;
+  letter-spacing:2px;
+  background:var(--ui-cyan-strong);
+  border:1px solid #8ce9e8;
+  color:#061014;
+  border-radius:2px;
+  box-shadow:0 5px 18px rgba(0,0,0,.35);
+}
+#overlay button:hover, #pauseOv button:hover { background:var(--ui-cyan); }
+#pauseOv h1 { color:var(--ui-amber); font-size:48px; text-shadow:0 3px 18px #000; letter-spacing:6px; }
+
+/* 主菜单与遭遇战配置页 */
+#landing, #menu {
+  background:#091116;
+  color:var(--ui-text);
+}
+#landing::after, #menu::after {
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:radial-gradient(ellipse at 50% 45%, rgba(38,93,98,.18), transparent 58%);
+}
+.landBox { position:relative; z-index:1; align-items:stretch; width:360px; gap:0; }
+#landing h1, #menu h1 {
+  color:var(--ui-text);
+  font-size:52px;
+  font-weight:600;
+  letter-spacing:9px;
+  text-shadow:0 3px 20px rgba(0,0,0,.65);
+  text-align:center;
+}
+#landing h1::after, #menu h1::after {
+  content:"";
+  display:block;
+  width:70px;
+  height:2px;
+  margin:14px auto 17px;
+  background:var(--ui-cyan-strong);
+  box-shadow:0 0 12px rgba(41,186,195,.55);
+}
+#landing .msub, #menu .msub { color:var(--ui-muted); font-size:12px; letter-spacing:3px; text-align:center; }
+.modeBtn {
+  position:relative;
+  width:360px;
+  margin-top:10px;
+  padding:15px 24px;
+  text-align:left;
+  font-size:17px;
+  letter-spacing:3px;
+  background:#14242b;
+  border:1px solid var(--ui-line);
+  border-left:3px solid var(--ui-line-hi);
+  color:var(--ui-text);
+  border-radius:1px;
+  box-shadow:0 6px 14px rgba(0,0,0,.2);
+}
+.modeBtn::after {
+  content:"›";
+  position:absolute;
+  right:18px;
+  color:var(--ui-muted);
+  font-size:22px;
+  line-height:1;
+}
+.modeBtn:hover { background:#1c343c; border-color:var(--ui-cyan); border-left-color:var(--ui-cyan-strong); color:#fff; box-shadow:0 0 18px rgba(41,186,195,.16); }
+.landBtns { gap:8px; margin-top:18px; justify-content:center; }
+#landing #helpBtn, #landing #settingsBtn {
+  padding:8px 24px;
+  font-size:12px;
+  letter-spacing:2px;
+  background:transparent;
+  border:1px solid var(--ui-line);
+  color:var(--ui-muted);
+  border-radius:1px;
+}
+#landing #helpBtn:hover, #landing #settingsBtn:hover { border-color:var(--ui-cyan); color:var(--ui-text); box-shadow:none; }
+#landing .mfoot, #menu .mfoot { color:#5e7378; font-size:11px; text-align:center; letter-spacing:1px; }
+
+#menu { align-items:center; justify-content:flex-start; padding:34px 24px 24px; gap:12px; overflow-y:auto; }
+#menu h1 { font-size:38px; }
+#menu .mcols {
+  position:relative;
+  z-index:1;
+  display:grid;
+  grid-template-columns:minmax(230px, 1fr) minmax(390px, 1.55fr) minmax(280px, 1.05fr);
+  width:min(1180px, 100%);
+  gap:18px;
+  margin-top:12px;
+  align-items:start;
+}
+#menu .mcol {
+  min-width:0;
+  padding:14px;
+  border:1px solid var(--ui-line);
+  border-top:2px solid var(--ui-line-hi);
+  background:rgba(13,22,27,.76);
+}
+#menu .mcol h2 { text-align:left; margin-bottom:13px; color:var(--ui-cyan); font-size:13px; letter-spacing:3px; }
+.mapcard, .card {
+  width:100%;
+  padding:13px 14px;
+  margin-bottom:8px;
+  border:1px solid var(--ui-line);
+  border-radius:1px;
+  background:#14242b;
+  box-shadow:none;
+}
+.mapcard:hover, .card:hover { border-color:var(--ui-cyan); transform:none; background:#1b3038; }
+.mapcard.sel, .card.sel { border-color:var(--ui-amber); box-shadow:0 0 0 1px rgba(239,189,99,.18); background:#263039; transform:none; }
+.mapcard .mname { color:var(--ui-amber); font-size:15px; letter-spacing:1px; }
+.mapcard .mdesc, .card .cmini { color:var(--ui-muted); }
+#mapPrev { width:100%; max-width:520px; height:auto; aspect-ratio:4/3; border:1px solid var(--ui-line-hi); border-radius:1px; background:#081014; }
+#menu .prevcol { position:relative; }
+#menu .prevcol::after { content:"TACTICAL OVERVIEW"; display:block; margin-top:7px; color:var(--ui-cyan); font:10px Consolas,monospace; letter-spacing:2px; text-align:right; }
+.facBtn, .grpBtn, .ddTrig, .spawnBtn, .ddOpt {
+  background:#14242b;
+  color:var(--ui-text);
+  border:1px solid var(--ui-line);
+  border-radius:1px;
+}
+.facBtn:hover, .grpBtn:hover, .ddTrig:hover, .spawnBtn:hover, .ddOpt:hover { border-color:var(--ui-cyan); background:#1d333b; }
+.facBtn.sel, .grpBtn.sel, .spawnBtn.sel, .ddOpt.sel { background:#176e73; border-color:var(--ui-cyan); color:#fff; }
+.allyBtn { border-radius:1px; background:#2a1d21; border-color:#704449; color:#eeaaa2; }
+.allyBtn.ally { border-color:#477e66; background:#17372f; color:var(--ui-green); }
+.ddList { background:#0f1b21; border:1px solid var(--ui-line-hi); border-radius:1px; box-shadow:var(--ui-shadow); }
+.ddTrig .ddCaret { color:var(--ui-muted); }
+.teamHint { color:#657a7e; }
+#moneyRow { color:var(--ui-amber); }
+.mapcol .setRow {
+  display:block;
+  width:100%;
+  margin:4px 0;
+  padding:8px 10px;
+  text-align:left;
+  font-size:12px;
+  letter-spacing:1px;
+  background:#14242b;
+  color:var(--ui-text);
+  border:1px solid var(--ui-line);
+  border-radius:1px;
+  cursor:pointer;
+}
+.mapcol .setRow:hover { background:#1d333b; border-color:var(--ui-cyan); color:#fff; }
+#startBtn {
+  position:relative;
+  z-index:1;
+  min-width:280px;
+  padding:14px 42px;
+  font-size:17px;
+  letter-spacing:3px;
+  background:var(--ui-cyan-strong);
+  border:1px solid #8ce9e8;
+  color:#061014;
+  border-radius:1px;
+  box-shadow:0 8px 22px rgba(0,0,0,.35);
+}
+#startBtn:hover { background:var(--ui-cyan); box-shadow:0 0 18px rgba(41,186,195,.24); }
+
+/* 任务、帮助、设置、地图浏览弹窗 */
+#missionPanel, #mapBrowser, #settingsOv, #helpOv, #soonOv { background:rgba(4,8,11,.76); backdrop-filter:blur(5px); }
+.mpBox, .mapBrowserBox, .setBox, .helpBox, .soonBox {
+  position:relative;
+  z-index:1;
+  background:#101b21;
+  border:1px solid var(--ui-line-hi);
+  border-top:2px solid var(--ui-cyan-strong);
+  border-radius:1px;
+  box-shadow:var(--ui-shadow);
+  color:var(--ui-text);
+}
+.mpBox { width:560px; padding:22px 24px; }
+.mpBox h2, .mapBrowserBox h2, .setBox h2, .helpBox h2, .soonBox h2 { color:var(--ui-text); letter-spacing:4px; text-shadow:none; }
+.mpBox .msub, .mapBrowserBox .msub { color:var(--ui-muted); }
+.mpTools button, .ovrow button, .setBox .setRow, .setBox .setClose, .helpBox #helpBackBtn, .soonBox button {
+  background:#14242b;
+  border:1px solid var(--ui-line);
+  border-radius:1px;
+  color:var(--ui-text);
+}
+.mpTools button:hover, .ovrow button:hover, .setBox .setRow:hover, .setBox .setClose:hover, .helpBox #helpBackBtn:hover, .soonBox button:hover {
+  background:#1d333b;
+  border-color:var(--ui-cyan);
+  color:#fff;
+  box-shadow:0 0 14px rgba(41,186,195,.16);
+}
+.mpLabel, .setBox .setLabel { color:var(--ui-cyan); }
+#missionSelect { background:#0b151a; color:var(--ui-text); border:1px solid var(--ui-line-hi); border-radius:1px; }
+#missionSelect:focus { border-color:var(--ui-cyan); }
+#missionInfo, #mapFileList { border:1px solid var(--ui-line); border-radius:1px; background:#0b151a; }
+.mpName { color:var(--ui-amber); }
+.mpStat, .mpDesc, .mpEmpty, .ovrow .ovnote { color:var(--ui-muted); }
+.mpWaves { color:var(--ui-text); }
+.mpStatus { color:var(--ui-green); }
+.mpBox #missionStartBtn {
+  width:240px;
+  padding:12px 0;
+  font-size:16px;
+  letter-spacing:3px;
+  background:var(--ui-cyan-strong);
+  border:1px solid #8ce9e8;
+  color:#061014;
+  border-radius:1px;
+  cursor:pointer;
+  box-shadow:0 6px 18px rgba(0,0,0,.32);
+}
+.mpBox #missionStartBtn:hover { background:var(--ui-cyan); border-color:#b5f7f4; box-shadow:0 0 18px rgba(41,186,195,.24); }
+.mapFileRow { border:1px solid var(--ui-line); border-radius:1px; background:#14242b; color:var(--ui-text); }
+.mapFileRow:hover { border-color:var(--ui-cyan); }
+.mapFileRow.sel { border-color:var(--ui-amber); background:#263039; box-shadow:none; }
+.mapSep { color:#5e7378; }
+.setBox .trackRow { gap:5px; }
+.setBox .setRow.sel { background:#176e73; border-color:var(--ui-cyan); box-shadow:none; }
+.setBox .setVolume { accent-color:var(--ui-cyan-strong); }
+.helpBox { width:720px; }
+.helpContent b { color:var(--ui-amber); }
+.helpContent hr { border-top-color:var(--ui-line); }
+.helpBox #helpBackBtn { color:var(--ui-text); }
+#verBadge {
+  right:12px !important;
+  bottom:160px !important;
+  padding:4px 8px !important;
+  font:10px Consolas, monospace !important;
+  letter-spacing:1px !important;
+  color:var(--ui-muted) !important;
+  background:rgba(9,17,22,.9) !important;
+  border:1px solid var(--ui-line) !important;
+  border-radius:1px !important;
+}
+
+/* 小屏幕：底部工具栏与弹窗保持可用 */
+@media (max-width:900px) {
+  #hud { gap:7px; padding-left:7px; padding-right:7px; }
+  #stats { min-width:148px; padding:8px; }
+  #selinfo { width:205px; }
+  .btn { width:72px; height:70px; }
+  #menu .mcols { grid-template-columns:1fr; max-width:560px; }
+  #menu .mcol { width:100%; }
+  #menu { padding-top:20px; }
+}
+@media (max-width:640px) {
+  #hud { height:150px; align-items:flex-start; overflow-x:auto; overflow-y:hidden; }
+  #stats { min-width:142px; }
+  #selinfo { min-width:195px; }
+  #panel { flex-wrap:nowrap; min-width:max-content; }
+  #minimap { right:7px; top:7px; transform:scale(.78); transform-origin:top right; }
+  #sellBtn { right:7px; top:166px; width:96px; font-size:12px; }
+  .landBox { width:min(360px, calc(100vw - 34px)); }
+  .modeBtn { width:100%; }
+  #landing h1 { font-size:40px; letter-spacing:6px; }
+  #menu h1 { font-size:30px; letter-spacing:5px; }
+  .mpBox, .mapBrowserBox, .setBox, .helpBox, .soonBox { max-width:calc(100% - 24px); padding:18px; }
+  .setBox .trackRow { grid-template-columns:repeat(2,1fr); }
+  .helpBox { max-height:90%; }
+}

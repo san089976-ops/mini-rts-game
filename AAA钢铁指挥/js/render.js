@@ -11,6 +11,10 @@ function render(){
   const shx=(Math.random()-0.5)*shake, shy=(Math.random()-0.5)*shake;
   ctx.translate(-cam.x+shx,-cam.y+shy);
   drawTerrain();
+  if(highEffectsEnabled){
+    drawHighWaterEffects();
+    drawHighSunlightEffects();
+  }
   drawCloudShadows();
   drawOre();
   drawTrackMarks();
@@ -58,7 +62,8 @@ function coastTileFor(x, y, v){
 function drawTerrainTileTo(g, x, y){
   const px=x*TILE, py=y*TILE;
   const v=tileVariation(x,y);
-  const t=terrain[x][y];
+  const row=terrain[x]; if(!row) return;
+  const t=row[y]; if(!t) return;
   if(t==='water'){
     const wtile=waterTiles[(x*11+y*7+v)%WATER_TILE_COUNT];
     if(wtile){ g.drawImage(wtile, px, py, TILE, TILE); }
@@ -132,7 +137,8 @@ function drawTerrain(){
   for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++){
     const px=x*TILE, py=y*TILE;
     const v=tileVariation(x,y);
-    const t=terrain[x][y];
+    const row=terrain[x]; if(!row) continue;
+    const t=row[y]; if(!t) continue;
     if(t==='water'){
       // 水域:照片水块随机平铺(每格固定一块);加载失败回退纯色水面
       const wtile=waterTiles[(x*11+y*7+v)%WATER_TILE_COUNT];
@@ -198,7 +204,7 @@ function drawTerrain(){
   for(const b of buildings){ if(b.alive && b.defName==='command'){ drawOwnZone(b); } }
 }
 function drawOwnZone(b){
-  ctx.strokeStyle = teamGroup(b.team)===0?'rgba(120,255,160,.12)':'rgba(255,120,120,.12)';
+  ctx.strokeStyle = tacticalTeamRGBA(b.team,.12);
   ctx.lineWidth=8;
   ctx.strokeRect(b.x-160, b.y-160, 320, 320);
   ctx.lineWidth=1;
@@ -219,6 +225,74 @@ function drawCloudShadows(){
     g.addColorStop(1,'rgba(20,30,25,0)');
     ctx.fillStyle=g;
     ctx.beginPath(); ctx.ellipse(cl.x,cl.y,cl.r,cl.r*0.55,0,0,Math.PI*2); ctx.fill();
+    if(highEffectsEnabled){
+      const soft=ctx.createRadialGradient(cl.x-cl.r*.16,cl.y-cl.r*.12,8,cl.x,cl.y,cl.r*.82);
+      soft.addColorStop(0,'rgba(245,250,244,.045)');
+      soft.addColorStop(1,'rgba(245,250,244,0)');
+      ctx.fillStyle=soft;
+      ctx.beginPath(); ctx.ellipse(cl.x,cl.y,cl.r*.92,cl.r*.48,0.05,0,Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+// 动态环境层只绘制视口附近的水格，不污染静态地形缓存。
+function drawHighWaterEffects(){
+  const x0=Math.max(0,Math.floor(cam.x/TILE)-1), x1=Math.min(MAP_W,Math.ceil((cam.x+viewW())/TILE)+1);
+  const y0=Math.max(0,Math.floor(cam.y/TILE)-1), y1=Math.min(MAP_H,Math.ceil((cam.y+viewH())/TILE)+1);
+  const phase=time*0.55;
+  ctx.save(); ctx.lineCap='round';
+  for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++){
+    if(!terrain[x] || terrain[x][y]!=='water') continue;
+    const px=x*TILE, py=y*TILE, v=tileVariation(x,y), wave=phase+(v%37)*0.17;
+    // 斜向流线持续向右下方移动，避免水面只是固定的闪烁线。
+    ctx.strokeStyle='rgba(155,220,232,'+(0.13+0.05*Math.sin(wave))+')'; ctx.lineWidth=1;
+    for(let i=0;i<3;i++){
+      const yy=py+5+i*10+Math.sin(wave+i*1.7)*2;
+      const xx=px+((wave*22+v+i*11)%38)-8;
+      ctx.beginPath(); ctx.moveTo(xx,yy); ctx.quadraticCurveTo(xx+6,yy-1.5,xx+14+(v%7),yy+1); ctx.stroke();
+    }
+    if((v%5)===0){
+      const band=((wave*10+v)%52)-12;
+      ctx.strokeStyle='rgba(223,250,247,'+(0.08+0.04*Math.sin(wave))+')'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(px+band,py+29); ctx.lineTo(px+band+18,py+3); ctx.stroke();
+    }
+    if((v%9)===0){
+      ctx.fillStyle='rgba(220,246,240,'+(0.08+0.04*Math.sin(wave*1.4))+')';
+      ctx.beginPath(); ctx.ellipse(px+9+(v%13),py+9+(v%11),5,1.3,-0.18,0,Math.PI*2); ctx.fill();
+    }
+    const coast=coastWaterDirs(x,y);
+    if(coast.length){
+      ctx.strokeStyle='rgba(193,228,211,.12)'; ctx.lineWidth=1.5;
+      if(coast.includes('N')){ctx.beginPath();ctx.moveTo(px+2,py+1);ctx.lineTo(px+30,py+1);ctx.stroke();}
+      if(coast.includes('S')){ctx.beginPath();ctx.moveTo(px+2,py+31);ctx.lineTo(px+30,py+31);ctx.stroke();}
+      if(coast.includes('W')){ctx.beginPath();ctx.moveTo(px+1,py+2);ctx.lineTo(px+1,py+30);ctx.stroke();}
+      if(coast.includes('E')){ctx.beginPath();ctx.moveTo(px+31,py+2);ctx.lineTo(px+31,py+30);ctx.stroke();}
+    }
+  }
+  ctx.restore();
+}
+// 草地日照斑驳：只叠加在地形上，建筑和单位随后绘制，不会降低可读性。
+function drawHighSunlightEffects(){
+  const x0=Math.max(0,Math.floor(cam.x/TILE)-1), x1=Math.min(MAP_W,Math.ceil((cam.x+viewW())/TILE)+1);
+  const y0=Math.max(0,Math.floor(cam.y/TILE)-1), y1=Math.min(MAP_H,Math.ceil((cam.y+viewH())/TILE)+1);
+  const phase=time*0.16;
+  ctx.save();
+  ctx.globalCompositeOperation='screen';
+  for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++){
+    if(!terrain[x] || terrain[x][y]!=='grass') continue;
+    const v=tileVariation(x,y);
+    if((v%4)!==0) continue;
+    const px=x*TILE, py=y*TILE;
+    const drift=((phase*9+v)%58)-14;
+    const alpha=0.035+0.018*Math.sin(phase+v*.03);
+    ctx.fillStyle='rgba(255,226,144,'+alpha+')';
+    ctx.beginPath();
+    ctx.ellipse(px+drift,py+18,19,5, -0.28,0,Math.PI*2);
+    ctx.fill();
+    if((v%11)===0){
+      ctx.strokeStyle='rgba(255,241,183,.07)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(px+drift-11,py+27); ctx.lineTo(px+drift+10,py+5); ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -592,7 +666,7 @@ function drawBuilding(b){
   ctx.fillStyle='#dfe8e0';
   ctx.fillText(b.def.name, cx, y+h+12);
   // HP条
-  drawHPBar(x+2, y+2, w-4, b.hp/b.maxHp, b.constructing);
+  drawHPBar(x+2, y+2, w-4, b.hp/b.maxHp, b.team);
   // 建造进度条
   if(b.constructing){
     // 全息投影 + 扫描线
@@ -611,48 +685,6 @@ function drawBuilding(b){
     ctx.fillStyle='#ffe27a'; ctx.fillRect(x+4,y+5,(w-8)*clamp(b.progress/b.buildTime,0,1),7);
     ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(x+4,y+5,(w-8)*clamp(b.progress/b.buildTime,0,1),2);
   }
-  // 战车工厂/兵营/建造厂升级进度
-  if(b.upgrading){
-    const uTime = b.defName==='command' ? COMMAND_UPGRADE_TIME : (b.defName==='barracks' ? BARRAX_UPGRADE_TIME : (b.defName==='factory' ? (b.upgradeLvl===0?FACTORY_UPGRADE_TIME:FACTORY_UPGRADE_TIME2) : FACTORY_UPGRADE_TIME));
-    ctx.fillStyle='rgba(255,226,122,.14)'; ctx.fillRect(x+2,y+2,w-4,h-4);
-    const pct=clamp(b.upgradeProg/uTime,0,1);
-    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(x+4,y+5,w-8,7);
-    ctx.fillStyle='#ffd24a'; ctx.fillRect(x+4,y+5,(w-8)*pct,7);
-    ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(x+4,y+5,(w-8)*pct,2);
-  }
-  // 发电厂升级进度
-  if(b.pwrUpgrading){
-    ctx.fillStyle='rgba(255,226,122,.14)'; ctx.fillRect(x+2,y+2,w-4,h-4);
-    const pct=clamp(b.pwrUpgradeProg/POWER_UPGRADE_TIME,0,1);
-    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(x+4,y+5,w-8,7);
-    ctx.fillStyle='#ffd24a'; ctx.fillRect(x+4,y+5,(w-8)*pct,7);
-    ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(x+4,y+5,(w-8)*pct,2);
-  }
-  // 生产队列
-  if(b.queue.length){
-    let qx=x+4;
-    for(const it of b.queue){
-      ctx.fillStyle='#14181c'; ctx.fillRect(qx, y-17, 15, 15);
-      ctx.strokeStyle='#3a4a42'; ctx.strokeRect(qx, y-17, 15, 15);
-      ctx.fillStyle='#ffe27a'; ctx.font='10px sans-serif';
-      const qd=getUnitDefs(unitFactionOf(b.team))[it.type];
-      ctx.fillText(qd ? qd.name[0] : '?', qx+7.5, y-5);
-      qx+=18;
-    }
-  }
-  // 机场停机位(4 格):只显示"停驻中"的飞机占格;飞出去的飞机对应格子消除
-  if(b.defName==='airfield' && !b.constructing){
-    let used=0;
-    for(const u of units){ if(u.hp>0 && u.fly && u.parked && u.homeBase===b) used++; }
-    const pipW=(w-16)/AIRFIELD_CAPACITY;
-    for(let i=0;i<AIRFIELD_CAPACITY;i++){
-      const px=x+8+i*pipW+(pipW-8)/2;
-      ctx.fillStyle = i<used ? 'rgba(120,255,160,.85)' : 'rgba(10,14,12,.55)';
-      ctx.fillRect(px, y+h-14, 8, 6);
-      ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=1;
-      ctx.strokeRect(px+0.5, y+h-13.5, 7, 5);
-    }
-  }
   // 建造厂升级星标(金色,区别于战车工厂的程序化星标)
   if(b.defName==='command' && b.upgraded){
     ctx.save(); ctx.translate(x+w*0.14, y+h*0.16);
@@ -664,11 +696,6 @@ function drawBuilding(b){
     ctx.strokeStyle='rgba(120,80,0,.6)'; ctx.lineWidth=1; ctx.stroke();
     ctx.restore();
   }
-  // 队伍颜色角标(右上角小方块,区分同阵营的不同队伍)
-  ctx.fillStyle=teamColor(b.team);
-  ctx.fillRect(x+w-11, y+8, 8, 8);
-  ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=1;
-  ctx.strokeRect(x+w-11.5, y+7.5, 9, 9);
 }
 function drawDockBody(b, x, y, w, h, cx, cy, tc){
   // ===== 船坞:木质浮台 + 仓库 + 龙门吊 + 干船坞斜坡 =====
@@ -714,11 +741,19 @@ function drawDockBody(b, x, y, w, h, cx, cy, tc){
   ctx.fillStyle='rgba(180,220,255,'+(0.10+0.12*wa)+')';
   ctx.fillRect(x-4, y+h+3, w+8, 2.5);
 }
-function drawHPBar(cx, y, w, pct, isConstruct){  if(pct>1)pct=1; if(pct<0)pct=0;
+function hpBarColor(team, pct){
+  if(team===undefined || team===null || team<0) return '#b4a77c';
+  const low = pct<=0.25;
+  const mid = pct<=0.5;
+  if(team!==TEAM_A && teamGroups[team]!==playerGroup()) return '#ff5555';
+  if(low) return '#ff5555';
+  if(mid) return '#ffcf3a';
+  return team===TEAM_A ? '#4fdc7a' : '#4f8ff0';
+}
+function drawHPBar(cx, y, w, pct, team){  if(pct>1)pct=1; if(pct<0)pct=0;
   ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillRect(cx-1,y-1,w+2,7);
   ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(cx,y,w,5);
-  const col=isConstruct?'#ffe27a':(pct>0.5?'#4fdc7a':(pct>0.25?'#ffcf3a':'#ff5555'));
-  ctx.fillStyle=col; ctx.fillRect(cx,y,w*pct,5);
+  ctx.fillStyle=hpBarColor(team,pct); ctx.fillRect(cx,y,w*pct,5);
   ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(cx,y,w*pct,1.5);
 }
 /* ============ 履带/轮子压痕(接地细节) ============ */
@@ -748,9 +783,10 @@ function unitPhotoImg(u){
   if(t==='abrams' || t==='t90') return imgs[t+'_body'];   // 车身+炮塔结构:阴影用车身
   if(t==='bradley' || t==='b11' || t==='marder' || t==='leclerc' || t==='leopard' || t==='challenger') return imgs[t+'_field'];
   if(t==='harvester' || t==='destroyer' || t==='transport') return imgs[t+'_field'];
+  if(t==='ford' || t==='kuznetsov') return imgs[t+'_field'];   // 航母(移动机场)
   if(t==='mcv' || t==='airfield_car') return imgs[t+'_field'];
   if(t==='puma') return imgs['puma_body'];
-  if(t==='f16' || t==='su35' || t==='f15') return imgs[t+'_field'];   // 战斗机
+  if(t==='f16' || t==='su35' || t==='f15' || t==='f18' || t==='su35h') return imgs[t+'_field'];   // 战斗机
   if(t==='littlebird' || t==='uh60' || t==='mi17') return imgs[t+'_body'];   // 运输直升机(机身照片)
   if(t==='drone') return imgs['drone'];                  // 弹簧刀无人机
   if(t==='infantry') return (unitFactionOf(u.team)==='soviet') ? imgs['infantry_soviet_field'] : imgs['infantry_allies_field'];
@@ -1070,16 +1106,6 @@ function drawUnit(u){
   else {
     ctx.fillStyle='rgba(0,0,0,.3)';
     ctx.beginPath(); ctx.ellipse(2,3,u.r+2,u.r+1,0,0,Math.PI*2); ctx.fill();
-  }
-  // 队色底圈
-  ctx.strokeStyle='rgba('+(teamGroup(u.team)===0?'120,255,160':'255,140,120')+',.35)'; ctx.lineWidth=1.5;
-  ctx.beginPath(); ctx.arc(0,0,u.r+2,0,Math.PI*2); ctx.stroke();
-  // 反应装甲护盾环
-  if(u.shield>0){
-    ctx.strokeStyle='rgba(80,180,255,.5)'; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.arc(0,0,u.r+4,0,Math.PI*2); ctx.stroke();
-    ctx.fillStyle='rgba(80,180,255,.08)';
-    ctx.beginPath(); ctx.arc(0,0,u.r+4,0,Math.PI*2); ctx.fill();
   }
   // 车体渲染偏移(起步/刹车俯仰 + 开火后坐力):阴影/选中圈保持接地,车体位移
   if(u.renderOx || u.renderOy) ctx.translate(u.renderOx, u.renderOy);
@@ -1476,10 +1502,6 @@ function drawUnit(u){
     // 车斗铆钉
     ctx.fillStyle='rgba(0,0,0,.25)';
     for(let i=0;i<4;i++){ ctx.fillRect(-u.r+6+i*6, u.r-2, 2, 2); }
-    // 斗内矿石
-    const pct=u.cargo/u.def.capacity;
-    ctx.fillStyle='#e8c84a'; ctx.fillRect(-u.r+3, -u.r+4, (u.r*2-6)*pct, u.r*2-8);
-    ctx.fillStyle='#8a7a2a'; ctx.fillRect(-u.r+3, -u.r+4, (u.r*2-6)*pct, 2);
     // 驾驶室
     ctx.fillStyle='#3f4a55'; ctx.fillRect(-u.r-1,-u.r,8,u.r*2);
     ctx.fillStyle='#9cc0e0'; ctx.fillRect(-u.r, -u.r+2, 4, u.r*2-4);
@@ -1575,6 +1597,25 @@ function drawUnit(u){
         ctx.fillStyle='rgba(255,220,120,.9)'; ctx.beginPath(); ctx.arc(R+10,0,3,0,Math.PI*2); ctx.fill();
         ctx.fillStyle='rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(R+10,0,1.5,0,Math.PI*2); ctx.fill();
       }
+    }
+  } else if(isCarrierShip(u)){
+    // 航母(移动机场):照片本体贴图(水平朝右,SPRITE_ROT=0)
+    const carImg = imgs[u.type+'_field'];
+    if(carImg && carImg.width){
+      ctx.rotate(u.facing);
+      drawUnitImg(u, carImg);
+    } else {
+      ctx.rotate(u.facing);
+      const R=u.r*1.35;
+      ctx.fillStyle='#5a6268';
+      ctx.beginPath();
+      ctx.moveTo(R*1.05,0); ctx.lineTo(R*0.2,-R*0.5); ctx.lineTo(-R,-R*0.44); ctx.lineTo(-R*0.9,R*0.42); ctx.lineTo(R*0.2,R*0.5);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='#2c3238'; ctx.lineWidth=1.2; ctx.stroke();
+      ctx.fillStyle='#3a4146'; ctx.fillRect(-R, R*0.2, R*2.05, R*0.22);   // 水线
+      ctx.fillStyle='#4c545a'; ctx.fillRect(-R*0.85, -R*0.18, R*1.7, R*0.34);   // 飞行甲板
+      ctx.fillStyle='#3f464c'; ctx.fillRect(-R*0.55, -R*0.42, R*0.4, R*0.24);   // 舰岛
+      ctx.fillStyle=tc; ctx.beginPath(); ctx.arc(-R*0.15, 0, 2.4, 0, Math.PI*2); ctx.fill();
     }
   } else if(u.type==='destroyer'){
     if(imgs['destroyer_field']){
@@ -1744,7 +1785,7 @@ function drawUnit(u){
       ctx.fillStyle='#c03030'; ctx.fillRect(-1.5,-6.5,3,1.4);
       // 队标
       ctx.fillStyle=tc; ctx.fillRect(-2,4.5,4,2);
-    } else if(fac==='allies'){
+    } else if(fac!=='soviet'){   // 美国/欧洲/以色列共用的北约士兵外形
       // ===== 北约士兵(盟军 · 现代战术装束) =====
       ctx.fillStyle=tc; ctx.beginPath(); ctx.ellipse(0,0,u.r,u.r*0.9,0,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle='#123'; ctx.lineWidth=1.2; ctx.stroke();
@@ -1798,10 +1839,10 @@ function drawUnit(u){
     }
   }
   ctx.restore();
-  // 飞机:血条/角标跟随悬停高度(画在机身上方/机身旁边,而不是地面)
+  // 飞机血条跟随悬停高度，画在机身上方而非地面。
   const gy = u.fly ? (u.y - AIR_ALTITUDE - 40) : u.y;
   // HP条
-  if(u.hp<u.maxHp){ drawHPBar(u.x-u.r, gy-u.r*0.5-8, u.r*2, u.hp/u.maxHp,false); }
+  if(u.hp<u.maxHp){ drawHPBar(u.x-u.r, gy-u.r*0.5-8, u.r*2, u.hp/u.maxHp,u.team); }
   // 反应装甲护盾条(血条上方)
   if(u.shield>0){
     const smax = unitShieldMax(u) || REACTIVE_SHIELD;
@@ -1809,32 +1850,19 @@ function drawUnit(u){
     ctx.fillStyle='#4fb8ff';
     ctx.fillRect(u.x-u.r, u.y-u.r-12, u.r*2*Math.min(1, u.shield/smax), 3);
   }
-  // 队伍颜色角标(右下角小方块,区分同阵营的不同队伍)
-  ctx.fillStyle=teamColor(u.team);
-  const badgeY = u.fly ? (u.y - AIR_ALTITUDE + 42) : (u.y+u.r+1);   // 飞机:角标画在机身下方
-  ctx.fillRect(u.x+u.r*0.6, badgeY, 7, 7);
-  ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=1;
-  ctx.strokeRect(u.x+u.r*0.6-0.5, badgeY-0.5, 8, 8);
-  // 运输艇/步兵战车:下方显示装载量(如 10/12)
-  if(isCarrier(u)){
-    const used=usedCapacity(u);
-    const full=used>=u.capacity;
-    const txt=used+'/'+u.capacity;
-    ctx.font='bold 10px "Microsoft YaHei"'; ctx.textAlign='center';
-    ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,.7)'; ctx.strokeText(txt, u.x, u.y+u.r+15);
-    ctx.fillStyle=full?'#ffb0b0':'#8aff8a';
-    ctx.fillText(txt, u.x, u.y+u.r+15);
-  }
-  // 挑战者升级等级标记(金色方块,位于队伍角标下方)
-  if(u.type==='challenger' && u.upgradeLvl>0){
-    ctx.fillStyle='#ffd24a';
-    for(let i=0;i<u.upgradeLvl;i++) ctx.fillRect(u.x+u.r*0.6 + i*5, u.y+u.r+11, 4, 4);
-  }
 }
 function drawProjectiles(){
   for(const p of projectiles){
     if(!onView(p.x,p.y,64)) continue;
     const dx=p.tx-p.x, dy=p.ty-p.y; const d=Math.hypot(dx,dy)||1;
+    if(highEffectsEnabled && (p.tankShell || p.ifvBullet)){
+      const ang=Math.atan2(dy,dx);
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(ang);
+      ctx.shadowBlur=p.tankShell?12:8; ctx.shadowColor='rgba(255,170,70,.75)';
+      ctx.strokeStyle=p.tankShell?'rgba(255,180,75,.42)':'rgba(255,220,120,.34)';
+      ctx.lineWidth=p.tankShell?5:3.5; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(-3,0); ctx.lineTo(p.tankShell?-18:-13,0); ctx.stroke(); ctx.restore();
+    }
     if(p.tankShell){
       // 坦克炮弹(125mm 贴图,车头朝左):贴图 + 曳光拖尾,从发射起匀速飞行
       const img=imgs['shell_125mm'];
@@ -1910,6 +1938,14 @@ function drawMissiles(){
     ctx.save();
     ctx.translate(m.x,m.y);
     ctx.rotate(m.ang + (up ? Math.PI/2 : 0));
+    if(highEffectsEnabled){
+      ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.shadowBlur=14; ctx.shadowColor='rgba(255,150,55,.8)';
+      ctx.strokeStyle='rgba(255,187,86,.30)'; ctx.lineWidth=5; ctx.lineCap='round';
+      ctx.beginPath();
+      if(up){ctx.moveTo(0,dh*.42);ctx.lineTo(0,dh*.42+18);}
+      else {ctx.moveTo(-dw*.42,0);ctx.lineTo(-dw*.42-18,0);}
+      ctx.stroke(); ctx.restore();
+    }
     // 尾焰/曳光(朝弹尾方向)
     ctx.lineCap='round';
     if(up){
@@ -1953,6 +1989,23 @@ function drawEffects(){
     if(!onView(e.x,e.y,220)) continue;
     const k=clamp(e.life/e.maxLife,0,1);
     if(e.type==='explode'){
+      if(highEffectsEnabled){
+        const p=1-k, pulse=0.85+0.15*Math.sin((e.maxLife-e.life)*30);
+        const g=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.r*(.9+p*.65));
+        g.addColorStop(0,'rgba(255,255,238,'+(0.95*k)+')');
+        g.addColorStop(.18,'rgba(255,226,140,'+(0.9*k)+')');
+        g.addColorStop(.48,'rgba(255,106,30,'+(0.65*k)+')');
+        g.addColorStop(1,'rgba(100,22,8,0)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(.72+p*.42)*pulse,0,Math.PI*2); ctx.fill();
+        ctx.save(); ctx.globalCompositeOperation='lighter';
+        ctx.strokeStyle='rgba(255,218,138,'+(0.75*k)+')'; ctx.lineWidth=2.5+2*p;
+        ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(.35+p*1.1),0,Math.PI*2); ctx.stroke();
+        for(let i=0;i<6;i++){
+          const a=i*2.399+(e.r%7)*.31, rr=e.r*(.55+p*.7), len=3+e.r*.08;
+          ctx.fillStyle='rgba(255,190,76,'+(0.55*k)+')'; ctx.beginPath(); ctx.arc(e.x+Math.cos(a)*rr,e.y+Math.sin(a)*rr,len*.5,0,Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+      }
       // 白闪
       ctx.fillStyle='rgba(255,255,255,'+(0.65*k)+')';
       ctx.beginPath(); ctx.arc(e.x,e.y,e.r*0.5*k+3,0,Math.PI*2); ctx.fill();
@@ -1966,21 +2019,85 @@ function drawEffects(){
       ctx.beginPath(); ctx.arc(e.x,e.y,e.r*0.5*(1.1-k),0,Math.PI*2); ctx.stroke();
     } else if(e.type==='smoke'){
       const sy=e.y-(1-k)*16;
+      if(highEffectsEnabled){
+        const drift=Math.sin((e.x+e.y)*.03+time*1.7)*5;
+        ctx.fillStyle='rgba(35,39,39,'+(0.18*k)+')';
+        ctx.beginPath(); ctx.arc(e.x+drift,sy-e.r*.45,e.r*(1.45-k*.2),0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(156,158,150,'+(0.10*k)+')';
+        ctx.beginPath(); ctx.arc(e.x-drift*.45,sy+e.r*.25,e.r*(1.1-k*.25),0,Math.PI*2); ctx.fill();
+      }
       ctx.fillStyle='rgba(90,95,95,'+(0.30*k)+')';
       ctx.beginPath(); ctx.arc(e.x, sy, e.r*(1.2-k*0.3), 0, Math.PI*2); ctx.fill();
       ctx.fillStyle='rgba(45,47,47,'+(0.15*k)+')';
       ctx.beginPath(); ctx.arc(e.x-2, sy+2, e.r*0.8, 0, Math.PI*2); ctx.fill();
     } else if(e.type==='burn'){
+      if(highEffectsEnabled){
+        const sway=Math.sin(time*9+(e.x+e.y)*.02);
+        const flame=ctx.createRadialGradient(e.x,e.y-e.r*.18,1,e.x,e.y,e.r*1.3);
+        flame.addColorStop(0,'rgba(255,238,160,'+(0.48*k)+')');
+        flame.addColorStop(.28,'rgba(255,104,22,'+(0.36*k)+')');
+        flame.addColorStop(1,'rgba(80,18,8,0)');
+        ctx.fillStyle=flame; ctx.beginPath(); ctx.ellipse(e.x+sway*2,e.y-e.r*.12,e.r*.95,e.r*.75,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(255,180,55,'+(0.42*k)+')';
+        ctx.beginPath(); ctx.ellipse(e.x+sway,e.y-e.r*.55,e.r*.2,e.r*.52,0,0,Math.PI*2); ctx.fill();
+      }
       ctx.fillStyle='rgba(28,24,18,'+(0.55*k)+')';
       ctx.beginPath(); ctx.ellipse(e.x,e.y,e.r,e.r*0.6,0,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='rgba(20,18,14,'+(0.3*k)+')';
       ctx.beginPath(); ctx.ellipse(e.x,e.y,e.r*0.7,e.r*0.4,0,0,Math.PI*2); ctx.fill();
+    } else if(e.type==='muzzle'){
+      if(!highEffectsEnabled) continue;
+      const p=clamp(e.life/e.maxLife,0,1), ang=e.ang||0;
+      ctx.save(); ctx.translate(e.x,e.y); ctx.rotate(ang); ctx.globalCompositeOperation='lighter';
+      const g=ctx.createRadialGradient(0,0,0,0,0,e.r*(1.2+p));
+      g.addColorStop(0,'rgba(255,255,245,'+(0.95*p)+')');
+      g.addColorStop(.22,'rgba(255,226,116,'+(0.9*p)+')');
+      g.addColorStop(.7,'rgba(255,72,18,'+(0.35*p)+')');
+      g.addColorStop(1,'rgba(255,40,0,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,e.r*(1.15+p*.5),0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,220,120,'+(0.72*p)+')';
+      ctx.beginPath(); ctx.moveTo(1,-e.r*.34); ctx.lineTo(e.r*(2.1+p*1.7),0); ctx.lineTo(1,e.r*.34); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    } else if(e.type==='muzzleSmoke'){
+      if(!highEffectsEnabled) continue;
+      const p=clamp(e.life/e.maxLife,0,1), ang=e.ang||0;
+      ctx.save(); ctx.translate(e.x,e.y); ctx.rotate(ang);
+      ctx.fillStyle='rgba(70,70,62,'+(0.28*p)+')';
+      ctx.beginPath(); ctx.ellipse(-e.r*(.7+p),0,e.r*(.8+p*.8),e.r*(.55+p*.3),0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(172,165,140,'+(0.13*p)+')';
+      ctx.beginPath(); ctx.arc(-e.r*(1.25+p),-e.r*.35,e.r*(.5+p*.35),0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    } else if(e.type==='impact'){
+      if(!highEffectsEnabled) continue;
+      const p=clamp(e.life/e.maxLife,0,1);
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      const g=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.r*(1.2-p*.4));
+      g.addColorStop(0,'rgba(255,255,235,'+(0.95*p)+')');
+      g.addColorStop(.24,'rgba(255,182,75,'+(0.7*p)+')');
+      g.addColorStop(1,'rgba(255,50,12,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(1.1-p*.25),0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(255,196,98,'+(0.8*p)+')'; ctx.lineWidth=1.8;
+      ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(1.8-p),0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+    } else if(e.type==='debris'){
+      if(!highEffectsEnabled) continue;
+      const p=clamp(e.life/e.maxLife,0,1);
+      ctx.save(); ctx.translate(e.x,e.y); ctx.rotate(e.rot||0); ctx.globalAlpha=p;
+      ctx.fillStyle=(e.r>3)?'#d68a36':'#ffcf6a';
+      ctx.fillRect(-e.r*.7,-e.r*.45,e.r*1.4,e.r*.9);
+      ctx.fillStyle='rgba(255,246,180,'+(.75*p)+')'; ctx.fillRect(-e.r*.35,-e.r*.22,e.r*.7,e.r*.35);
+      ctx.restore();
     } else if(e.type==='ring'){
       ctx.strokeStyle='rgba(140,255,180,'+k+')';
       ctx.lineWidth=2;
       ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(1-k),0,Math.PI*2); ctx.stroke();
     } else if(e.type==='dust'){
       // 履带扬尘:淡黄色尘土颗粒,随生命周期缩小淡出
+      if(highEffectsEnabled){
+        const drift=Math.sin(time*3+(e.x+e.y)*.02)*4;
+        ctx.fillStyle='rgba(236,218,177,'+(0.12*k)+')';
+        ctx.beginPath(); ctx.arc(e.x+drift,e.y-3*(1-k),e.r*(1.6-k*.3),0,Math.PI*2); ctx.fill();
+      }
       ctx.fillStyle='rgba(214,206,184,'+(0.30*k)+')';
       ctx.beginPath(); ctx.arc(e.x,e.y,e.r*k,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='rgba(255,255,255,'+(0.12*k)+')';
@@ -2081,9 +2198,17 @@ function drawSel(){
   }
   // 自主防御反应圈:选中装有 APS 且开启的坦克时,显示 270px 反导圈
   for(const u of selected){
-    if((u.type==='abrams' || u.type==='t72' || u.type==='abramsx' || u.type==='t14') && u.aps && u.apsOn){
+    if((u.type==='abrams' || u.type==='t72' || u.type==='abramsx' || u.type==='t14' || u.type==='bradley') && u.aps && u.apsOn){
       ctx.strokeStyle='rgba(140,220,255,.22)'; ctx.lineWidth=1.5; ctx.setLineDash([6,5]);
       ctx.beginPath(); ctx.arc(u.x,u.y,APS_RANGE,0,Math.PI*2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  // 咆哮者干扰光环:选中装有干扰仓的 F/A-18 时,显示 320px 区域干扰圈
+  for(const u of selected){
+    if(isGrowlerUnit(u) && u.growler && !u.parked){
+      ctx.strokeStyle='rgba(255,180,90,.4)'; ctx.lineWidth=1.5; ctx.setLineDash([8,6]);
+      ctx.beginPath(); ctx.arc(u.x,u.y,GROWLER_JAM_RADIUS,0,Math.PI*2); ctx.stroke();
       ctx.setLineDash([]);
     }
   }
@@ -2221,12 +2346,18 @@ function drawMinimap(){
     if(!mmTerrainCache) mmTerrainCache=document.createElement('canvas');
     mmTerrainCache.width=mmw; mmTerrainCache.height=mmh;
     const g=mmTerrainCache.getContext('2d');
-    g.fillStyle='#1a241a'; g.fillRect(0,0,mmw,mmh);
+    g.fillStyle='#071116'; g.fillRect(0,0,mmw,mmh);
     for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
-      const t=terrain[x][y];
-      g.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#273a29');
+      const t=(terrain[x]&&terrain[x][y])||'grass';
+      g.fillStyle = t==='water' ? '#174b63' : (t==='tree' ? '#1c3b36' : '#26352f');
       g.fillRect(ox+x*TILE*s, oy+y*TILE*s, TILE*s+0.4, TILE*s+0.4);
     }
+    // 小地图细网格,让大地图的方位和道路/房屋分布更容易判断。
+    g.strokeStyle='rgba(126,211,213,.12)'; g.lineWidth=0.5;
+    g.beginPath();
+    for(let x=0;x<=MAP_W;x+=4){ g.moveTo(ox+x*TILE*s,oy); g.lineTo(ox+x*TILE*s,oy+H*s); }
+    for(let y=0;y<=MAP_H;y+=4){ g.moveTo(ox,oy+y*TILE*s); g.lineTo(ox+W*s,oy+y*TILE*s); }
+    g.stroke();
     mmTerrainKey=cacheKey;
   }
   // 地形
@@ -2237,17 +2368,35 @@ function drawMinimap(){
   // 建筑
   for(const b of buildings){
     if(!b.alive) continue;
-    mmCtx.fillStyle = b.team<0 ? '#8a8a8a' : teamCol(b.team);
-    mmCtx.fillRect(ox+(b.x-b.w*TILE/2)*s, oy+(b.y-b.h*TILE/2)*s, Math.max(3,b.w*TILE*s), Math.max(3,b.h*TILE*s));
+    const bx=ox+(b.x-b.w*TILE/2)*s, by=oy+(b.y-b.h*TILE/2)*s;
+    const bw=Math.max(3,b.w*TILE*s), bh=Math.max(3,b.h*TILE*s);
+    mmCtx.fillStyle=tacticalTeamColor(b.team);
+    mmCtx.globalAlpha=.82; mmCtx.fillRect(bx,by,bw,bh); mmCtx.globalAlpha=1;
+    mmCtx.strokeStyle=b.team<0 ? '#b4a77c' : teamColor(b.team);
+    mmCtx.lineWidth=1; mmCtx.strokeRect(bx+.5,by+.5,Math.max(2,bw-1),Math.max(2,bh-1));
   }
   // 单位
   for(const u of units){
     if(u.parked) continue;   // 停驻飞机不上小地图
-    mmCtx.fillStyle=teamCol(u.team);
-    mmCtx.fillRect(ox+u.x*s-1, oy+u.y*s-1, 2, 2);
+    const ux=ox+u.x*s, uy=oy+u.y*s;
+    const r=Math.max(2, u.fly ? 3 : (u.type==='infantry'||u.type==='exo'||u.type==='magnet' ? 2 : 2.5));
+    mmCtx.fillStyle=tacticalTeamColor(u.team);
+    mmCtx.strokeStyle=teamColor(u.team);
+    mmCtx.lineWidth=.7;
+    mmCtx.beginPath();
+    if(u.fly){
+      mmCtx.moveTo(ux,uy-r-1); mmCtx.lineTo(ux+r+1,uy); mmCtx.lineTo(ux,uy+r+1); mmCtx.lineTo(ux-r-1,uy); mmCtx.closePath();
+    } else if(u.type==='infantry'||u.type==='exo'||u.type==='magnet') {
+      mmCtx.arc(ux,uy,r*.75,0,Math.PI*2);
+    } else {
+      mmCtx.rect(ux-r,uy-r*.7,r*2,r*1.4);
+    }
+    mmCtx.fill(); mmCtx.stroke();
   }
   // 视野框
-  mmCtx.strokeStyle='#ffffff';
-  mmCtx.lineWidth=1.5;
+  mmCtx.strokeStyle='#d6f7f2';
+  mmCtx.lineWidth=1.2;
   mmCtx.strokeRect(ox+cam.x*s, oy+cam.y*s, viewW()*s, viewH()*s);
+  mmCtx.strokeStyle='rgba(57,215,223,.65)'; mmCtx.lineWidth=1;
+  mmCtx.strokeRect(ox+.5,oy+.5,Math.max(1,W*s-1),Math.max(1,H*s-1));
 }

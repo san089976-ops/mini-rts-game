@@ -1,13 +1,13 @@
 "use strict";
 /* ============ menu.js: 主菜单(地图/队伍/分组/颜色/资金/出生点) ============ */
-const START_MONEY_OPTS = [5000,10000,20000,30000,50000,100000];
+const START_MONEY_OPTS = [5000,10000,20000,30000,50000,100000,1000000000];
 let menuState = {
   mapChoice: {kind:'builtin', idx:0},          // 当前选中地图: {kind:'custom',file,id} 或 {kind:'builtin',idx}
   startMoney: 10000,             // 我方开局资金(难度)
   openDrop: null,                // 当前展开的下拉: 'money' | 'group-i' | 'color-i'
   spawnIdx: [0,1,2,3,4,5,6,7],   // 每队(最多8)选中的出生点下标,不可重复
   spawnTarget: 0,                // 出生点放置模式:当前操作的队伍
-  playerFaction: 'allies',
+  playerFaction: 'usa',
   compFactions: ['soviet','soviet','soviet','soviet','soviet','soviet','soviet'],
   groups: [1,1,1,1,1,1,1],       // 电脑所在组 0=A(与玩家同盟,蓝)/1..3=敌对(红)
   compDiffs: ['easy','easy','easy','easy','easy','easy','easy'],  // 电脑难度
@@ -83,9 +83,10 @@ function loadCustomMaps(done){
 
 /* ============ 模式选择页(登陆页) ============ */
 function enterSkirmish(){
+  clearMissionMode();
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('menu').classList.remove('hidden');
-  if(done) done(); else buildMenu(true);
+  buildMenu(true);
 }
 function comingSoon(){
   document.getElementById('soonOv').classList.add('show');
@@ -98,7 +99,28 @@ function closeSoon(){
 function openHelp(){ document.getElementById('helpOv').classList.add('show'); }
 function closeHelp(){ document.getElementById('helpOv').classList.remove('show'); }
 /* ============ 设置弹层(主菜单左上角/暂停页) ============ */
-function openSettings(){ document.getElementById('settingsOv').classList.add('show'); updateMusicUI(); }
+let highEffectsEnabled = true;
+function initHighEffects(){
+  try{
+    const saved = localStorage.getItem('ra_high_effects');
+    if(saved !== null) highEffectsEnabled = saved !== '0' && saved !== 'false';
+  }catch(e){}
+  updateHighEffectsUI();
+}
+function setHighEffects(enabled){
+  highEffectsEnabled = !!enabled;
+  try{ localStorage.setItem('ra_high_effects', highEffectsEnabled ? '1' : '0'); }catch(e){}
+  updateHighEffectsUI();
+}
+function toggleHighEffects(){ setHighEffects(!highEffectsEnabled); }
+function updateHighEffectsUI(){
+  const b=document.getElementById('highEffectsToggle');
+  if(!b) return;
+  b.textContent=highEffectsEnabled ? '开启' : '关闭';
+  b.classList.toggle('off', !highEffectsEnabled);
+  b.setAttribute('aria-pressed', highEffectsEnabled ? 'true' : 'false');
+}
+function openSettings(){ document.getElementById('settingsOv').classList.add('show'); updateMusicUI(); updateHighEffectsUI(); }
 function closeSettings(){ document.getElementById('settingsOv').classList.remove('show'); }
 
 /* ============ 出生点分配辅助 ============ */
@@ -131,7 +153,7 @@ function buildGameSetup(){
     teams.push({name:'电脑'+i, faction:menuState.compFactions[i-1], group:menuState.groups[i-1], ai:true,
       color:menuState.colors[i], diff:menuState.compDiffs[i-1], spawn:assign[i]||[8+i,8]});
   }
-  return { map, teams };
+  return { mode:'skirmish', map, teams };
 }
 
 function selectMap(i){
@@ -356,8 +378,8 @@ function setMenuStatus(s){
 function teamRowHTML(name, fac, teamIdx, compIdx){
   const row=document.createElement('div');
   row.className='trow';
-  const fc=(f)=>'<button class="facBtn'+(fac===f?' sel':'')+'" onclick="setTeamFaction('+teamIdx+',\''+f+'\')">'+(f==='allies'?'盟军':'苏军')+'</button>';
-  let h='<span class="tname">'+name+'</span>'+fc('allies')+fc('soviet');
+  const fc=(f)=>'<button class="facBtn'+(fac===f?' sel':'')+'" onclick="setTeamFaction('+teamIdx+',\''+f+'\')"><span class="facImg" style="background-image:url(img/factions/'+f+'.png)"></span>'+factionName(f)+'</button>';
+  let h='<span class="tname">'+name+'</span>'+FACTIONS.map(fc).join('');
   if(compIdx!==null){
     // 分组 A/B/C/D 下拉(与玩家同组=同盟,其余=敌对)
     h+='<span class="tname">分组</span>'+groupDropHTML(compIdx);
@@ -512,32 +534,44 @@ function renderMenuPreview(){
   // 等比包含缩放:直到长或宽任一边与画板等距(正方形/竖长图也能完整显示),并居中
   const s = Math.min(cw/MAP_W, ch/MAP_H);
   const ox = (cw - MAP_W*s)/2, oy = (ch - MAP_H*s)/2;
-  g.fillStyle='#0a120c'; g.fillRect(0,0,cw,ch);
+  g.fillStyle='#071116'; g.fillRect(0,0,cw,ch);
   for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
-    const t=terrain[x][y];
-    g.fillStyle = t==='water' ? '#22486e' : (t==='tree' ? '#1c3a24' : '#2a4a2e');
+    const t=(terrain[x]&&terrain[x][y])||'grass';
+    g.fillStyle = t==='water' ? '#174b63' : (t==='tree' ? '#1c3b36' : '#26352f');
     g.fillRect(ox+x*s, oy+y*s, s+0.4, s+0.4);
   }
+  // 战术地图网格:每4格一条主网格,保留细小方格的方向感。
+  g.strokeStyle='rgba(126,211,213,.15)'; g.lineWidth=.6; g.beginPath();
+  for(let x=0;x<=MAP_W;x+=4){ g.moveTo(ox+x*s,oy); g.lineTo(ox+x*s,oy+MAP_H*s); }
+  for(let y=0;y<=MAP_H;y+=4){ g.moveTo(ox,oy+y*s); g.lineTo(ox+MAP_W*s,oy+y*s); }
+  g.stroke();
+  g.strokeStyle='rgba(57,215,223,.55)'; g.lineWidth=1; g.strokeRect(ox+.5,oy+.5,MAP_W*s-1,MAP_H*s-1);
   // 金矿
-  g.fillStyle='#d8b840';
-  for(const o of oreFields) if(o.amount>0) g.fillRect(ox+o.x*s-1.5, oy+o.y*s-1.5, 3, 3);
+  for(const o of oreFields) if(o.amount>0){
+    const px=ox+o.x*s, py=oy+o.y*s;
+    g.fillStyle='#e7bf63'; g.strokeStyle='rgba(255,239,170,.85)'; g.lineWidth=.7;
+    g.beginPath(); g.moveTo(px,py-2.5); g.lineTo(px+2.5,py); g.lineTo(px,py+2.5); g.lineTo(px-2.5,py); g.closePath(); g.fill(); g.stroke();
+  }
   const n=teamCount();
   const spawns=getSpawns(n);
   spawns.forEach(([sx,sy],p)=>{
     const px=ox+(sx+0.5)*s, py=oy+(sy+0.5)*s;
     const owner=menuState.spawnIdx.indexOf(p);   // 哪个队占了该点(-1=空闲)
     const isActive=owner===menuState.spawnTarget;
-    // 底座
-    g.beginPath(); g.arc(px,py,7,0,Math.PI*2);
-    g.fillStyle = owner!==-1 ? TEAM_COLORS[menuState.colors[owner]].hex : 'rgba(255,255,255,.22)';
-    g.fill();
-    g.lineWidth = isActive ? 2.6 : 1.3;
-    g.strokeStyle = isActive ? '#ffffff' : 'rgba(255,255,255,.45)';
+    const relation = owner===-1 ? '#8a9da0' : (owner===0 ? '#39d7df' : (menuState.groups[owner-1]===0 ? '#73d69c' : '#ef7068'));
+    const team = owner!==-1 ? TEAM_COLORS[menuState.colors[owner]].hex : '#8a9da0';
+    // 外环代表敌我关系,内点代表具体队伍颜色。
+    g.beginPath(); g.arc(px,py,8.5,0,Math.PI*2); g.fillStyle='rgba(4,12,16,.82)'; g.fill();
+    g.beginPath(); g.arc(px,py,7,0,Math.PI*2); g.fillStyle=relation; g.fill();
+    g.beginPath(); g.arc(px,py,4,0,Math.PI*2); g.fillStyle=team; g.fill();
+    g.lineWidth = isActive ? 2.4 : 1.1;
+    g.strokeStyle = isActive ? '#f0fffb' : relation;
     g.stroke();
+    if(isActive){ g.beginPath(); g.arc(px,py,11,0,Math.PI*2); g.strokeStyle='rgba(240,255,251,.7)'; g.lineWidth=1; g.stroke(); }
     // 编号/标签
     g.font='bold 8px sans-serif'; g.textAlign='center';
-    g.fillStyle='rgba(0,0,0,.55)'; g.fillText(owner!==-1 ? (owner===0?'玩家':'电脑'+owner) : '空闲', px+1, py+17);
-    g.fillStyle = (owner!==-1 && TEAM_COLORS[menuState.colors[owner]].hex==='#2a2d33') ? '#cfd8cf' : '#dfe8df';
+    g.fillStyle='rgba(0,0,0,.72)'; g.fillText(owner!==-1 ? (owner===0?'玩家':'电脑'+owner) : '空闲', px+1, py+17);
+    g.fillStyle = '#e6f5f2';
     g.fillText(owner!==-1 ? (owner===0?'玩家':'电脑'+owner) : '空闲', px, py+16);
     // 组标记
     const grp = owner===0 ? 0 : (owner>0 ? menuState.groups[owner-1] : -1);

@@ -50,9 +50,27 @@
     terrain[x][y]   = 'grass' | 'tree' | 'water'
     blocked[x][y]   = true 表示陆地单位不可通行（水/树/建筑占格）
     structBlocked[x][y] = true 仅建筑占格（用于海军/两栖寻路区分"建筑"与"水域"）
-  teams：gameTeams[{name,faction,group,ai,spawn}]；teamGroups 决定同盟/敌对；
+   teams：gameTeams[{name,faction,group,ai,spawn}]；teamGroups 决定同盟/敌对；
     teamCol() 蓝=友方阵营、红=敌方阵营；teamColor() 是队伍角标色（9色，不影响蓝/红）。
-  阵营：teamFactions[team] = 'allies'|'soviet'；单位外形由各自阵营决定。
+   阵营：teamFactions[team] = 'usa'(美国)|'europe'(欧洲)|'israel'(以色列)|'soviet'(苏军)。
+     FACTIONS / factionName()；isSovietFac() 判苏军；getUnitDefs(faction) 按阵营返回单位表。
+
+【阵营分配(近期新增:盟军拆分为美国/欧洲/以色列)】
+   原"盟军"拆成 美国/欧洲/以色列 三个可选项,苏军保留为第4阵营;菜单每队下拉都有
+   4 个阵营按钮。单位归属(config.js getUnitDefs 的 west 共用基底 + 各自专属):
+    - 共用基础(西方三阵营):北约步兵 / M60 坦克 / 矿车 / 基地车 / 机场建筑车 /
+      驱逐舰 / 运输艇 / 外骨骼大兵(exo) / F-16 / 小鸟 / UH-60。
+    - 美国(usa):+ 艾布拉姆 abrams / 艾布拉姆X abramsx / 布拉德利 bradley /
+      F-15 / F-18(仅航母) / 福特号航母 ford;三级坦克 abramsx。
+    - 欧洲(europe):+ 豹2 leopard / 勒克莱尔 leclerc / 挑战者 challenger /
+      黄鼠狼 marder / 美洲狮 puma;无三级坦克、无航母。
+    - 以色列(israel):+ 梅卡瓦 merkava / F-15I;无三级坦克、无航母。
+    - 苏军(soviet):不变(T54/T90/T72/T62/T80/T84BM/T14/B11/磁暴/苏27/苏35/米17/库兹涅佐夫)。
+   关键助手:factoryUnitsFor(fac) 工厂高级单位列表、tier3UnitsFor(fac) 三级坦克、
+     carrierFor(fac) 航母、airFactionOK(type,fac) 战斗机阵营、advancedTankType(team)
+     高级坦克、advancedInfantryType(team) 高级步兵(exo西方/magnet苏军)。
+   生产资格:canTrain/canProduceIn 均加了"阵营单位表存在"门槛(getUnitDefs 成员判定),
+     苏军专属单位不会出现在西方阵营面板,反之亦然。
 
 【单位/建筑/护甲系统】
   单位定义在 getUnitDefs(faction)（按阵营返回），建筑在 BLD_DEFS。
@@ -375,7 +393,40 @@
    - 渲染:飞机最后绘制(最高显示权,盖过所有单位/建筑);地面模糊椭圆投影
      (drawAircraftShadow);本体抬高 AIR_ALTITUDE=16px;尾焰 drawAircraftFlame
      画在机尾(本地 -x 方向,外焰橙黄/内焰亮白,按时间抖动);血条/角标跟随高度。
-   - 替换素材:node tools/process-sprite.js "新图.png" f16_field img/units 512
+    - 替换素材:node tools/process-sprite.js "新图.png" f16_field img/units 512
+   - 停机位/生产完全独立(近期新增):每个基地(机场/航母)单独算自己的停机位,
+     互不转移。tryTrain 里选中基地已满直接拒绝("停机位已满,无法再生产"),
+     绝不自动把订单转给别的基地;只有未选中任何基地时才全图自动找有空位的。
+     ui.js mkUnit 支持 disabled:机场/航母停机位满时战斗机生产按钮置灰。
+   - 右侧飞机栏「选择全部同类」批量升级/挂载(近期新增):
+     · 每个飞机行底部有「选择全部同类 (×N)」按钮(state.js airBatchSel 按机型存
+       集合),点击选中全图同型飞机(跨航母+机场、停驻+出击都算)。
+     · 批量状态下点升级/挂载 → 对全图同型逐架生效(airPlaneUpgrade/airHpUpgrade
+       走 airBatchApply),逐架独立扣费,已装/安装中的自动跳过(钱不够就只升得起
+       多少架),汇总一次"×N 架"提示。
+     · F-15 批量挂载=同一挂点号跨全图同型一起挂(该挂点已有武器的跳过)。
+     · 按钮显示条件:全图同型中只要还有一个升级包/挂点没升级就显示;
+       已批量选中时恒显示(方便取消),按钮高亮(batchOn),面板顶部有绿色横幅。
+     · helpers: planesOfType()/planeHasPending()/airBatchVisible()/airBatchToggle()/airBatchApply()。
+
+【新增战斗机:F/A-18 咆哮者 + 苏-35】(近期新增)
+   F/A-18 咆哮者(f18,盟军):血300/铸铁甲/速150/价24000/建造16s/占1格,
+     只能由福特号航母生产(def.carrierOnly=true,机场不可建),4 挂点同 F-15
+     (A-120c/A-174b/GBU-31)+ 雷达火控 + 隐身涂层,专属挂点武器「咆哮者干扰仓」
+     (GROWLER_COST=4500/15s,占 1 个武器挂点,F-18 专属):升空(非停驻)时以自身为
+     中心张开 GROWLER_JAM_RADIUS=320px 干扰光环,只对敌方生效——圈内敌方 TOW/长钉
+     反坦克导弹被打上 jammed(乱飞3步后爆炸,爆炸不分敌我)、敌方弹簧刀无人机原地
+     自爆、敌方自主防御系统(APS)失效;我方不受影响,空军导弹维持免疫干扰。
+   苏-35(su35h,苏军,新内部键;现有 su35=苏-27 保留):F-15 完全翻版
+     (血300/钛甲/速160/价26500/建造17s/4挂点),导弹用 R-37m/Kh-29,
+     垂直炸弹同名同数值「MK-1000」(airBombName(u) 按苏系机返回),机场+库兹涅佐夫
+     航母均可建造。
+   - 贴图:img/units/f18_field.png(机头朝左,SPRITE_ROT=π,SPRITE_FRONT=[-1,0]);
+     img/units/su35h_field.png(机头朝上,SPRITE_ROT=π/2,SPRITE_FRONT=[0,-1])。
+   - hardpoints 初始化(entities.js)与 startHardpointUpgrade(build.js)已放开到
+     f15/f18/su35h;f18 面板左右均有「咆哮者干扰仓」按钮,批量「选择全部同类」
+     也支持 growler(airPlaneUpgrade 的 which 分支)。
+   - canTrain/canProduceIn/tryTrain 战斗机分支统一走 carrierOnly 判定(f18 机场不可产)。
 
 【高分辨率渲染 RENDER_SCALE】  画布后备缓冲按 max(devicePixelRatio, RENDER_SCALE) 放大，再 CSS 缩回窗口，
   让画面（含照片贴图）更精细。当前 RENDER_SCALE=4；卡顿可调小。
@@ -463,6 +514,33 @@
      updateMissiles 顶部处理 jammed;irOn 可开关(选中按钮切换),drawSel 扇形在
      开启时显示。
   详细经验见《装甲升级包具体事项.txt》第四、五节。
+
+【升级包“选择全体同类”批量规则(近期修复)】
+  范围:所有升级包,包括单位升级(T72/T62/T80/T90/挑战者/T54分支/M60A3)、
+  安装武器(空对空/空对地/反坦克导弹/火炮)、飞机挂载点武器(AA/AG/GBU31/
+  咆哮者干扰仓)、雷达火控、涂层更新、反应装甲/红外干扰/TUSK/自主防御等。
+  规则:
+  - 左侧面板「选择全体同类」后,只要选中同类中还有单位没装该升级包(或该
+    挂点为空),升级/安装按钮就显示,并标注待装数量 ×N。
+  - 点击按钮只作用于未升级/未安装/未安装中的单位;已升级、已安装、安装中、
+    资金不足的单位自动跳过,逐架独立扣费,成功数汇总成一次提示。
+  - 同一类型不同等级混合(如 T72+T72B+T72BVM)也按“群体里还有可升级者”显示;
+    APS 等依赖等级的单位(如 T72BVM 才可装自主防御)用 selected.some 判断,
+    不再只看第一台。
+  - 飞机挂载点:批量挂载同一挂点号,该挂点已装/安装中的飞机跳过;挂点全部
+    装满后不再显示武器按钮。
+  - 右侧机场/航母飞机栏的 airBatchSel 批量升级走同一规则(airPlaneUpgrade/
+    airHpUpgrade → airBatchApply,planeHasPending 控制显示)。
+  - 实现位置:ui.js countNeeding/pkgAction + input.js massUpgrade/hpUp;
+    右侧飞机栏 ui.js airBatchVisible/airBatchApply。
+
+【雌虎步兵战车解锁修正】
+雌虎(namer)从以色列 Lv3 战车工厂专属改为 Lv2 战车工厂单位:config.js
+factoryUnitsFor('israel')=['merkava','namer','mcv'],tier3UnitsFor 不再返回
+namer;build.js canTrain/canProduceIn 的 Lv2 工厂单位表加入 namer;
+ai.js 以色列 IFV 也按升级工厂生产 namer;单位描述同步改为“需Lv2战车工厂”。
+另:修正时曾误把 T62 也放进 Lv2 工厂高级单位表,已从 canTrain/canProduceIn
+移除;T62 仍按 config.js 设定由普通战车工厂直接生产。
 
 【已知注意事项 / 坑】
   1. 地图尺寸是动态的：改地图前先 setMapSize，别把 MAP_W/H 当常量硬编码。

@@ -66,11 +66,21 @@ function update(dt){
   for(const b of buildings){ updateBuilding(b, dt, teamPower); }
   // 弹体
   for(const p of projectiles){
-    if(p.target && p.target.fly){ p.dead = true; continue; }   // 目标升空(直升机)→ 地面弹丸落空
+    if(p.target && (p.target.fly || p.target.garrisoned)){ p.dead = true; continue; }   // 目标升空(直升机)/已进驻 → 地面弹丸落空
     const d=Math.hypot(p.tx-p.x,p.ty-p.y);
     if(p.accel) p.speed = Math.min(p.maxSpeed||p.speed, p.speed + p.accel*dt);   // 先加速后匀速
     const step=p.speed*dt;
-    if(d<=step){ p.dead=true; if(p.target && p.target.hp!==undefined && p.target.hp>0 && (p.target.team!==p.team || p.force)){ applyDamage(p.target,p.damage,p.attacker,p.proj); } }
+    if(d<=step){
+      p.dead=true;
+      const ix=p.target&&p.target.x!==undefined?p.target.x:p.tx;
+      const iy=p.target&&p.target.y!==undefined?p.target.y:p.ty;
+      if(highEffectsEnabled){
+        const impact=new Effect(ix,iy,'impact',p.tankShell?15:(p.ifvBullet?7:5));
+        impact.life=p.tankShell?0.28:0.18; impact.maxLife=impact.life; impact.team=p.team;
+        effects.push(impact);
+      }
+      if(p.target && p.target.hp!==undefined && p.target.hp>0 && (p.target.team!==p.team || p.force)){ applyDamage(p.target,p.damage,p.attacker,p.proj); }
+    }
     else { p.x+=(p.tx-p.x)/d*step; p.y+=(p.ty-p.y)/d*step; }
   }
   projectiles=projectiles.filter(p=>!p.dead);
@@ -79,7 +89,14 @@ function update(dt){
   // 自主防御反导弹(拦截弹:追踪来袭 TOW 导弹,命中即摧毁)
   updateInterceptors(dt);
   // 特效
-  for(const e of effects){ e.life-=dt; }
+  for(const e of effects){
+    e.life-=dt;
+    if(e.type==='debris'){
+      e.x+=(e.vx||0)*dt; e.y+=(e.vy||0)*dt;
+      e.vy=(e.vy||0)+120*dt;
+      e.rot=(e.rot||0)+(e.spin||0)*dt;
+    }
+  }
   for(const e of effects){
     if(e.type==='burn' && Math.random()<dt*0.18){
       const sm=new Effect(e.x+rnd(-e.r/2,e.r/2),e.y-e.r*0.3+rnd(-4,4),'smoke',rnd(5,10)); sm.life=1.3; sm.maxLife=1.3; effects.push(sm);
@@ -99,12 +116,18 @@ function update(dt){
       unloadTransport(u, {x:u.x, y:u.y});
     }
   }
+  // 航母被击沉:停驻其上的战斗机自动释放(在残骸上空继续盘旋,无法再返场)
+  for(const u of units){
+    if(u.hp<=0 && isCarrierShip(u)) releaseParkedAircraft(u);
+  }
   // 清理死亡单位
   units=units.filter(u=>u.hp>0);
   // 同步清理选中列表:死亡单位若还留在 selected,会继续画出它的移动线/信息
   if(selected.length && selected.some(u=>!units.includes(u))) selected=selected.filter(u=>units.includes(u));
+  // 任务模式:胜负由 updateMission 按波次清敌判定,不套用双方建筑存活规则
+  if(gameSetup && gameSetup.mode === 'mission' && !gameOver) updateMission(dt);
   // 胜负判定(摧毁所有建筑获胜/战败;gameTeams 仅在开局后非空,避免主菜单误判)
-  if(gameTeams.length>=2 && !gameOver){
+  if(gameTeams.length>=2 && !gameOver && gameSetup && gameSetup.mode !== 'mission'){
     const pGrp = teamGroups[0];
     const pAlive = buildings.some(b=>b.team===TEAM_A && b.alive);
     const eAlive = gameTeams.some((g,ti)=> teamGroups[ti]!==pGrp && buildings.some(b=>b.team===ti && b.alive));
@@ -164,6 +187,14 @@ function applyDamage(ent, dmg, attacker, proj){
       shake=Math.max(shake,2);
       effects.push(new Effect(ent.x,ent.y,'explode',ent.r*2.4));
       for(let i=0;i<5;i++){ const sm=new Effect(ent.x+rnd(-8,8),ent.y+rnd(-8,8),'smoke',rnd(4,9)); sm.life=1.1; sm.maxLife=1.1; effects.push(sm); }
+      if(highEffectsEnabled){
+        for(let i=0;i<7;i++){
+          const d=new Effect(ent.x+rnd(-4,4),ent.y+rnd(-4,4),'debris',rnd(2,4));
+          const a=rnd(-Math.PI,Math.PI), s=rnd(28,82);
+          d.vx=Math.cos(a)*s; d.vy=Math.sin(a)*s-rnd(20,55); d.spin=rnd(-8,8); d.rot=rnd(-Math.PI,Math.PI);
+          d.life=rnd(.45,.9); d.maxLife=d.life; effects.push(d);
+        }
+      }
     }
     // 弹簧刀无人机被击落:原地自爆(1800 火炮范围伤),先于死亡清理执行
     if(ent.type==='drone') droneDetonate(ent, null);
@@ -187,6 +218,8 @@ function destroyBuilding(ent){
   markBlocked(ent,false);
   // 机场被摧毁:停驻的战斗机自动释放(失去母港,在机场残骸上空盘旋;无法再返场)
   if(ent.defName==='airfield') releaseParkedAircraft(ent);
+  // 进驻建筑被摧毁:自动释放进驻部队到建筑周围(不随建筑消失)
+  if(ent.garrison && (ent.garrison.length || ent.garrisonTank)) releaseGarrison(ent, true);
   shake=Math.max(shake, Math.min(7, ent.w*ent.h*0.7));
   effects.push(new Effect(ent.x,ent.y,'explode',Math.max(ent.w,ent.h)*TILE*0.55));
   for(let i=0;i<8;i++){ const sm=new Effect(ent.x+rnd(-ent.w*TILE/2,ent.w*TILE/2),ent.y+rnd(-ent.h*TILE/2,ent.h*TILE/2),'smoke',rnd(6,12)); sm.life=1.4; sm.maxLife=1.4; effects.push(sm); }
@@ -198,18 +231,25 @@ function destroyBuilding(ent){
 
 function updateBuilding(b, dt, teamPower){
   if(!b.alive) return;
+  // 建造中建筑也允许被摧毁,不能让建造完成逻辑把零血建筑重新恢复。
+  if(b.hp<=0){
+    destroyBuilding(b);
+    return;
+  }
   const p=teamPower[b.team]||{give:0,use:0};
   const shortPower = p.give>0 && p.use>p.give;
   if(b.constructing){
+    // 建造期间不保留旧的索敌/开火状态,完工后再重新搜索目标。
+    b.turretTarget=null;
+    b.fireT=0;
     b.progress += dt*(shortPower?0.5:1);
-    b.hp = b.maxHp * (0.15 + 0.85*(b.progress / b.buildTime));
     if(b.progress>=b.buildTime){
-      b.constructing=false; b.progress=0; b.hp=b.maxHp;
+      b.constructing=false; b.progress=0;
       textPopup(b.x,b.y-10,b.def.name+' 完工','#8aff8a');
       effects.push(new Effect(b.x,b.y,'ring',26));
     }
   }
-  // 战车工厂升级(两次:Lv0→Lv1 高级坦克,Lv1→Lv2 三级坦克;耗时按当前等级取)
+  // 战车工厂升级(两次:Lv1→Lv2 高级坦克,Lv2→Lv3 三级坦克;耗时按当前等级取)
   if(b.defName==='factory' && b.upgrading && !b.constructing){
     const uTime = b.upgradeLvl===0 ? FACTORY_UPGRADE_TIME : FACTORY_UPGRADE_TIME2;
     b.upgradeProg += dt*(shortPower?0.5:1);
@@ -217,7 +257,7 @@ function updateBuilding(b, dt, teamPower){
       b.upgrading=false; b.upgradeProg=0;
       b.upgradeLvl++;
       b.upgraded = b.upgradeLvl>=1;
-      textPopup(b.x,b.y-10,b.def.name+' 升级至 Lv'+b.upgradeLvl,'#8aff8a');
+      textPopup(b.x,b.y-10,b.def.name+' 升级至 Lv'+(b.upgradeLvl+1),'#8aff8a');
       effects.push(new Effect(b.x,b.y,'ring',26));
     }
   }
@@ -236,6 +276,17 @@ function updateBuilding(b, dt, teamPower){
     if(b.upgradeProg >= COMMAND_UPGRADE_TIME){
       b.upgrading=false; b.upgraded=true; b.upgradeProg=0;
       textPopup(b.x,b.y-10,'建造厂升级完成','#8aff8a');
+      effects.push(new Effect(b.x,b.y,'ring',26));
+    }
+  }
+  // 船坞升级(Lv2:血量+200,解锁航母生产)
+  if(b.defName==='dock' && b.upgrading && !b.constructing){
+    b.upgradeProg += dt*(shortPower?0.5:1);
+    if(b.upgradeProg >= DOCK_UPGRADE_TIME){
+      b.upgrading=false; b.upgraded=true; b.upgradeProg=0;
+      b.maxHp += DOCK_UPGRADE_HP;
+      b.hp = Math.min(b.maxHp, b.hp + DOCK_UPGRADE_HP);   // 按差量回血
+      textPopup(b.x,b.y-10,'船坞升级完成 (Lv2)','#8aff8a');
       effects.push(new Effect(b.x,b.y,'ring',26));
     }
   }
@@ -271,7 +322,7 @@ function updateBuilding(b, dt, teamPower){
     b.pwrUpgradeProg += dt*(shortPower?0.5:1);
     if(b.pwrUpgradeProg >= POWER_UPGRADE_TIME){
       b.pwrUpgrading=false; b.pwrUpgradeProg=0; b.powerLevel++;
-      textPopup(b.x,b.y-10,'发电厂升级至 Lv'+b.powerLevel,'#8aff8a');
+      textPopup(b.x,b.y-10,'发电厂升级至 Lv'+(b.powerLevel+1),'#8aff8a');
       effects.push(new Effect(b.x,b.y,'ring',22));
     }
   }
@@ -295,7 +346,16 @@ function updateBuilding(b, dt, teamPower){
     if(hasResearch(b.team,'powerInc')) inc += 1;
     credits[b.team] += inc*dt;
   }
-  if(b.hp<=0 && !b.constructing && b.alive) destroyBuilding(b);
+  // 中立经济建筑被占领收入:进驻(team>=0)后按建筑类型给占领方资金
+  if((b.def.incomePerSec || b.def.incomePerUnit) && b.team>=0 && !b.constructing){
+    let inc = b.def.incomePerSec || 0;
+    if(b.def.incomePerUnit) inc += b.def.incomePerUnit * (b.garrison.length + (b.garrisonTank?1:0));
+    if(inc>0) credits[b.team] += inc*dt;
+  }
+  if(b.hp<=0 && b.alive){
+    destroyBuilding(b);
+    return;
+  }
   // 维修厂:治疗光环,占地外两格内的己方单位每秒恢复 10 生命
   if(b.defName==='repair' && !b.constructing){
     const rad = b.w*TILE/2 + TILE*2;
@@ -316,7 +376,7 @@ function updateBuilding(b, dt, teamPower){
     }
   }
   // 炮塔自动攻击
-  if(b.def.weapon){
+  if(b.def.weapon && !b.constructing){
     b.fireT-=dt;
     if(!b.turretTarget || !b.turretTarget.hp || b.turretTarget.hp<=0 || b.turretTarget.team===b.team || dist(b,b.turretTarget)>b.def.weapon.range*1.3){
       // 找目标
@@ -340,7 +400,7 @@ function updateBuilding(b, dt, teamPower){
     }
   }
   // 进驻建筑自动向外射击(用进驻单位武器,射程+20)
-  if((b.garrison && b.garrison.length) || b.garrisonTank) updateGarrisonAttack(b, dt);
+  if(!b.constructing && ((b.garrison && b.garrison.length) || b.garrisonTank)) updateGarrisonAttack(b, dt);
 }
 
 function updateUnit(u, dt){
@@ -352,9 +412,9 @@ function updateUnit(u, dt){
   if(u.fly){ updateAircraft(u, dt); return; }   // 空军单位走独立逻辑(停驻/盘旋/返场)
   if(isTurretUnit(u)) u._turretAiming = false;   // 独立炮塔载具每帧重置:本轮是否在索敌开火(独立转炮塔)
   u._standFire = false;                          // 每帧重置:是否"战斗中钉住不动"(射程内原地射击)
-  // 反应装甲护盾回血:按各单位当前等级的护盾上限/回血速度恢复(T84BM 模块 / T62线 / T80线 / T90M)
-  if(u.rarm && u.shield<T84BM_SHIELD){
-    u.shield = Math.min(T84BM_SHIELD, u.shield + T84BM_SHIELD_REGEN*dt);
+  // 反应装甲护盾回血:按各单位当前等级的护盾上限/回血速度恢复(T84BM 300回10 / 布拉德利 150回5)
+  if(u.rarm && u.shield<rarmShieldMaxFor(u)){
+    u.shield = Math.min(rarmShieldMaxFor(u), u.shield + rarmShieldRegenFor(u)*dt);
   }
   // T14 反应装甲护盾(300 回15)
   if(u.type==='t14' && u.shield<T14_SHIELD){
@@ -398,12 +458,12 @@ function updateUnit(u, dt){
     const t54l = t54Branch(u);
     if(t54l.shield>0 && u.shield<t54l.shield) u.shield = Math.min(t54l.shield, u.shield + t54l.shieldRegen*dt);
   }
-  // T84BM 反应装甲模块安装进度:装好后给满盾
+  // 反应装甲模块安装进度:装好后给满盾(T84BM 300 / 布拉德利 150)
   if(u.rarmUpgrading){
     u.rarmProg += dt;
-    if(u.rarmProg >= RARM_UPGRADE_TIME){
-      u.rarmUpgrading=false; u.rarmProg=0; u.rarm=true; u.shield=T84BM_SHIELD;
-      textPopup(u.x,u.y-20,'反应装甲 安装完成','#8aff8a');
+    if(u.rarmProg >= rarmUpgradeTimeFor(u)){
+      u.rarmUpgrading=false; u.rarmProg=0; u.rarm=true; u.shield=rarmShieldMaxFor(u);
+      textPopup(u.x,u.y-20,'反应装甲 安装完成 ('+rarmShieldMaxFor(u)+'盾)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
       updatePanel();
     }
@@ -438,6 +498,23 @@ function updateUnit(u, dt){
         range: (u._def.range||0) + GUN_RANGE,
       });
       textPopup(u.x,u.y-20,'火炮升级 安装完成 (+15伤 +15射程)','#8aff8a');
+      effects.push(new Effect(u.x,u.y,'ring',22));
+      updatePanel();
+    }
+  }
+  // M60A3 升级包安装进度(装好 +270血至600 +22射程 +27伤害,换 M60A3 外观,按差量回血)
+  if(u.m60a3Upgrading){
+    u.m60a3Prog += dt;
+    if(u.m60a3Prog >= M60A3_UPGRADE_TIME){
+      u.m60a3Upgrading=false; u.m60a3Prog=0; u.m60a3=true;
+      u.maxHp += M60A3_HP;
+      u.hp = Math.min(u.maxHp, u.hp + M60A3_HP);   // 按差量回血,升级即刻满额
+      u._def = Object.assign({}, u._def, {
+        damage: (u._def.damage||0) + M60A3_DMG,
+        range: (u._def.range||0) + M60A3_RANGE,
+        name: 'M60A3',
+      });
+      textPopup(u.x,u.y-20,'M60A3 升级完成 (+'+M60A3_HP+'血 +'+M60A3_RANGE+'射程 +'+M60A3_DMG+'伤害)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
       updatePanel();
     }
@@ -578,24 +655,25 @@ function updateUnit(u, dt){
     }
   }
   if(u.atgm) u.atgmReload = Math.max(0, u.atgmReload - dt);
-  // 自主防御系统:安装进度 + 反导弹弹夹填充(每发 APS_RELOAD 秒补 1 发,上限 APS_MAX_AMMO)
+  // 自主防御系统:安装进度 + 反导弹弹夹填充(每发 APS_RELOAD 秒补 1 发,上限按单位配置)
   if(u.apsUpgrading){
     u.apsProg += dt;
-    if(u.apsProg >= APS_UPGRADE_TIME){
-      u.apsUpgrading=false; u.apsProg=0; u.aps=true; u.apsOn=true; u.apsAmmo=APS_MAX_AMMO;
+    if(u.apsProg >= apsUpgradeTimeFor(u)){
+      u.apsUpgrading=false; u.apsProg=0; u.aps=true; u.apsOn=true; u.apsAmmo=apsMaxAmmoFor(u);
       textPopup(u.x,u.y-22,'自主防御系统 安装完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',20));
       updatePanel();
     }
   }
-  if(u.aps && u.apsAmmo<APS_MAX_AMMO){
+  if(u.aps && u.apsAmmo<apsMaxAmmoFor(u)){
     u.apsReload = Math.max(0, u.apsReload - dt);
     if(u.apsReload<=0){ u.apsReload = APS_RELOAD; u.apsAmmo++; }
   }
   // 自主防御(被动):开启且弹夹有货时,探测反应圈(APS_RANGE)内的敌 TOW 导弹并反击。
   // 只反 TOW(布拉德利/黄鼠狼),不反长钉(美洲狮),也不反己方导弹。
   // 只对"新进入圈内的导弹"各打一发(apsEngaged 记录已接战目标),不会对同一枚连续倾泻。
-  if(u.aps && u.apsOn && u.apsAmmo>0){
+  // 处于敌方咆哮者干扰光环内时 APS 完全失效(不再拦截任何导弹)。
+  if(u.aps && u.apsOn && u.apsAmmo>0 && !growlerJamNear(u.team, u.x, u.y)){
     if(u.apsEngaged) u.apsEngaged = u.apsEngaged.filter(x=>x && !x.dead && missiles.includes(x));
     else u.apsEngaged = [];
     for(const m of missiles){
@@ -630,6 +708,34 @@ function updateUnit(u, dt){
       }
     }
   }
+  // 航母(移动机场):生产队列推进 + 修复停驻飞机 + 停驻飞机跟随航母移动
+  // (独立于指令链执行,不占用 move/attack 等指令分支;下方仍继续处理航母自身的移动/战斗)
+  if(isCarrierShip(u)){
+    if(u.queue && u.queue.length){
+      const item=u.queue[0];
+      item.progress += dt;
+      const t=getUnitDefs(unitFactionOf(u.team))[item.type].build;
+      if(item.progress>=t){
+        const pl=spawnCarrierAircraft(item.type,u.team,u);
+        if(pl){
+          u.queue.shift();
+          textPopup(u.x,u.y-20,getUnitDefs(unitFactionOf(u.team))[item.type].name+' 已上舰','#8aff8a');
+          updatePanel();
+        } else { u.spawnWait=(u.spawnWait||0)+dt; }
+      }
+    }
+    // 修复停驻在航母上的战斗机(每秒恢复 10,与机场一致)
+    for(const a of units){
+      if(a.hp>0 && a.fly && a.parked && a.homeBase===u && a.hp<a.maxHp){
+        a.hp = Math.min(a.maxHp, a.hp + 10*dt);
+        if(Math.random()<dt*1.5){ effects.push(new Effect(a.x+rnd(-3,3),a.y+rnd(-3,3),'ring',8)); }
+      }
+    }
+    // 停驻飞机跟随航母坐标(航母移动时飞机一起走,释放后停在原处不跟)
+    for(const a of units){
+      if(a.hp>0 && a.fly && a.parked && a.homeBase===u){ a.x=u.x; a.y=u.y; }
+    }
+  }
   if(u.type==='harvester'){
     updateHarvester(u,dt);
   } else if(u.order.kind==='load'){
@@ -661,6 +767,7 @@ function updateUnit(u, dt){
       const d=dist(u,b);
       const reach = Math.max(b.w,b.h)*TILE/2 + u.r + 10;
       if(d<=reach){
+        u.garrisoned = true;       // 立即标记进驻:残余弹丸/导弹不再结算伤害
         u._garrisoning=true; u.garrisonTo=b;
         u.order={kind:'none'}; u.path=null;
       } else {
@@ -699,7 +806,7 @@ function updateUnit(u, dt){
           // 独立炮塔载具(美洲狮/艾布拉姆/T90):炮塔独立 360° 瞄准,炮口对准目标且射程内才开火;
           // 射程外则炮塔边转、车体边寻路推进,进入射程后车体停住只转炮塔打。
           u._turretAiming = true;   // 索敌开火:本轮炮塔独立旋转(不随车体)
-          const d=dist(u,at);
+          const d=unitTargetDist(u,at);
           const ang=Math.atan2(at.y-u.y, at.x-u.x);
           u.turretAng = lerpAngle(u.turretAng, ang, Math.min(1, PUMA_TURRET_RATE*dt));
           if(d > u.def.range){
@@ -712,7 +819,7 @@ function updateUnit(u, dt){
             }
           }
         } else {
-          const d=dist(u,at);
+          const d=unitTargetDist(u,at);
           // 到位距离:停在自己射程边缘即可打到目标(刚好能开火的距离)
           const stopD = u.def.range;
           if(d > stopD){
@@ -729,7 +836,7 @@ function updateUnit(u, dt){
       }
     }
     // 反坦克导弹模块:目标在导弹射程内且已装填则发射(自动制导跟踪)
-    if(u.atgm && u.atgmReload<=0 && at && at.hp>0 && dist(u,at)<=ATGM_RANGE){
+    if(u.atgm && u.atgmReload<=0 && at && at.hp>0 && unitTargetDist(u,at)<=ATGM_RANGE){
       launchATGM(u, at);
       u.atgmReload = ATGM_RELOAD;
     }
@@ -788,7 +895,18 @@ function orbitAround(u, c, dt){
   u.wantVx = vx/m*u.speedEff;
   u.wantVy = vy/m*u.speedEff;
 }
-// 停驻进机场:占停机位,不渲染/不参战,入住即重新装弹(弹舱补满)
+// 航母产机:在航母位置生成战斗机并立即停驻进航母(占停机位)
+function spawnCarrierAircraft(type, team, carrier){
+  if(!carrier || carrier.hp<=0) return null;
+  const u=new Unit(type,team,carrier.x,carrier.y);
+  u.order={kind:'none'};
+  u.homeBase=carrier;           // 记录母港(统计停机位占用)
+  units.push(u);
+  parkAircraft(u, carrier);     // 出生即停驻
+  effects.push(new Effect(u.x,u.y,'ring',20));
+  return u;
+}
+// 停驻进机场/航母:占停机位,不渲染/不参战,入住即重新装弹(弹舱补满)
 function parkAircraft(u, b){
   if(!u || !b) return;
   u.parked = true;
@@ -869,7 +987,7 @@ function updatePlaneRadarWeapon(u, dt, kind){
   } else {
     // 空对地:探测圈内敌方地面单位/建筑
     for(const v of units){ if(v.hp>0 && !v.fly && isEnemy(u.team,v.team) && dist(u,v)<=radius) cur.add(v); }
-    for(const b of buildings){ if(b.alive && b.team>=0 && isEnemy(u.team,b.team) && dist(u,b)<=radius) cur.add(b); }
+    for(const b of buildings){ if(b.alive && b.team>=0 && isEnemy(u.team,b.team) && pointToBuildingDist(b,u.x,u.y)<=radius) cur.add(b); }
   }
   const fireOne = (v)=>{
     if(isAA){
@@ -943,15 +1061,15 @@ function updateAircraft(u, dt){
       updatePanel();
     }
   }
-  // F-15 挂载点安装进度(完成后按挂点重算聚合弹药)
+  // F-15 / F/A-18 / 苏-35 挂载点安装进度(完成后按挂点重算聚合弹药与标记)
   if(u.hardpoints){
     let dirty = false;
     for(const hp of u.hardpoints){
       if(hp && hp.upgrading){
         hp.prog += dt;
-        if(hp.prog >= (hp.kind==='gbu'?GBU31_UPGRADE_TIME:(hp.kind==='aa'?AA_UPGRADE_TIME:AG_UPGRADE_TIME))){
+        if(hp.prog >= (hp.kind==='growler'?GROWLER_UPGRADE_TIME:(hp.kind==='gbu'?GBU31_UPGRADE_TIME:(hp.kind==='aa'?AA_UPGRADE_TIME:AG_UPGRADE_TIME)))){
           hp.upgrading = false; hp.prog = 0;
-          textPopup(u.x, u.y-20, (hp.kind==='gbu'?'GBU-31':(hp.kind==='aa'?airAAName(u):airAGName(u)))+' 挂载完成','#8aff8a');
+          textPopup(u.x, u.y-20, (hp.kind==='growler'?'咆哮者干扰仓':(hp.kind==='gbu'?airBombName(u):(hp.kind==='aa'?airAAName(u):airAGName(u))))+' 挂载完成','#8aff8a');
           effects.push(new Effect(u.x, u.y, 'ring', 20));
           dirty = true;
         }
@@ -962,17 +1080,19 @@ function updateAircraft(u, dt){
   if(u.aa) u.aaCd = Math.max(0, u.aaCd - dt);
   if(u.ag) u.agCd = Math.max(0, u.agCd - dt);
   if(u.parked){ u.wantVx=0; u.wantVy=0; return; }   // 停驻:不动
-  // 返回机场入住(手动右键机场 / 任一弹舱打空自动返场)
+  // 咆哮者干扰仓被动光环(仅升空生效):压制圈内敌方 TOW/长钉导弹、无人机,并使敌方 APS 失效
+  if(u.growler) updateGrowlerAura(u, dt);
+  // 返回机场/航母入住(手动右键 / 任一弹舱打空自动返场)
   if(u._returning){
     const home = u.homeBase;
-    const b = (u._returnBase && u._returnBase.alive && buildings.includes(u._returnBase)) ? u._returnBase : home;
-    if(!b || !b.alive || !buildings.includes(b)){
-      u._returning = false; u._returnBase = null;   // 机场没了:继续盘旋
+    const b = (u._returnBase && airBaseAlive(u._returnBase)) ? u._returnBase : home;
+    if(!airBaseAlive(b)){
+      u._returning = false; u._returnBase = null;   // 母港没了:继续盘旋
     } else {
       const d = Math.hypot(b.x-u.x, b.y-u.y);
       if(d <= 60){
-        if(u._returnBase && airfieldUsedSlots(b) >= AIRFIELD_CAPACITY){
-          u._returning = false; u._returnBase = null;   // 新机场停机位满,继续盘旋
+        if(u._returnBase && airfieldUsedSlots(b) >= airBaseCapacity(b)){
+          u._returning = false; u._returnBase = null;   // 新母港停机位满,继续盘旋
           if(!u.patrol) u.patrol = {x:b.x, y:b.y};
         } else {
           parkAircraft(u, b);
@@ -998,7 +1118,7 @@ function updateAircraft(u, dt){
       u.gbuAmmo -= n;
       if(u.gbuAmmo<=0){
         u.bombing = false;
-        textPopup(u.x, u.y-20, 'GBU-31 已全部投放','#ffd24a');
+        textPopup(u.x, u.y-20, airBombName(u)+' 已全部投放','#ffd24a');
       }
       updatePanel();
     }
@@ -1132,6 +1252,27 @@ function chopperSpawn(u, b){
 }
 /* ============ 弹簧刀无人机(艾布拉姆X释放:悬浮待命 / 右键撞击自爆) ============ */
 // 每帧:有攻击目标就直线飞向目标,进入接触距离即自爆;无目标则悬停(可右键移动改悬停点)
+// 咆哮者干扰光环(F/A-18 专属挂点武器,被动,只对敌方生效):
+// 1) 圈内敌方 TOW/长钉 地面反坦克导弹全部打上 jammed(updateMissiles 乱飞3步后爆炸,爆炸不分敌我);
+// 2) 圈内敌方弹簧刀无人机原地自爆;
+// 3) 敌方 APS 失效由 growlerJamNear 在 APS 探测处判定(见 updateUnit)。
+function updateGrowlerAura(u, dt){
+  for(const m of missiles){
+    if(m.dead || m.jammed) continue;
+    if(m.spriteType!=='tow' && m.spriteType!=='spike') continue;   // 只干扰地面反坦克导弹(空军导弹免疫)
+    if(!isEnemy(u.team, m.team)) continue;                          // 对我方无影响
+    if(dist(u,m) > GROWLER_JAM_RADIUS) continue;
+    m.jammed = true; m.jamSteps = 0; m._jamStepD = 0;
+    m.ang = Math.atan2(m.y-u.y, m.x-u.x) + rnd(-Math.PI, Math.PI);  // 乱飞起始方向
+    effects.push(new Effect(m.x, m.y, 'ring', 18));
+  }
+  for(const v of units){
+    if(v.hp<=0 || v.type!=='drone' || !isEnemy(u.team, v.team)) continue;
+    if(dist(u,v) <= GROWLER_JAM_RADIUS){
+      droneDetonate(v, null);   // 敌方无人机原地自爆(自爆伤害按原规则结算)
+    }
+  }
+}
 function updateDrone(u, dt){
   const at = u.target;
   if(at && (at.hp===undefined || at.hp<=0 || at.alive===false)) u.target = null;
@@ -1176,7 +1317,7 @@ function droneDetonate(u, primary){
   }
   for(const b of buildings){
     if(!b.alive || b===primary) continue;
-    if(dist(b,{x:u.x,y:u.y}) <= DRONE_AOE_RADIUS) applyDamage(b, DRONE_DAMAGE, u, 'cannon');
+    if(pointToBuildingDist(b, u.x, u.y) <= DRONE_AOE_RADIUS) applyDamage(b, DRONE_DAMAGE, u, 'cannon');
   }
 }
 // 艾布拉姆X 释放无人机:在坦克旁生成一架悬浮无人机,扣 1 发并开始填装
@@ -2005,7 +2146,7 @@ function findEnemyNear(u, range){
     if(d<bd){ bd=d; best=v; }
   }
   if(best) return best;
-  for(const b of buildings){ if(!b.alive || b.team<0 || !isEnemy(u.team,b.team)) continue; const d=dist(u,b); if(d<range && d<bd){bd=d;best=b;} }
+  for(const b of buildings){ if(!b.alive || b.team<0 || !isEnemy(u.team,b.team)) continue; const d=pointToBuildingDist(b,u.x,u.y); if(d<range && d<bd){bd=d;best=b;} }
   return best;
 }
 function fireAt(u,target){
@@ -2052,6 +2193,18 @@ function fireAt(u,target){
     pr.tankShell = true;
   }
   projectiles.push(pr);
+  if(highEffectsEnabled){
+    const muzzle=new Effect(px,py,'muzzle',isTankShellUnit(u)?10:(u.type==='infantry'?5:7));
+    muzzle.ang=Math.atan2(target.y-py,target.x-px);
+    muzzle.life=isTankShellUnit(u)?0.16:0.11;
+    muzzle.maxLife=muzzle.life;
+    muzzle.team=u.team;
+    effects.push(muzzle);
+    if(isTankShellUnit(u) || isIFV25(u)){
+      const puff=new Effect(px-Math.cos(muzzle.ang)*4,py-Math.sin(muzzle.ang)*4,'muzzleSmoke',isTankShellUnit(u)?6:3.5);
+      puff.ang=muzzle.ang; puff.life=0.32; puff.maxLife=0.32; effects.push(puff);
+    }
+  }
   // 所有坦克/载具开火不再产生后坐力位移(避免车身开火抽动)
   if(bolt){
     // 磁暴步兵:释放一段闪电特效(纯视觉,命中伤害走弹体)
@@ -2246,7 +2399,7 @@ function findRefinery(u){
   let best=null,bd=1e9;
   for(const b of buildings){
     if(b.team!==u.team||!b.alive||b.defName!=='refinery') continue;
-    const d=dist(u,b); if(d<bd){bd=d;best=b;}
+    const d=pointToBuildingDist(b,u.x,u.y); if(d<bd){bd=d;best=b;}
   }
   u.refinery=best;
 }
@@ -2282,6 +2435,7 @@ function doGarrison(u){
   else b.garrisonTank=u;
   if(b._origTeam===null) b._origTeam = (b.team<0 ? -1 : b.team);
   b.team = u.team;   // 进驻后自动归属该方
+  u.garrisoned = true;   // 标记已进驻:外部弹丸/导弹不再结算伤害
   units = units.filter(s=>s!==u);
   if(selected.includes(u)) selected=selected.filter(s=>s!==u);
   textPopup(b.x,b.y-20, u.def.name+' 已进驻','#8aff8a');
@@ -2290,12 +2444,14 @@ function doGarrison(u){
 function garrisonUnitCount(b){
   return (b.garrison ? b.garrison.length : 0) + (b.garrisonTank ? 1 : 0);
 }
-function releaseGarrison(b){
-  if(!b || !(b instanceof Building) || !b.alive) return 0;
+function releaseGarrison(b, allowDead){
+  if(!b || !(b instanceof Building)) return 0;
+  if(!allowDead && !b.alive) return 0;   // 建筑已毁:仅允许摧毁时自动释放
   const team = b.team;
   const all = b.garrison.slice();
   if(b.garrisonTank) all.push(b.garrisonTank);
-  const pts = formationTargets(b.x, b.y, all.length ? all : [{}]);
+  if(!all.length) return 0;
+  const pts = formationTargets(b.x, b.y, all);
   const out=[];
   for(let i=0;i<all.length;i++){
     const c=all[i];
@@ -2325,13 +2481,26 @@ function projSpeedFor(type){
   if(type==='transport') return 520;
   return 420;
 }
-// 进驻建筑自动向外射击:用进驻单位的武器,射程=该单位射程+20
+// 点 (x,y) 到建筑占格矩形的最短距离(点在占格内返回 0):整格都是伤害吸收点
+function pointToBuildingDist(b, x, y){
+  const x0=b.tx*TILE, y0=b.ty*TILE, x1=(b.tx+b.w)*TILE, y1=(b.ty+b.h)*TILE;
+  const dx = x<x0 ? x0-x : (x>x1 ? x-x1 : 0);
+  const dy = y<y0 ? y0-y : (y>y1 ? y-y1 : 0);
+  return Math.hypot(dx, dy);
+}
+// 单位到目标的有效距离:建筑按"到占格边缘的最短距离"(整格为吸收点),单位按中心距离
+function unitTargetDist(u, t){
+  if(t instanceof Building) return pointToBuildingDist(t, u.x, u.y);
+  return dist(u, t);
+}
+// 进驻建筑自动向外射击:用进驻单位的武器,总射程=建筑半对角线 + 该单位射程(以正中心为中点)
 function updateGarrisonAttack(b, dt){
   b.fireT -= dt;
+  const diag = Math.hypot(b.w*TILE, b.h*TILE)/2;   // 建筑半对角线(边缘到中心距离)
   let range=0;
   for(const uu of b.garrison) if(uu && uu.def) range=Math.max(range, uu.def.range);
   if(b.garrisonTank && b.garrisonTank.def) range=Math.max(range, b.garrisonTank.def.range);
-  range += 20;
+  range += diag;   // 总射程 = 半对角线 + 进驻单位射程
   if(!b.turretTarget || !b.turretTarget.hp || b.turretTarget.hp<=0 || !isEnemy(b.team,b.turretTarget.team) || dist(b,b.turretTarget)>range*1.3){
     b.turretTarget=null;
     let best=null,bd=1e9;
@@ -2349,13 +2518,13 @@ function updateGarrisonAttack(b, dt){
     const tt=b.turretTarget;
     for(const uu of b.garrison){
       if(!uu || !uu.def) continue;
-      if(dist(b,tt) <= uu.def.range+20){
+      if(dist(b,tt) <= diag + uu.def.range){
         const pr=new Projectile(b.x,b.y-b.h*TILE/2, tt.x,tt.y, tt, uu.def.damage, b.team, projSpeedFor(uu.type), uu, uu.def.proj);
         if(isTankShellUnit(uu)) pr.tankShell=true;
         projectiles.push(pr);
       }
     }
-    if(b.garrisonTank && b.garrisonTank.def && dist(b,tt)<=b.garrisonTank.def.range+20){
+    if(b.garrisonTank && b.garrisonTank.def && dist(b,tt)<=diag + b.garrisonTank.def.range){
       const pr=new Projectile(b.x,b.y-b.h*TILE/2, tt.x,tt.y, tt, b.garrisonTank.def.damage, b.team, projSpeedFor(b.garrisonTank.type), b.garrisonTank, b.garrisonTank.def.proj);
       if(isTankShellUnit(b.garrisonTank)) pr.tankShell=true;
       projectiles.push(pr);
@@ -2367,7 +2536,7 @@ function doBoard(u){
   u._boarded=false; u.boardTo=null;
   if(!t || t.hp<=0 || !units.includes(t)){ u.order={kind:'none'}; return; }
   if(t.chopper && !t.landed){ u.order={kind:'none'}; return; }   // 直升机已起飞,不能上机
-  if(transportCost(u) > (t.capacity - usedCapacity(t))){ u.order={kind:'none'}; return; }  // 已满,停在原地
+  if(transportCostIn(t,u) > (t.capacity - usedCapacity(t))){ u.order={kind:'none'}; return; }  // 已满,停在原地
   // 从场上移除,进入运输艇舱内(保留对象引用以便卸载时恢复属性)
   t.cargoUnits.push(u);
   units = units.filter(s=>s!==u);
@@ -2439,7 +2608,7 @@ function updateMissiles(dt){
     // 直线追踪目标,命中爆炸(AOE),超射程自爆,目标死亡自爆
     if(m.air){
       const t=m.target;
-      if(!t || t.hp===undefined || t.hp<=0){
+      if(!t || t.hp===undefined || t.hp<=0 || t.garrisoned){
         explodeATGM(m, m.x, m.y, null);
         continue;
       }
@@ -2482,8 +2651,8 @@ function updateMissiles(dt){
       continue;
     }
     const t=m.target;
-    // 目标已死:导弹在当前位置立即自动爆炸
-    if(!t || t.hp===undefined || t.hp<=0){
+    // 目标已死或已进驻:导弹在当前位置立即自动爆炸
+    if(!t || t.hp===undefined || t.hp<=0 || t.garrisoned){
       explodeATGM(m, m.x, m.y, null);
       continue;
     }
@@ -2535,11 +2704,11 @@ function atgmBlocker(m){
 function launchATGM(u, target){
   const ang=Math.atan2(target.y-u.y, target.x-u.x);
   const x=u.x+Math.cos(ang)*(u.r+12), y=u.y+Math.sin(ang)*(u.r+12);
-  const m=new Missile(x, y, target, u.team, u, u.type==='puma'?'spike':'tow');
+  const m=new Missile(x, y, target, u.team, u, (u.type==='puma'||u.type==='namer')?'spike':'tow');
   missiles.push(m);
   effects.push(new Effect(x,y,'ring',14));
   for(let i=0;i<3;i++){ const sm=new Effect(x+rnd(-3,3), y+rnd(-3,3), 'smoke', rnd(3,6)); sm.life=0.5; sm.maxLife=0.5; effects.push(sm); }
-  textPopup(u.x, u.y-22, atgmMissileName(u.type==='puma'?'spike':'tow')+' 发射','#ffd24a');
+  textPopup(u.x, u.y-22, atgmMissileName((u.type==='puma'||u.type==='namer')?'spike':'tow')+' 发射','#ffd24a');
 }
 // 发射空军导弹(F16:A-120c/A-174b;苏35:R-37m/Kh-29,导弹种类不同、数值相同):从机头稍出膛,直线追踪目标
 function launchAirMissile(u, target, kind){
@@ -2586,7 +2755,7 @@ function gbuExplode(m, ex, ey, primary){
   }
   for(const b of buildings){
     if(!b.alive || b===primary) continue;
-    if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, m.damage, m.attacker, 'cannon');
+    if(pointToBuildingDist(b, ex, ey) <= m.explodeR) applyDamage(b, m.damage, m.attacker, 'cannon');
   }
 }
 // 爆炸:目标(或挡路者)吃单体满伤,范围内其它单位/建筑吃范围伤害(范围不大)
@@ -2606,7 +2775,7 @@ function explodeATGM(m, ex, ey, primary){
   }
   for(const b of buildings){
     if(!b.alive || b===primary) continue;
-    if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
+    if(pointToBuildingDist(b, ex, ey) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
   }
 }
 /* ============ 红外干扰(被干扰导弹):乱飞 3 步后爆炸,不分敌我 ============ */
@@ -2640,7 +2809,7 @@ function explodeIRJam(m, ex, ey, primary){
   }
   for(const b of buildings){
     if(!b.alive) continue;
-    if(dist(b,{x:ex,y:ey}) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
+    if(pointToBuildingDist(b, ex, ey) <= m.explodeR) applyDamage(b, aoe, m.attacker, 'missile');
   }
 }
 /* ============ 自主防御反导弹(拦截弹):追踪来袭 TOW 导弹,命中即摧毁 ============ */
