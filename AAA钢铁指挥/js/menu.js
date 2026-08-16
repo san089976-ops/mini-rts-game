@@ -165,7 +165,7 @@ function setCompCount(n){
   menuState.compCount=Math.max(1, Math.min(maxTeamCount()-1, n));   // n=电脑数量(总队伍=n+1,按当前地图上限钳制)
   menuState.spawnTarget=Math.min(menuState.spawnTarget, Math.max(0,n));
   initSpawnIdx();
-  buildMenu(true);
+  buildMenu(false);   // 只刷新队伍/出生点,不重新生成随机地形
 }
 function setTeamFaction(i,fac){
   if(i===0) menuState.playerFaction=fac;
@@ -368,7 +368,7 @@ async function autoScanStored(done){
     if(maps.length){ window.CUSTOM_MAPS=maps; }
     customMapsLoaded=true;
   }catch(e){}
-  buildMenu(true);
+  buildMenu(false);
 }
 function setMenuStatus(s){
   const el=document.getElementById('status');
@@ -526,6 +526,32 @@ function renderSpawnButtons(){
   }
 }
 
+let menuPreviewCache = null;
+let menuPreviewKey = '';
+let menuTerrainCanvas = null;
+let menuTerrainKey = '';
+function buildMenuTerrainRaster(){
+  const key=MAP_W+'x'+MAP_H+':'+terrainVersion;
+  if(menuTerrainCanvas && menuTerrainCanvas.width===MAP_W && menuTerrainCanvas.height===MAP_H && menuTerrainKey===key) return;
+  if(!menuTerrainCanvas) menuTerrainCanvas=document.createElement('canvas');
+  menuTerrainCanvas.width=MAP_W; menuTerrainCanvas.height=MAP_H;
+  const tg=menuTerrainCanvas.getContext('2d');
+  const img=tg.createImageData(MAP_W, MAP_H);
+  const d=img.data;
+  for(let x=0;x<MAP_W;x++){
+    const row=terrain[x];
+    for(let y=0;y<MAP_H;y++){
+      const t=(row&&row[y])||'grass';
+      const o=(y*MAP_W+x)*4;
+      if(t==='water'){ d[o]=23; d[o+1]=75; d[o+2]=99; }
+      else if(t==='tree'){ d[o]=28; d[o+1]=59; d[o+2]=54; }
+      else { d[o]=38; d[o+1]=53; d[o+2]=47; }
+      d[o+3]=255;
+    }
+  }
+  tg.putImageData(img,0,0);
+  menuTerrainKey=key;
+}
 function renderMenuPreview(){
   const cv=document.getElementById('mapPrev');
   if(!cv) return;
@@ -534,18 +560,23 @@ function renderMenuPreview(){
   // 等比包含缩放:直到长或宽任一边与画板等距(正方形/竖长图也能完整显示),并居中
   const s = Math.min(cw/MAP_W, ch/MAP_H);
   const ox = (cw - MAP_W*s)/2, oy = (ch - MAP_H*s)/2;
-  g.fillStyle='#071116'; g.fillRect(0,0,cw,ch);
-  for(let x=0;x<MAP_W;x++) for(let y=0;y<MAP_H;y++){
-    const t=(terrain[x]&&terrain[x][y])||'grass';
-    g.fillStyle = t==='water' ? '#174b63' : (t==='tree' ? '#1c3b36' : '#26352f');
-    g.fillRect(ox+x*s, oy+y*s, s+0.4, s+0.4);
+  const cacheKey = MAP_W+'x'+MAP_H+':'+terrainVersion;
+  if(!menuPreviewCache || menuPreviewCache.width!==cw || menuPreviewCache.height!==ch || menuPreviewKey!==cacheKey){
+    if(!menuPreviewCache) menuPreviewCache=document.createElement('canvas');
+    menuPreviewCache.width=cw; menuPreviewCache.height=ch;
+    const cg=menuPreviewCache.getContext('2d');
+    cg.fillStyle='#071116'; cg.fillRect(0,0,cw,ch);
+    buildMenuTerrainRaster();
+    cg.imageSmoothingEnabled=false;
+    cg.drawImage(menuTerrainCanvas, ox, oy, MAP_W*s, MAP_H*s);
+    cg.strokeStyle='rgba(126,211,213,.15)'; cg.lineWidth=.6; cg.beginPath();
+    for(let x=0;x<=MAP_W;x+=4){ cg.moveTo(ox+x*s,oy); cg.lineTo(ox+x*s,oy+MAP_H*s); }
+    for(let y=0;y<=MAP_H;y+=4){ cg.moveTo(ox,oy+y*s); cg.lineTo(ox+MAP_W*s,oy+y*s); }
+    cg.stroke();
+    cg.strokeStyle='rgba(57,215,223,.55)'; cg.lineWidth=1; cg.strokeRect(ox+.5,oy+.5,MAP_W*s-1,MAP_H*s-1);
+    menuPreviewKey=cacheKey;
   }
-  // 战术地图网格:每4格一条主网格,保留细小方格的方向感。
-  g.strokeStyle='rgba(126,211,213,.15)'; g.lineWidth=.6; g.beginPath();
-  for(let x=0;x<=MAP_W;x+=4){ g.moveTo(ox+x*s,oy); g.lineTo(ox+x*s,oy+MAP_H*s); }
-  for(let y=0;y<=MAP_H;y+=4){ g.moveTo(ox,oy+y*s); g.lineTo(ox+MAP_W*s,oy+y*s); }
-  g.stroke();
-  g.strokeStyle='rgba(57,215,223,.55)'; g.lineWidth=1; g.strokeRect(ox+.5,oy+.5,MAP_W*s-1,MAP_H*s-1);
+  g.drawImage(menuPreviewCache,0,0);
   // 金矿
   for(const o of oreFields) if(o.amount>0){
     const px=ox+o.x*s, py=oy+o.y*s;

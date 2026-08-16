@@ -31,22 +31,24 @@ function gridCollect(x, y, range){
   }
   return spCand;
 }
+function requestPanelUpdate(){
+  panelT = Math.min(panelT, 0.001);
+}
 function update(dt){
   time+=dt;
   processPathJobs();
   if(gameOver){ overTimer+=dt; return; }
-  // 资金/电力每帧轻量刷新;按钮面板每 0.3s 重建一次,避免每帧 DOM 重建
-  updateStats();
-  panelT-=dt; if(panelT<=0){ panelT=0.3; updatePanel(); }
-  // 每帧重建一次空间网格(单位移动前),供索敌/分离/炮塔共享
-  buildGrid();
-  // 每帧按队伍各算一次电力,避免 updateBuilding 里反复 O(建筑²)
+  // 电力每帧只算一次,资金/电力 UI 与建筑更新共用;面板每 0.2s 重建一次
   const teamPower={};
   for(const b of buildings){
     if(!b.alive) continue;
     const p=teamPower[b.team]||(teamPower[b.team]={give:0,use:0});
     p.give+=b.powerGive; p.use+=b.powerUse;
   }
+  updateStats(teamPower[TEAM_A] || {give:0,use:0});
+  panelT-=dt; if(panelT<=0){ panelT=0.2; updatePanel(); }
+  // 每帧重建一次空间网格(单位移动前),供索敌/分离/炮塔共享
+  buildGrid();
   // 采矿车自动找矿/倒矿 + 单位战斗(只更新逻辑/期望速度,不直接改坐标)
   for(const u of units){ updateUnit(u, dt); }
   // 上船处理(等遍历结束再移除,避免改数组跳过元素)
@@ -123,7 +125,10 @@ function update(dt){
   // 清理死亡单位
   units=units.filter(u=>u.hp>0);
   // 同步清理选中列表:死亡单位若还留在 selected,会继续画出它的移动线/信息
-  if(selected.length && selected.some(u=>!units.includes(u))) selected=selected.filter(u=>units.includes(u));
+  if(selected.length){
+    const aliveSet=new Set(units);
+    if(selected.some(u=>!aliveSet.has(u))) selected=selected.filter(u=>aliveSet.has(u));
+  }
   // 任务模式:胜负由 updateMission 按波次清敌判定,不套用双方建筑存活规则
   if(gameSetup && gameSetup.mode === 'mission' && !gameOver) updateMission(dt);
   // 胜负判定(摧毁所有建筑获胜/战败;gameTeams 仅在开局后非空,避免主菜单误判)
@@ -337,7 +342,7 @@ function updateBuilding(b, dt, teamPower){
       onResearchComplete(b.team, id);
       textPopup(b.x,b.y-10, rd.name+' 研究完成','#8aff8a');
       effects.push(new Effect(b.x,b.y,'ring',24));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // 发电厂升级收入:每级每秒 +1 资金(发电改进科技:升级1级以上的电厂额外 +1/秒)
@@ -426,7 +431,7 @@ function updateUnit(u, dt){
     if(u.droneReload<=0){
       u.droneAmmo = 1; u.droneReload = 0;
       textPopup(u.x,u.y-20,'无人机 填装完成','#8aff8a');
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T62 升级链护盾(T64B 150 回5 / T64BM 200 回10)
@@ -465,7 +470,7 @@ function updateUnit(u, dt){
       u.rarmUpgrading=false; u.rarmProg=0; u.rarm=true; u.shield=rarmShieldMaxFor(u);
       textPopup(u.x,u.y-20,'反应装甲 安装完成 ('+rarmShieldMaxFor(u)+'盾)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T84BM 红外干扰装置安装进度
@@ -475,7 +480,7 @@ function updateUnit(u, dt){
       u.irUpgrading=false; u.irProg=0; u.ir=true; u.irOn=true;
       textPopup(u.x,u.y-20,'红外干扰装置 安装完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // 艾布拉姆 TUSK 升级包安装进度(装好给满盾,外观自动换 M1A2TUSK)
@@ -485,7 +490,7 @@ function updateUnit(u, dt){
       u.tuskUpgrading=false; u.tuskProg=0; u.tusk=true; u.shield=TUSK_SHIELD;
       textPopup(u.x,u.y-20,'TUSK 升级包 安装完成 (300盾)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // 艾布拉姆 火炮升级包安装进度(装好 +15 伤害 +15 射程)
@@ -499,7 +504,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20,'火炮升级 安装完成 (+15伤 +15射程)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // M60A3 升级包安装进度(装好 +270血至600 +22射程 +27伤害,换 M60A3 外观,按差量回血)
@@ -516,7 +521,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20,'M60A3 升级完成 (+'+M60A3_HP+'血 +'+M60A3_RANGE+'射程 +'+M60A3_DMG+'伤害)','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // 挑战者坦克升级进度(不占用移动/战斗)
@@ -534,7 +539,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20, CHALL_NAMES[u.upgradeLvl]+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T72 坦克三阶升级进度(T72→T72B→T72BVM:血量/伤害/射程/移速/护甲/护盾/贴图档全部更新)
@@ -556,7 +561,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T62 四阶升级进度(T62→T64→T64B→T64BM:属性/护盾/贴图档全部更新)
@@ -577,7 +582,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T80 四阶升级进度(T80→T80B→T80U→T80BVM:属性/护盾/贴图档全部更新;T80BVM 自带 APS)
@@ -599,7 +604,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T90 单次升级进度(T90→T90M:属性/护盾/贴图档全部更新;T90M 自带 APS)
@@ -621,7 +626,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20, lv.name+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // T54 双分支升级进度(T54 → T54B / T55AM:升级时间跑完后才改变属性/贴图/护盾)
@@ -641,7 +646,7 @@ function updateUnit(u, dt){
       });
       textPopup(u.x,u.y-20, br.name+' 升级完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // 反坦克导弹模块:安装进度 + 装填倒计时
@@ -651,7 +656,7 @@ function updateUnit(u, dt){
       u.atgmUpgrading=false; u.atgmProg=0; u.atgm=true;
       textPopup(u.x,u.y-20,atgmModuleName(u)+' 安装完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',20));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   if(u.atgm) u.atgmReload = Math.max(0, u.atgmReload - dt);
@@ -662,7 +667,7 @@ function updateUnit(u, dt){
       u.apsUpgrading=false; u.apsProg=0; u.aps=true; u.apsOn=true; u.apsAmmo=apsMaxAmmoFor(u);
       textPopup(u.x,u.y-22,'自主防御系统 安装完成','#8aff8a');
       effects.push(new Effect(u.x,u.y,'ring',20));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   if(u.aps && u.apsAmmo<apsMaxAmmoFor(u)){
@@ -720,7 +725,7 @@ function updateUnit(u, dt){
         if(pl){
           u.queue.shift();
           textPopup(u.x,u.y-20,getUnitDefs(unitFactionOf(u.team))[item.type].name+' 已上舰','#8aff8a');
-          updatePanel();
+          requestPanelUpdate();
         } else { u.spawnWait=(u.spawnWait||0)+dt; }
       }
     }
@@ -950,7 +955,7 @@ function releaseAircraft(b){
     u.bombing = false; u.bombCd = 0;     // 释放时取消投弹
   });
   textPopup(b.x, b.y-24, '释放战斗机 '+parked.length+' 架','#8aff8a');
-  updatePanel();
+  requestPanelUpdate();
 }
 // 任一弹舱打空即标记需返场补充弹药;强制返航优先级低于玩家指令(玩家移动会先执行)
 function planeNeedRefuel(u){
@@ -1031,7 +1036,7 @@ function updateAircraft(u, dt){
       u.aaUpgrading = false; u.aaProg = 0; u.aa = true; u.aaAmmo = AA_AMMO;
       textPopup(u.x, u.y-20, airAAName(u)+' 空对空导弹包 安装完成','#8aff8a');
       effects.push(new Effect(u.x, u.y, 'ring', 20));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   if(u.agUpgrading){
@@ -1040,7 +1045,7 @@ function updateAircraft(u, dt){
       u.agUpgrading = false; u.agProg = 0; u.ag = true; u.agAmmo = AG_AMMO;
       textPopup(u.x, u.y-20, airAGName(u)+' 空对地导弹包 安装完成','#8aff8a');
       effects.push(new Effect(u.x, u.y, 'ring', 20));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   if(u.radarUpgrading){
@@ -1049,7 +1054,7 @@ function updateAircraft(u, dt){
       u.radarUpgrading = false; u.radarProg = 0; u.radar = true;
       textPopup(u.x, u.y-20, '雷达火控 安装完成','#8aff8a');
       effects.push(new Effect(u.x, u.y, 'ring', 22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   if(u.coatUpgrading){
@@ -1058,7 +1063,7 @@ function updateAircraft(u, dt){
       u.coatUpgrading = false; u.coatProg = 0; u.coat = true;
       textPopup(u.x, u.y-20, '涂层更新 安装完成','#8aff8a');
       effects.push(new Effect(u.x, u.y, 'ring', 22));
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // F-15 / F/A-18 / 苏-35 挂载点安装进度(完成后按挂点重算聚合弹药与标记)
@@ -1075,7 +1080,7 @@ function updateAircraft(u, dt){
         }
       }
     }
-    if(dirty){ f15RecalcAmmo(u); updatePanel(); }
+    if(dirty){ f15RecalcAmmo(u); requestPanelUpdate(); }
   }
   if(u.aa) u.aaCd = Math.max(0, u.aaCd - dt);
   if(u.ag) u.agCd = Math.max(0, u.agCd - dt);
@@ -1096,7 +1101,7 @@ function updateAircraft(u, dt){
           if(!u.patrol) u.patrol = {x:b.x, y:b.y};
         } else {
           parkAircraft(u, b);
-          updatePanel();
+          requestPanelUpdate();
         }
       } else {
         u.turnTarget = Math.atan2(b.y-u.y, b.x-u.x);
@@ -1120,7 +1125,7 @@ function updateAircraft(u, dt){
         u.bombing = false;
         textPopup(u.x, u.y-20, airBombName(u)+' 已全部投放','#ffd24a');
       }
-      updatePanel();
+      requestPanelUpdate();
     }
   }
   // 雷达火控的自动分配/倾泻模式(不依赖右键指令,独立探测)
@@ -1191,7 +1196,7 @@ function updateChopper(u, dt){
     if(u.spin <= 0){
       u.landing = false; u.landed = true;
       textPopup(u.x, u.y-20, '直升机 已降落','#8aff8a');
-      updatePanel();
+      requestPanelUpdate();
     }
   } else if((u.rising || !u.landed) && u.spin < ROTOR_FULL_SPEED){
     u.spin = Math.min(ROTOR_FULL_SPEED, u.spin + ROTOR_SPIN_ACCEL*dt);
@@ -1203,7 +1208,7 @@ function updateChopper(u, dt){
     u.fly = true;
     onChopperAirborne(u);
     textPopup(u.x, u.y-20, '直升机 升空','#8aff8a');
-    updatePanel();
+    requestPanelUpdate();
   }
   u.fly = !u.landed;   // 落地=地面单位(可被地面打),升空=飞行单位(只被空对空打)
   if(u.landed){ u.wantVx=0; u.wantVy=0; u.vx=0; u.vy=0; return; }
@@ -1224,7 +1229,7 @@ function chopperRise(u){
   if(!u.landed || u.rising) return false;
   u.rising = true; u.landing = false;
   textPopup(u.x, u.y-20, '直升机 起飞中','#ffe27a');
-  updatePanel();
+  requestPanelUpdate();
   return true;
 }
 // 降落:只能落在可通行的地面(水面/树林/建筑占格拒绝)
@@ -1235,7 +1240,7 @@ function chopperLand(u){
   if(!canChopperLandAt(tx,ty)){ textPopup(u.x,u.y-20,'此处无法降落(需可通行地面)','#ff8080'); return false; }
   u.landing = true; u.rising = false; u.dest = null;
   textPopup(u.x, u.y-20, '直升机 降落中','#ffe27a');
-  updatePanel();
+  requestPanelUpdate();
   return true;
 }
 function canChopperLandAt(tx, ty){
@@ -1336,7 +1341,7 @@ function releaseDrone(u){
   u.droneReload = DRONE_RELOAD;
   textPopup(u.x, u.y-22, '释放 弹簧刀无人机','#8aff8a');
   effects.push(new Effect(dr.x, dr.y, 'ring', 16));
-  updatePanel();
+  requestPanelUpdate();
   return true;
 }
 /* ============ 出击规划任务(精确打击 / 分布式攻击;F16,可移植到苏35) ============ */
@@ -1454,7 +1459,7 @@ function launchPrecisionStrike(uids, target){
     launched++;
   }
   if(launched) textPopup(target.x, target.y-22, '精确打击 '+launched+' 架 锁定目标','#ffb0b0');
-  updatePanel();
+  requestPanelUpdate();
   return launched;
 }
 // 分布式攻击:把玩家右键分配结果 round-robin 分到各架(按每架武器弹量封顶),分到任务的才出动
@@ -1490,7 +1495,7 @@ function launchDistributed(uids, assignments){
     launched++;
   }
   if(launched && planes.length) textPopup(planes[0].x, planes[0].y-22, '分布式攻击 '+launched+' 架 起飞','#ffb0b0');
-  updatePanel();
+  requestPanelUpdate();
 }
 /* ============ 单位互锁脱困(位移检测) ============ */
 // 有移动意图但 0.4s 内实际位移极小——比如两辆坦克顶在一起,速度被分离/刚性修正
@@ -2439,7 +2444,7 @@ function doGarrison(u){
   units = units.filter(s=>s!==u);
   if(selected.includes(u)) selected=selected.filter(s=>s!==u);
   textPopup(b.x,b.y-20, u.def.name+' 已进驻','#8aff8a');
-  updatePanel();
+  requestPanelUpdate();
 }
 function garrisonUnitCount(b){
   return (b.garrison ? b.garrison.length : 0) + (b.garrisonTank ? 1 : 0);
@@ -2471,7 +2476,7 @@ function releaseGarrison(b, allowDead){
   if(b._origTeam!==null) b.team = b._origTeam;   // 释放后变回原样(中立)
   b._origTeam=null;
   textPopup(b.x,b.y-18,'已释放 '+out.length+' 个单位','#8aff8a');
-  updatePanel();
+  requestPanelUpdate();
   return out.length;
 }
 function projSpeedFor(type){
@@ -2542,7 +2547,7 @@ function doBoard(u){
   units = units.filter(s=>s!==u);
   if(selected.includes(u)) selected=selected.filter(s=>s!==u);
   textPopup(t.x,t.y-18, u.def.name+' 已'+(t.type==='transport'?'上船':'登车'),'#8aff8a');
-  updatePanel();
+  requestPanelUpdate();
 }
 function nearestLand(x,y){
   const cxc=Math.floor(x/TILE), cyc=Math.floor(y/TILE);
@@ -2586,7 +2591,7 @@ function unloadTransport(t, at){
   if(out.length) units.push(...out);
   if(remain.length) textPopup(t.x,t.y-18,'附近没有陆地,'+remain.length+' 个单位未卸载','#ffb0b0');
   else if(out.length) textPopup(t.x,t.y-18,'已卸载 '+out.length+' 个单位','#8aff8a');
-  updatePanel();
+  requestPanelUpdate();
   return out.length;
 }
 // 手动卸载:玩家点按钮,在运兵车当前位置释放部队

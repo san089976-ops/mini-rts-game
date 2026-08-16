@@ -14,6 +14,7 @@ let selectedBlds = [];      // 多选建筑(「选择全体同类」后的批量
 let placing = null;         // {def} 正在放置的建筑
 let selling = false;        // 出售模式
 let paused = false;         // 暂停
+let menuMode = true;        // 菜单/登陆页时冻结后台画布渲染,避免空转拖慢点击
 let units = [], buildings = [], projectiles = [], effects = [], texts = [];
 let missiles = [];          // 反坦克导弹(自动制导的类单位飞行物)
 let interceptors = [];      // 自主防御反导弹(拦截弹:朝来袭 TOW 导弹追踪)

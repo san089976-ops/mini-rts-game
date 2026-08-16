@@ -50,9 +50,11 @@ function startGame(){
   gameSetup.mode = 'skirmish';
   gameTeams = gameSetup.teams;
   document.getElementById('menu').classList.add('hidden');
+  menuMode = false;
   setupGame();
 }
 function showMenu(){
+  menuMode = true;
   clearMissionMode();
   resetBattlefield();
   genTerrain();   // 回到菜单时按遭遇战当前地图重建尺寸/地形,避免旧任务地图残留
@@ -80,6 +82,7 @@ function frame(ts){
   const dt=Math.min(0.05,(ts-(frame.last||ts))/1000);
   frame.last=ts;
   frameCount++;
+  if(menuMode){ requestAnimationFrame(frame); return; }
   if(ts-lastFpsT>=500 && fpsEl){ fpsEl.textContent=(frameCount*1000/(ts-lastFpsT))|0; frameCount=0; lastFpsT=ts; }
   if(paused){ render(); requestAnimationFrame(frame); return; }   // 暂停:只保留画面,逻辑冻结
   // 相机控制
@@ -154,6 +157,6 @@ window.addEventListener('load', async ()=>{
   window.addEventListener('resize',resize);
   setupInput();
   buildMenu(true);         // 生成菜单:地图/队伍/预览(内部会生成地图)
-  loadCustomMaps(()=>buildMenu(true));   // 加载 map/index.js 列出的自制地图后刷新地图列表
+  loadCustomMaps(()=>buildMenu(false));   // 加载 map/index.js 列出的自制地图后刷新地图列表
   requestAnimationFrame(frame);
 });

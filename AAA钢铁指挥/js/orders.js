@@ -434,10 +434,11 @@ function boxSelect(x0,y0,x1,y1){
   const minX=Math.min(w0.x,w1.x),minY=Math.min(w0.y,w1.y),maxX=Math.max(w0.x,w1.x),maxY=Math.max(w0.y,w1.y);
   if(maxX-minX<6 && maxY-minY<6){ clickSelect(x1,y1); return; }
   const add=keys['ShiftLeft']||keys['ShiftRight'];
+  const selSet = add ? new Set(selected) : new Set();
   if(!add){ selected=[]; selBuilding=null; selectedBlds=[]; }
   for(const u of units){
     if(u.team!==TEAM_A || u.parked) continue;   // 停驻在机场内的飞机不参与框选
-    if(u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY && !selected.includes(u)) selected.push(u);
+    if(u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY && !selSet.has(u)){ selected.push(u); selSet.add(u); }
   }
   updatePanel();
 }

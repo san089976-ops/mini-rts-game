@@ -157,10 +157,10 @@ function buildingStatsHTML(b){
   h+='<div class="udesc">'+(UNIT_DESC['b_'+b.defName]||'')+'</div>';
   return h;
 }
-function updateStats(){
+function updateStats(teamPower){
   const moneyEl=document.getElementById('money');
   moneyEl.textContent=Math.floor(credits[TEAM_A]);
-  const p=powerOf(TEAM_A);
+  const p = teamPower || powerOf(TEAM_A);
   document.getElementById('power').textContent=p.give;
   document.getElementById('powerUse').textContent=p.use;
   document.getElementById('powerBadge').style.display = (p.give>0 && p.use>p.give) ? 'block' : 'none';
@@ -504,10 +504,12 @@ function updatePanel(){
     b.innerHTML=buildIconHTML(k,d.name[0])+'<div class="bname">'+d.name+'</div><div class="cost">$'+d.cost+'</div>'+(extra||'')+'<span class="num">'+btnIdx+'</span>';
     panel.appendChild(b);
   };
+  const unitCounts = new Map();
+  for(const u of units){ if(u.team===TEAM_A) unitCounts.set(u.type, (unitCounts.get(u.type)||0)+1); }
   const mkUnit=(defName, disabled)=>{
     btnIdx++;
     const d=getUnitDefs(playerFaction)[defName];
-    const cnt=units.filter(u=>u.team===TEAM_A&&u.type===defName).length;
+    const cnt=unitCounts.get(defName)||0;
     const b=document.createElement('div');
     b.className='btn';
     b.dataset.action=disabled?'none':'train'; b.dataset.def=defName;
