@@ -87,7 +87,7 @@ function loadEditedMap(m){
 /* ============ 自制地图:开局放置建筑/单位(队伍数不足的跳过,中立=team -1) ============ */
 function placeMapEntities(m){
   for(const bb of (m.buildings||[])){
-    if(!bb || !BLD_DEFS[bb.def]) continue;
+    if(!bb || !Object.prototype.hasOwnProperty.call(BLD_DEFS, bb.def)) continue;
     const team = (bb.team===undefined || bb.team===null) ? -1 : bb.team;
     if(team>=0 && team>=gameTeams.length) continue;
     const b = new Building(bb.def, team, bb.tx, bb.ty);
@@ -98,7 +98,7 @@ function placeMapEntities(m){
   for(const uu of (m.units||[])){
     if(!uu) continue;
     const KNOWN={infantry:1,tank:1,harvester:1,mcv:1,airfield_car:1,exo:1,magnet:1,abrams:1,t90:1,destroyer:1,transport:1,bradley:1,b11:1,marder:1,leclerc:1,leopard:1,challenger:1,puma:1,leopard1a5:1,chieftain:1,namer:1,f16:1,su35:1,f15:1,f18:1,su35h:1,t84bm:1,t72:1,t62:1,t80:1,merkava:1,littlebird:1,abramsx:1,t14:1,drone:1,uh60:1,mi17:1,ford:1,kuznetsov:1};
-    if(!KNOWN[uu.type]) continue;
+    if(!Object.prototype.hasOwnProperty.call(KNOWN, uu.type)) continue;
     const team = (uu.team===undefined || uu.team===null) ? -1 : uu.team;
     if(team>=0 && team>=gameTeams.length) continue;
     const u = new Unit(uu.type, team, uu.x*TILE + TILE/2, uu.y*TILE + TILE/2);

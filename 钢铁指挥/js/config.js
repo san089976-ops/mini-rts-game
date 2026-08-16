@@ -9,7 +9,8 @@ const RED_LINE_TIME = 1.5;
 
 // 设置当前地图尺寸(海战图等可更大),所有 MAP_W/MAP_H/W/H 均为运行时读取
 function setMapSize(w, h){
-  MAP_W = w; MAP_H = h;
+  MAP_W = Math.max(4, Math.min(220, Math.round(w) || 64));
+  MAP_H = Math.max(4, Math.min(220, Math.round(h) || 48));
   W = MAP_W * TILE; H = MAP_H * TILE;
   GRID_COLS = Math.ceil(W / GRID_C);
   cam.maxX = W; cam.maxY = H;
@@ -1078,7 +1079,7 @@ function preloadImages(onProgress){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-const GAME_VERSION = '1.8.38';
+const GAME_VERSION = '1.8.39';
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');

@@ -58,27 +58,43 @@ function initSpawnIdx(){
   }
 }
 
-/* ============ 加载 map 文件夹的地图(map/index.js 给出文件名,逐个注入) ============ */
+/* ============ 加载 map 文件夹的地图(map/index.json 列出文件名,逐个读取 JSON) ============ */
 function loadCustomMaps(done){
   window.CUSTOM_MAPS = window.CUSTOM_MAPS || [];
-  const idx = window.CUSTOM_MAPS_INDEX || [];
-  if(!idx.length){
-    customMapsLoaded = true;
-    autoScanStored(done);   // 无清单时也尝试从已授权 map 文件夹发现自声明地图
-    return;
-  }
-  let remaining = idx.length;
-  for(const name of idx){
-    const start = window.CUSTOM_MAPS.length;
-    const s=document.createElement('script');
-    s.src='map/'+name;
-    s.onload=()=>{
-      for(let i=start;i<window.CUSTOM_MAPS.length;i++){ const m=window.CUSTOM_MAPS[i]; if(m && !m._file) m._file=name; }
-      remaining--; if(remaining<=0){ customMapsLoaded=true; autoScanStored(done); }
+  fetchMapIndex().then(names=>{
+    if(!names.length){
+      customMapsLoaded = true;
+      autoScanStored(done);   // 无清单时也尝试从已授权 map 文件夹发现地图
+      return;
+    }
+    const maps = [];
+    let remaining = names.length;
+    let settled = false;
+    const settle = ()=>{
+      if(settled) return;
+      settled = true;
+      window.CUSTOM_MAPS = maps;
+      customMapsLoaded = true;
+      autoScanStored(done);
     };
-    s.onerror=()=>{ remaining--; if(remaining<=0){ customMapsLoaded=true; autoScanStored(done); } };
-    document.head.appendChild(s);
-  }
+    for(const name of names){
+      fetch('map/'+encodeURIComponent(name), { cache:'no-store' })
+        .then(res=> res.ok ? res.text() : '')
+        .then(text=>{
+          const m = loadMapJSON(text);
+          if(m){ m._file = name; maps.push(m); }
+          remaining--;
+          if(remaining <= 0) settle();
+        })
+        .catch(()=>{
+          remaining--;
+          if(remaining <= 0) settle();
+        });
+    }
+  }).catch(()=>{
+    customMapsLoaded = true;
+    autoScanStored(done);
+  });
 }
 
 /* ============ 模式选择页(登陆页) ============ */
@@ -253,7 +269,7 @@ function renderMapFileList(){
       row.className='mapFileRow';
       row._file = m._file;
       row._cid = m.id;
-      row.innerHTML='<span class="mfIcon">📄</span><span class="mfName">'+esc(m._file || ((m.name||m.id||'未命名')+'.js'))+'</span>';
+      row.innerHTML='<span class="mfIcon">📄</span><span class="mfName">'+esc(m._file || ((m.name||m.id||'未命名')+'.json'))+'</span>';
       row.onclick=()=>{
         for(const r of el.children) r.classList.remove('sel');
         row.classList.add('sel');
@@ -311,15 +327,11 @@ async function idbSet(key,val){ try{ const db=await idbOpen(); await new Promise
 async function readMapsFromHandle(h){
   const maps=[];
   for await (const [name, fh] of h.entries()){
-    if(!name.endsWith('.js') || name==='index.js') continue;
+    if(!validMapFileName(name)) continue;
     try{
       const file=await fh.getFile();
       const text=await file.text();
-      const prev=window.CUSTOM_MAPS||[];
-      window.CUSTOM_MAPS=[];
-      (0,eval)(text);
-      const m=window.CUSTOM_MAPS && window.CUSTOM_MAPS[0];
-      window.CUSTOM_MAPS=prev;
+      const m=loadMapJSON(text);
       if(m){ m._file=name; maps.push(m); }
     }catch(e){}
   }
@@ -328,22 +340,22 @@ async function readMapsFromHandle(h){
 }
 async function writeMapIndex(h, names){
   try{
-    names=names.filter(n=>n && n.endsWith('.js') && n!=='index.js').sort();
-    const fh=await h.getFileHandle('index.js',{create:true});
+    names=names.filter(validMapFileName).sort();
+    const fh=await h.getFileHandle('index.json',{create:true});
     const w=await fh.createWritable();
-    await w.write('window.CUSTOM_MAPS_INDEX='+JSON.stringify(names)+';\n');
+    await w.write(JSON.stringify(names));
     await w.close();
   }catch(e){}
 }
 async function scanMapFolder(){
-  if(!('showDirectoryPicker' in window)){ alert('当前浏览器不支持直接读取文件夹,请用 Chrome/Edge,或在地图编辑器里保存(自动生成 index.js)。'); return; }
+  if(!('showDirectoryPicker' in window)){ alert('当前浏览器不支持直接读取文件夹,请用 Chrome/Edge,或在地图编辑器里保存(自动生成 index.json)。'); return; }
   try{
     const h=await window.showDirectoryPicker();
     mapDirHandle=h;
     const maps=await readMapsFromHandle(h);
     if(maps.length){ window.CUSTOM_MAPS=maps; }
     else { window.CUSTOM_MAPS=[]; }
-    await writeMapIndex(h, maps.map(m=>m._file));   // 顺手刷新 index.js,下次启动自动生效
+    await writeMapIndex(h, maps.map(m=>m._file));   // 顺手刷新 index.json,下次启动自动生效
     await idbSet('dirHandle', h);
     customMapsLoaded=true;
     setMenuStatus('已扫描 map 文件夹: '+maps.length+' 张地图');
@@ -355,7 +367,7 @@ async function scanMapFolder(){
     buildMenu(true);
   }catch(e){ if(e && e.name!=='AbortError') setMenuStatus('扫描失败: '+e.message); }
 }
-// 启动时若有已保存的文件夹句柄,自动扫描刷新(不用手动重新连接;无用户手势时可能被浏览器拒,失败则保留 index.js 的列表)
+// 启动时若有已保存的文件夹句柄,自动扫描刷新(不用手动重新连接;无用户手势时可能被浏览器拒,失败则保留 index.json 的列表)
 async function autoScanStored(done){
   const h=await idbGet('dirHandle');
   if(!h){ if(done) done(); else buildMenu(true); return; }

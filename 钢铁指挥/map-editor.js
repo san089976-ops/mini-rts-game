@@ -236,6 +236,7 @@ function autoCommandForSpawn(sidx, sx, sy){
 }
 
 /* ============ 属性编辑(选中建筑/单位/出生点) ============ */
+function escHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function renderProp(){
   const box=$('propBox');
   const m=EDIT.map;
@@ -255,7 +256,7 @@ function renderProp(){
     const sp=m.spawns[s.idx]; if(!sp){ resetSel(); return; }
     title='出生点';
   }
-  let h='<div class="propTitle">'+title+'</div>';
+  let h='<div class="propTitle">'+escHtml(title)+'</div>';
   h+='<div class="propRow"><span>所属玩家</span></div>';
   h+='<div class="teamBtns">';
   for(let i=1;i<=8;i++){ h+='<button class="tBtn" data-t="'+i+'">'+i+'</button>'; }
@@ -322,13 +323,13 @@ function mapJSON(){
   const name=(m.name||'未命名地图').trim();
   const fileBase=name.replace(/[\\/:*?"<>|]/g,'_').trim()||'map';
   m.id = fileBase;
-  const obj={ id:fileBase, _file:fileBase+'.js', name, width:m.width, height:m.height, custom:'edited',
+  const obj={ id:fileBase, _file:fileBase+'.json', name, width:m.width, height:m.height, custom:'edited',
     terrain:m.terrain, ores:m.ores,
     buildings:(m.buildings||[]).map(b=>({def:b.def, team:b.team, tx:b.tx, ty:b.ty})),
     units:(m.units||[]).map(u=>({type:u.type, team:u.team, x:u.x, y:u.y})),
     spawns:(m.spawns||[]).filter(s=>s).map(s=>[s[0],s[1]]),
   };
-  // 同步到内存列表,便于生成完整的 index.js
+  // 同步到内存列表,便于生成完整的 index.json
   window.CUSTOM_MAPS = window.CUSTOM_MAPS || [];
   const i=window.CUSTOM_MAPS.findIndex(x=>x && x.id===fileBase);
   if(i>=0) window.CUSTOM_MAPS[i]=obj; else window.CUSTOM_MAPS.push(obj);
@@ -337,22 +338,24 @@ function mapJSON(){
 function downloadIndex(){
   const list=window.CUSTOM_MAPS||[];
   const names=[];
-  for(const m of list){ const n=(m && (m._file||((m.id||'map')+'.js'))); if(n && n!=='index.js' && !names.includes(n)) names.push(n); }
+  for(const m of list){ const n=(m && (m._file||((m.id||'map')+'.json'))); if(n && validMapFileName(n) && !names.includes(n)) names.push(n); }
   names.sort();
-  blobDownload('index.js', 'window.CUSTOM_MAPS_INDEX='+JSON.stringify(names)+';\n');
+  blobDownload('index.json', JSON.stringify(names));
 }
-/* 启动时加载 map/index.js 列出的地图(Chrome/其它浏览器下载保存时,内存里就有全部地图,可生成完整 index) */
-function loadFolderMaps(){
+/* 启动时读取 map/index.json 列出的地图,全部按 JSON 解析 */
+async function loadFolderMaps(){
   window.CUSTOM_MAPS = window.CUSTOM_MAPS || [];
-  const idx = window.CUSTOM_MAPS_INDEX || [];
-  for(const n of idx){
-    if(n==='index.js') continue;
-    const start=window.CUSTOM_MAPS.length;
-    const s=document.createElement('script');
-    s.src='map/'+n;
-    s.onload=()=>{ for(let i=start;i<window.CUSTOM_MAPS.length;i++){ const mm=window.CUSTOM_MAPS[i]; if(mm && !mm._file) mm._file=n; } };
-    document.head.appendChild(s);
-  }
+  const names = await fetchMapIndex();
+  const loaded = [];
+  await Promise.all(names.map(async n=>{
+    try{
+      const res = await fetch('map/'+encodeURIComponent(n), { cache:'no-store' });
+      if(!res.ok) return;
+      const m = loadMapJSON(await res.text());
+      if(m){ m._file = n; loaded.push(m); }
+    }catch(e){}
+  }));
+  window.CUSTOM_MAPS = loaded;
 }
 async function connectFolder(){
   if(!('showDirectoryPicker' in window)){ setStatus('当前浏览器不支持直接连接文件夹,请用 Chrome/Edge,或用「另存为下载」'); return false; }
@@ -369,65 +372,55 @@ async function rewriteIndex(){
   if(!EDIT.dirHandle) return;
   const names=[];
   for await (const [n,h] of EDIT.dirHandle.entries()){
-    if(n.endsWith('.js') && n!=='index.js') names.push(n);
+    if(validMapFileName(n)) names.push(n);
   }
   names.sort();
-  await writeFile(EDIT.dirHandle, 'index.js', 'window.CUSTOM_MAPS_INDEX='+JSON.stringify(names)+';\n');
+  await writeFile(EDIT.dirHandle, 'index.json', JSON.stringify(names));
 }
 function blobDownload(name, content){
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([content],{type:'text/javascript'}));
+  a.href=URL.createObjectURL(new Blob([content],{type:'application/json'}));
   a.download=name;
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),3000);
 }
-// 单文件自声明:地图 JS 同时把自己追加进 CUSTOM_MAPS_INDEX,放入 map/ 后扫描即可识别
-function selfDeclareMapContent(fileBase, obj){
-  const fileName = (obj && obj._file) || fileBase+'.js';
-  return '(window.CUSTOM_MAPS=window.CUSTOM_MAPS||[]).push('+JSON.stringify(obj)+');\n'+
-    '(window.CUSTOM_MAPS_INDEX=window.CUSTOM_MAPS_INDEX||[]);\n'+
-    'if(!window.CUSTOM_MAPS_INDEX.includes('+JSON.stringify(fileName)+')) window.CUSTOM_MAPS_INDEX.push('+JSON.stringify(fileName)+');\n';
+// 地图文件现在是纯 JSON 数据,不再包含任何可执行代码
+function mapJSONContent(obj){
+  return JSON.stringify(obj);
 }
 async function saveMap(){
   const r=mapJSON(); if(!r) return;
-  const content=selfDeclareMapContent(r.fileBase, r.obj);
+  const content=mapJSONContent(r.obj);
   if(EDIT.dirHandle){
     try{
-      await writeFile(EDIT.dirHandle, r.fileBase+'.js', content);
+      await writeFile(EDIT.dirHandle, r.fileBase+'.json', content);
       await rewriteIndex();
-      setStatus('已保存: map/'+r.fileBase+'.js');
+      setStatus('已保存: map/'+r.fileBase+'.json');
     }catch(e){ setStatus('保存失败: '+e.message); }
   } else {
-    blobDownload(r.fileBase+'.js', content);
-    setStatus('已下载 '+r.fileBase+'.js。放入 map/ 后授权一次文件夹或点「扫描 map 文件夹」即可识别。');
+    blobDownload(r.fileBase+'.json', content);
+    setStatus('已下载 '+r.fileBase+'.json。放入 map/ 后授权一次文件夹或点「扫描 map 文件夹」即可识别。');
   }
 }
 function downloadMap(){
   const r=mapJSON(); if(!r) return;
-  blobDownload(r.fileBase+'.js', selfDeclareMapContent(r.fileBase, r.obj));
-  setStatus('已下载 '+r.fileBase+'.js。放入 map/ 后授权一次文件夹或点「扫描 map 文件夹」即可识别。');
+  blobDownload(r.fileBase+'.json', mapJSONContent(r.obj));
+  setStatus('已下载 '+r.fileBase+'.json。放入 map/ 后授权一次文件夹或点「扫描 map 文件夹」即可识别。');
 }
 async function openMaps(){
   if(EDIT.dirHandle){
     try{
       const list=[];
       for await (const [n,h] of EDIT.dirHandle.entries()){
-        if(n.endsWith('.js') && n!=='index.js') list.push([n,h]);
+        if(validMapFileName(n)) list.push([n,h]);
       }
       if(!list.length){ setStatus('map 文件夹里没有地图文件'); return; }
-      // 逐个读取并注册
       const maps=[];
       for(const [n,h] of list){
         try{
           const file=await h.getFile();
           const text=await file.text();
-          const fn=new Function('window', text+'\n;return (window.__tmp=window.CUSTOM_MAPS_LAST);');
-          // 用隔离方式:直接在 window.CUSTOM_MAPS 上注册
-          const prev=window.CUSTOM_MAPS||[];
-          window.CUSTOM_MAPS=[];
-          (0,eval)(text);
-          const m=window.CUSTOM_MAPS&&window.CUSTOM_MAPS[0];
-          window.CUSTOM_MAPS=prev;
+          const m=loadMapJSON(text);
           if(m){ m._file=n; maps.push(m); }
         }catch(e){ setStatus('读取 '+n+' 失败: '+e.message); }
       }
@@ -437,17 +430,13 @@ async function openMaps(){
   }
   // 回退:文件选择
   const inp=document.createElement('input');
-  inp.type='file'; inp.multiple=true; inp.accept='.js';
+  inp.type='file'; inp.multiple=true; inp.accept='.json';
   inp.onchange=async()=>{
     const maps=[];
     for(const f of inp.files){
       try{
         const text=await f.text();
-        const prev=window.CUSTOM_MAPS||[];
-        window.CUSTOM_MAPS=[];
-        (0,eval)(text);
-        const m=window.CUSTOM_MAPS&&window.CUSTOM_MAPS[0];
-        window.CUSTOM_MAPS=prev;
+        const m=loadMapJSON(text);
         if(m){ m._file=f.name; maps.push(m); }
       }catch(e){}
     }
@@ -463,7 +452,14 @@ function showOpenList(maps){
   for(const m of maps){
     const row=document.createElement('div');
     row.className='mapFileRow';
-    row.innerHTML='<span class="mfIcon">📄</span><span class="mfName">'+m.name+' <small>('+(m._file||'')+')</small></span>';
+    const icon=document.createElement('span');
+    icon.className='mfIcon';
+    icon.textContent='📄';
+    const nm=document.createElement('span');
+    nm.className='mfName';
+    nm.textContent=m.name+' ('+(m._file||'')+')';
+    row.appendChild(icon);
+    row.appendChild(nm);
     row.onclick=()=>{ loadMapData(m); ov.classList.remove('show'); };
     el.appendChild(row);
   }
