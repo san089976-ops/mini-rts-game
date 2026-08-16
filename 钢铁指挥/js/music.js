@@ -66,10 +66,10 @@ function selectMusic(i){
 }
 function updateMusicUI(){
   const vol = Math.round(musicVolPct);
-  const slider = document.getElementById('musicVolume');
-  if(slider) slider.value = String(vol);
-  const volLabel = document.getElementById('musicVolLabel');
-  if(volLabel) volLabel.textContent = String(vol);
+  const sliders = document.querySelectorAll('[data-music-volume]');
+  for(const s of sliders) s.value = String(vol);
+  const volLabels = document.querySelectorAll('[data-music-vol-label]');
+  for(const l of volLabels) l.textContent = String(vol);
   const picks = document.querySelectorAll('[data-music-pick]');
   for(const b of picks){
     const i = parseInt(b.getAttribute('data-music-pick'),10);

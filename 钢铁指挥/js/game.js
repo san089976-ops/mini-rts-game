@@ -1,6 +1,11 @@
 "use strict";
 /* ============ game.js: 游戏流程与主循环 ============ */
+function setVersionBadge(show){
+  const vb=document.getElementById('verBadge');
+  if(vb) vb.style.display = show ? '' : 'none';
+}
 function setupGame(){
+  setVersionBadge(false);
   resetBattlefield();
   if(gameSetup && gameSetup.mode === 'mission'){
     missionState = { nextWave:0, retargetT:1.2 };
@@ -54,6 +59,7 @@ function startGame(){
   setupGame();
 }
 function showMenu(){
+  setVersionBadge(true);
   menuMode = true;
   clearMissionMode();
   resetBattlefield();

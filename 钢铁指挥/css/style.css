@@ -141,7 +141,7 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
 #menu.hidden { display:none; }
 #menu h1 { font-size:58px; color:#ffe27a; text-shadow:0 0 24px rgba(255,226,122,.4), 0 4px 8px #000; letter-spacing:6px; }
 #menu .msub { color:#9fc0ac; font-size:14px; letter-spacing:2px; }
-#menu .mcols { display:flex; gap:36px; margin-top:8px; align-items:flex-start; }
+#menu .mcols { display:flex; gap:36px; margin-top:4px; align-items:flex-start; }
 #menu .mcol { min-width:210px; }
 #menu .mcol h2 { text-align:center; margin-bottom:12px; color:#9fd0b0; font-size:17px; letter-spacing:3px; }
 .mapcard { width:230px; padding:12px 14px; margin-bottom:10px; border:2px solid #3a5a4a; border-radius:10px;
@@ -289,13 +289,36 @@ canvas#main { position:absolute; top:0; left:0; display:block; cursor:crosshair;
   color:#cfe8d8; font-size:14px; letter-spacing:2px;
   padding:10px 0 4px; border-top:1px solid rgba(122,200,138,.22);
 }
-.setToggle {
-  min-width:88px; padding:8px 14px; font-size:13px; letter-spacing:2px;
-  background:linear-gradient(#3a7a4a,#2a5a3a); color:#fff;
-  border:1px solid #7ac88a; border-radius:7px; cursor:pointer;
+.fxSwitch {
+  position:relative; display:inline-flex; align-items:center; flex:none;
+  width:46px; height:24px; cursor:pointer;
 }
-.setToggle.off { background:linear-gradient(#3a4240,#262d2b); border-color:#65716b; color:#a7b5ad; }
-.setToggle:hover { border-color:#b5f0c0; }
+.fxSwitch input {
+  position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer;
+}
+.fxTrack {
+  position:relative; display:block; width:46px; height:24px;
+  background:linear-gradient(#3a4240,#262d2b);
+  border:1px solid #65716b; border-radius:12px;
+  transition:background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.fxThumb {
+  position:absolute; top:2px; left:2px; width:18px; height:18px;
+  background:#a7b5ad; border-radius:50%;
+  box-shadow:0 1px 3px rgba(0,0,0,.45);
+  transition:transform .16s ease, background .16s ease;
+}
+.fxSwitch input:checked + .fxTrack {
+  background:linear-gradient(#3a7a4a,#2f6a3f);
+  border-color:#7ac88a;
+  box-shadow:0 0 8px rgba(120,220,140,.28);
+}
+.fxSwitch input:checked + .fxTrack .fxThumb {
+  transform:translateX(22px);
+  background:#eafff0;
+}
+.fxSwitch input:focus-visible + .fxTrack { box-shadow:0 0 0 2px rgba(122,200,138,.45); }
+.fxSwitch:hover .fxTrack { border-color:#7ac88a; }
 .setBox .setRow {
   padding:12px 16px; font-size:15px; letter-spacing:2px;
   background:linear-gradient(#2c3c32,#1a241e); color:#d8f0e0;
@@ -720,8 +743,9 @@ button { transition:background .16s ease, border-color .16s ease, color .16s eas
 }
 #landing #helpBtn:hover, #landing #settingsBtn:hover { border-color:var(--ui-cyan); color:var(--ui-text); box-shadow:none; }
 #landing .mfoot, #menu .mfoot { color:#5e7378; font-size:11px; text-align:center; letter-spacing:1px; }
+#menu .mfoot { margin-top:2px; }
 
-#menu { align-items:center; justify-content:flex-start; padding:34px 24px 24px; gap:12px; overflow-y:auto; }
+#menu { align-items:center; justify-content:flex-start; padding:16px 24px 24px; gap:8px; overflow-y:auto; }
 #menu h1 { font-size:38px; }
 #menu .mcols {
   position:relative;
@@ -730,7 +754,7 @@ button { transition:background .16s ease, border-color .16s ease, color .16s eas
   grid-template-columns:minmax(230px, 1fr) minmax(390px, 1.55fr) minmax(280px, 1.05fr);
   width:min(1180px, 100%);
   gap:18px;
-  margin-top:12px;
+  margin-top:4px;
   align-items:start;
 }
 #menu .mcol {
@@ -800,6 +824,29 @@ button { transition:background .16s ease, border-color .16s ease, color .16s eas
   box-shadow:0 8px 22px rgba(0,0,0,.35);
 }
 #startBtn:hover { background:var(--ui-cyan); box-shadow:0 0 18px rgba(41,186,195,.24); }
+.menuActions {
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  width:min(440px,100%);
+  margin-top:-4px;
+}
+.menuActions #startBtn { flex:1 1 auto; min-width:0; }
+#menuSettingsBtn {
+  flex:none;
+  padding:10px 22px;
+  font-size:14px;
+  letter-spacing:2px;
+  background:#14242b;
+  color:var(--ui-text);
+  border:1px solid var(--ui-line);
+  border-radius:1px;
+  cursor:pointer;
+}
+#menuSettingsBtn:hover { background:#1d333b; border-color:var(--ui-cyan); color:#fff; }
 
 /* 任务、帮助、设置、地图浏览弹窗 */
 #missionPanel, #mapBrowser, #settingsOv, #helpOv, #soonOv { background:rgba(4,8,11,.76); backdrop-filter:blur(5px); }
@@ -871,6 +918,10 @@ button { transition:background .16s ease, border-color .16s ease, color .16s eas
   border:1px solid var(--ui-line) !important;
   border-radius:1px !important;
 }
+body:has(#menu:not(.hidden)) #verBadge {
+  right:20px !important;
+  bottom:12px !important;
+}
 
 /* 小屏幕：底部工具栏与弹窗保持可用 */
 @media (max-width:900px) {
@@ -880,7 +931,7 @@ button { transition:background .16s ease, border-color .16s ease, color .16s eas
   .btn { width:72px; height:70px; }
   #menu .mcols { grid-template-columns:1fr; max-width:560px; }
   #menu .mcol { width:100%; }
-  #menu { padding-top:20px; }
+  #menu { padding-top:10px; }
 }
 @media (max-width:640px) {
   #hud { height:150px; align-items:flex-start; overflow-x:auto; overflow-y:hidden; }

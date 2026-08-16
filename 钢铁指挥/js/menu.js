@@ -114,11 +114,11 @@ function setHighEffects(enabled){
 }
 function toggleHighEffects(){ setHighEffects(!highEffectsEnabled); }
 function updateHighEffectsUI(){
-  const b=document.getElementById('highEffectsToggle');
-  if(!b) return;
-  b.textContent=highEffectsEnabled ? '开启' : '关闭';
-  b.classList.toggle('off', !highEffectsEnabled);
-  b.setAttribute('aria-pressed', highEffectsEnabled ? 'true' : 'false');
+  const boxes=document.querySelectorAll('[data-effects-toggle]');
+  for(const b of boxes){
+    b.checked = highEffectsEnabled;
+    b.setAttribute('aria-checked', highEffectsEnabled ? 'true' : 'false');
+  }
 }
 function openSettings(){ document.getElementById('settingsOv').classList.add('show'); updateMusicUI(); updateHighEffectsUI(); }
 function closeSettings(){ document.getElementById('settingsOv').classList.remove('show'); }

@@ -1078,7 +1078,7 @@ function preloadImages(onProgress){
 }
 
 /* ===== 版本标记:用于确认浏览器加载的是最新代码(改完代码请顺手 +1) ===== */
-const GAME_VERSION = '1.8.34';
+const GAME_VERSION = '1.8.38';
 console.log('[钢铁指挥] GAME_VERSION =', GAME_VERSION);
 try{
   const vb=document.createElement('div');

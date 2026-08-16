@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>钢铁指挥</title>
-<link rel="stylesheet" href="css/style.css?v=217">
+<link rel="stylesheet" href="css/style.css?v=227">
 </head>
 <body>
 <div id="wrap">
@@ -87,7 +87,10 @@
         <div class="teamHint">· 分组 A~D:与玩家同组=同盟(蓝),其余=敌对(红)<br>· 颜色为队伍角标,9色可选,不影响阵营蓝/红<br>· 开局资金(我方)决定难度:越多越轻松<br>· 电脑难度:简单(常规)/ 中等·残酷(会研发实验室科技,收入更高、进攻更凶)<br>· 每个队伍可分别选择盟军/苏军;把电脑设为组 A 即可作为盟友</div>
       </div>
     </div>
-    <button id="startBtn" onclick="startGame()">开始对战</button>
+    <div class="menuActions">
+      <button id="startBtn" onclick="startGame()">开始对战</button>
+      <button id="menuSettingsBtn" onclick="openSettings()">设置</button>
+    </div>
     <p class="mfoot">蓝方=我方阵营 红方=敌方阵营 · 单位外形由各自阵营决定</p>
   </div>
   <div id="overlay">
@@ -164,11 +167,14 @@
         <button class="setRow" onclick="selectMusic(2)" data-music-pick="2">音乐3</button>
         <button class="setRow" onclick="selectMusic(3)" data-music-pick="3">音乐4</button>
       </div>
-      <div class="setLabel">音量 <span id="musicVolLabel">60</span></div>
-      <input id="musicVolume" class="setVolume" type="range" min="0" max="100" value="60" oninput="setMusicVolume(this.value)">
+      <div class="setLabel">音量 <span id="musicVolLabel" data-music-vol-label>60</span></div>
+      <input id="musicVolume" class="setVolume" type="range" data-music-volume min="0" max="100" value="60" oninput="setMusicVolume(this.value)">
       <div class="setOption">
         <span>高特效渲染</span>
-        <button id="highEffectsToggle" class="setToggle" type="button" onclick="toggleHighEffects()" aria-pressed="true">开启</button>
+        <label class="fxSwitch" aria-label="高特效渲染">
+          <input type="checkbox" id="highEffectsToggle" data-effects-toggle onchange="setHighEffects(this.checked)" aria-label="高特效渲染">
+          <span class="fxTrack" aria-hidden="true"><span class="fxThumb"></span></span>
+        </label>
       </div>
       <button class="setClose" onclick="closeSettings()">关闭</button>
     </div>
@@ -196,25 +202,25 @@
     </div>
   </div>
 </div>
-<script src="map/index.js?v=217"></script>
-<script src="任务文件夹/index.js?v=217"></script>
-<script src="js/config.js?v=217"></script>
-<script src="js/state.js?v=217"></script>
-<script src="js/maps.js?v=217"></script>
-<script src="js/entities.js?v=217"></script>
-<script src="js/map.js?v=217"></script>
-<script src="js/astar.js?v=217"></script>
-<script src="js/path.js?v=217"></script>
-<script src="js/build.js?v=217"></script>
-<script src="js/orders.js?v=217"></script>
-<script src="js/ai.js?v=217"></script>
-<script src="js/ui.js?v=217"></script>
-<script src="js/input.js?v=217"></script>
-<script src="js/update.js?v=217"></script>
-<script src="js/render.js?v=217"></script>
-<script src="js/menu.js?v=217"></script>
-<script src="js/missions.js?v=217"></script>
-<script src="js/music.js?v=217"></script>
-<script src="js/game.js?v=217"></script>
+<script src="map/index.js?v=227"></script>
+<script src="任务文件夹/index.js?v=227"></script>
+<script src="js/config.js?v=227"></script>
+<script src="js/state.js?v=227"></script>
+<script src="js/maps.js?v=227"></script>
+<script src="js/entities.js?v=227"></script>
+<script src="js/map.js?v=227"></script>
+<script src="js/astar.js?v=227"></script>
+<script src="js/path.js?v=227"></script>
+<script src="js/build.js?v=227"></script>
+<script src="js/orders.js?v=227"></script>
+<script src="js/ai.js?v=227"></script>
+<script src="js/ui.js?v=227"></script>
+<script src="js/input.js?v=227"></script>
+<script src="js/update.js?v=227"></script>
+<script src="js/render.js?v=227"></script>
+<script src="js/menu.js?v=227"></script>
+<script src="js/missions.js?v=227"></script>
+<script src="js/music.js?v=227"></script>
+<script src="js/game.js?v=227"></script>
 </body>
 </html>
