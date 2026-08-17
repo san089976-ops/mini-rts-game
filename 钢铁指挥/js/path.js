@@ -358,7 +358,8 @@ function pathForDetour(u, tx, ty){
   const mask = passableMaskFor(u).slice();
   const R = 240;
   for(const v of units){
-    if(v===u || v.hp<=0 || v.fly || !isEnemy(u.team, v.team)) continue;
+    // 只标记非敌方单位(同队/同盟);敌方单位不参与友军拥挤绕行
+    if(v===u || v.hp<=0 || v.fly || isEnemy(u.team, v.team)) continue;
     if(Math.abs(v.x-u.x) > R || Math.abs(v.y-u.y) > R) continue;
     const fx = Math.cos(v.facing), fy = Math.sin(v.facing);
     const off = v.colOff || 0, r = (v.colR||v.r||10) + 4;

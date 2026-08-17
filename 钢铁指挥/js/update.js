@@ -1989,8 +1989,8 @@ function applyMovement(u, dt){
       for(const c of csNow) if(uCellBlocked(u, Math.floor(c.x/TILE), Math.floor(c.y/TILE))) capBlocked++;
       const trulyBuried = centerBlocked || capBlocked >= csNow.length;
       if(trulyBuried || (u._edgeStuckT||0) >= 0.6){   // 贴边 0.6s 直接静态脱困
-        // 被埋住立即瞬移;只是擦到障碍边缘则侧移无效后卡满 1 秒才瞬移(第二位),避免正常擦墙闪跳
-        if(pullOutOfObstacle(u)) escaped = true;
+        // 被埋住立即瞬移;只是擦到障碍边缘则侧移无效且贴边超过 0.6s 时,跳过当前格直接搜最近可通行格兜底
+        if(pullOutOfObstacle(u, !trulyBuried && (u._edgeStuckT||0) >= 0.6)) escaped = true;
       }
     }
     if(!escaped){
@@ -2846,11 +2846,11 @@ function explodeIntercept(x, y){
 }
 /* ============ 建筑/障碍卡死兜底:把被"埋住"的单位拉到最近可通行格 ============ */
 // 注意:这只是脱困机制(与既有 stuck-escape 同理),不修改 astar/path 寻路本身。
-function pullOutOfObstacle(u){
+function pullOutOfObstacle(u, forceEdge){
   const cxc=Math.floor(u.x/TILE), cyc=Math.floor(u.y/TILE);
   const centerBlocked = !unitPassable(u,cxc,cyc);
-  if(!centerBlocked && !uBodyBlocked(u,u.x,u.y)) return false;   // 中心和胶囊都正常就不动
-  const ex=findExitCellFor(u, centerBlocked);
+  if(!forceEdge && !centerBlocked && !uBodyBlocked(u,u.x,u.y)) return false;   // 非强制边缘脱困时,中心和胶囊都正常就不动
+  const ex=findExitCellFor(u, centerBlocked, forceEdge);
   if(!ex) return false;
   u.x=ex.x; u.y=ex.y;
   u.vx=0; u.vy=0; u._escapeT=0; u._escapeAng=0;
@@ -2858,12 +2858,12 @@ function pullOutOfObstacle(u){
   u.path=null; u.pathIdx=0; u.repathT=0.2;
   return true;
 }
-// 以单位中心格为起点,逐圈向外找第一个可通行格(含当前格 r=0)
-function findExitCellFor(u, allowPlainFallback){
+// 以单位中心格为起点,逐圈向外找第一个可通行格;skipCurrent 时跳过当前格
+function findExitCellFor(u, allowPlainFallback, skipCurrent){
   const cxc=Math.floor(u.x/TILE), cyc=Math.floor(u.y/TILE);
   let fallback=null;
   for(let pass=0; pass<2; pass++){
-    for(let r=0;r<=8;r++){
+    for(let r=skipCurrent?1:0;r<=8;r++){
       for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
         if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
         const nx=cxc+dx, ny=cyc+dy;
