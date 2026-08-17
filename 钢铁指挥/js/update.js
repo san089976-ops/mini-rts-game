@@ -1866,7 +1866,7 @@ function applyMovement(u, dt){
     u.wantVx = u._backing.dir.x*sp*0.6;
     u.wantVy = u._backing.dir.y*sp*0.6;
   }
-  // 旋转脱困后的"短暂逃生":朝逃生方向直线滑出,不被寻路期望方向拉回卡死
+  // 脱困后的"短暂逃生":朝逃生方向直线滑出,不被寻路期望方向拉回卡死
   if(u._escapeT>0){
     u._escapeT -= dt;
     u.wantVx = Math.cos(u._escapeAng)*sp;
@@ -1938,20 +1938,24 @@ function applyMovement(u, dt){
   if(m>sp){ u.vx=u.vx/m*sp; u.vy=u.vy/m*sp; m=sp; }
   if(m>0 && m<0.5){ u.vx=0; u.vy=0; m=0; }   // 微速清零,避免停在目标点附近漂移
   // 卡住检测 + 本地脱困:有移动意图但实际速度长期过低(被同伴/地形顶住)时,
-  // 1) 先向左右/后方小步移动找不重叠的空位;2) 还不行就"旋转脱困"——
-  //    在期望朝向附近搜一个能让胶囊两圆都落在可通行格上的角度,转到该朝向滑出。
-  //    (解决长车身斜贴在水/陆边缘、建筑边缘、船坞边缘卡死的问题)
+  // 1) 先向左右/后方小步移动找不重叠的空位;2) 仍失败就拉到最近可通行格。
   const wantSpeed=wm;
+  // 加强水边/建筑角边缘检测:不仅当前车身被压,前方一小段压到水面/建筑也算贴边
+  u.isEdgeStuck = !u.fly && wm>12 && (
+    uBodyBlocked(u, u.x, u.y) ||
+    uBodyBlocked(u, u.x+(wx/wm)*8, u.y+(wy/wm)*8) ||
+    uBodyBlocked(u, u.x+(wx/wm)*16, u.y+(wy/wm)*16)
+  );
   if(wantSpeed>12 && m<wantSpeed*0.25 && !u.fly){ u.stuckT=(u.stuckT||0)+dt; }   // 飞机悬空无静态障碍,不参与卡住脱困
   else u.stuckT=0;
-  if(u.stuckT>0 && uBodyBlocked(u, u.x, u.y)) u._edgeStuckT = (u._edgeStuckT||0) + dt;   // 擦边静态卡死累计时长
+  if(u.stuckT>0 && u.isEdgeStuck) u._edgeStuckT = (u._edgeStuckT||0) + dt;   // 擦边静态卡死累计时长
   else u._edgeStuckT = 0;
-  if(u.stuckT>0.5){
+  if(u.stuckT>0.3){   // 卡住阈值降到 0.3s
     u.stuckT=0;
     const wm2=Math.max(1,wm);
     const fx=wx/wm2, fy=wy/wm2;
     const dirs=[[-fy,fx],[fy,-fx],[-fx,-fy]];   // 左,右,后
-    const staticBlocked = uBodyBlocked(u, u.x, u.y);
+    const staticBlocked = uBodyBlocked(u, u.x, u.y) || u.isEdgeStuck;
     const detourFailed = u._detourFail!==undefined && (time - u._detourFail) < 0.5;
     let escaped=false;
     if(!staticBlocked && !detourFailed){
@@ -1984,34 +1988,13 @@ function applyMovement(u, dt){
       let capBlocked = 0;
       for(const c of csNow) if(uCellBlocked(u, Math.floor(c.x/TILE), Math.floor(c.y/TILE))) capBlocked++;
       const trulyBuried = centerBlocked || capBlocked >= csNow.length;
-      if(trulyBuried || (u._edgeStuckT||0) >= 1.0){
+      if(trulyBuried || (u._edgeStuckT||0) >= 0.6){   // 贴边 0.6s 直接静态脱困
         // 被埋住立即瞬移;只是擦到障碍边缘则侧移无效后卡满 1 秒才瞬移(第二位),避免正常擦墙闪跳
         if(pullOutOfObstacle(u)) escaped = true;
       }
-      // 旋转脱困:仅当被地形/水域/建筑等"静态障碍"真正卡住时才触发
-      // (纯被同伴挤压交给分离系统,避免两辆坦克原地转圈)
-      const wantAng = Math.atan2(fy, fx);   // fx/fy = 归一化期望方向
-      const STEPS = [0, 1, -1, 2, -2, 3, -3, 6];   // ×30° 的偏移档
-      for(const s of STEPS){
-        const ang = wantAng + s*(Math.PI/6);
-        if(uBodyBlocked(u, u.x, u.y, ang)) continue;   // 该朝向下车身仍在障碍里
-        // 朝该朝向小幅滑出一段,确认能真正动起来
-        const cx = u.x + Math.cos(ang)*10, cy = u.y + Math.sin(ang)*10;
-        if(uBodyBlocked(u, cx, cy, ang)) continue;
-        if(hasUnitOverlapAt(u, cx, cy)) continue;
-        // 平滑转到脱困朝向(快速但非瞬移,避免战斗/贴边时 facing 突然抽搐)
-        u.facing = lerpAngle(u.facing, ang, Math.min(1, 26*dt));
-        u.angVel = 0;
-        u.vx = Math.cos(ang)*sp*0.5; u.vy = Math.sin(ang)*sp*0.5;
-        u.turnTarget = ang;
-        // 短暂逃生:约 0.6 秒内保持朝该方向直线滑出,清开障碍后再回归正常寻路
-        u._escapeT = 0.6; u._escapeAng = ang;
-        escaped = true;
-        break;
-      }
     }
     if(!escaped){
-      // 兜底:左右后都滑不动、旋转也出不来(被建筑/障碍"埋住")-> 直接拉到最近可通行格
+      // 兜底:左右后都滑不动(被建筑/障碍"埋住")-> 直接拉到最近可通行格
       if(pullOutOfObstacle(u)) escaped = true;
     }
   }
@@ -2131,7 +2114,7 @@ function crushTree(tx, ty, u){
   log.dir = dir; log.life = 18; log.maxLife = 18;
   effects.push(log);
 }
-// 该位置是否撞到静态障碍/水域(胶囊两圆所在格任一被挡即算撞)。facing 可选:用于"旋转脱困"检查
+// 该位置是否撞到静态障碍/水域(胶囊两圆所在格任一被挡即算撞)。facing 可选:用于"脱困朝向"检查
 function uBodyBlocked(u, x, y, facing){
   if(!inBounds(x,y)) return true;
   const cs=u.circlesAt(x,y, facing!==undefined ? facing : u.facing);
@@ -2891,7 +2874,7 @@ function findExitCellFor(u, allowPlainFallback){
         const ang=Math.atan2(py-u.y, px-u.x);
         if(!uBodyBlocked(u,px,py,ang)) return { x:px, y:py, facing:ang };   // 优先找船体胶囊也能放下的格
         // 只有中心真被埋住时才退回"只保证中心可走"的旧兜底;
-        // 中心可走但胶囊压住时,宁可保持原位等旋转脱困,也不要瞬移后又卡住循环
+        // 中心可走但胶囊压住时,宁可保持原位等静态脱困,也不要瞬移后又卡住循环
         if(allowPlainFallback && !fallback && (r>0 || !unitPassable(u,cxc,cyc))) fallback={ x:px, y:py };
       }
     }
